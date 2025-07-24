@@ -77,7 +77,7 @@ def register_companies_transfer(bot, history):
         }
         company = company_map[call.data]
         user_states[user_id] = {"step": "show_commission", "company": company}
-         if not isinstance(history.get(user_id), list):
+        if not isinstance(history.get(user_id), list):
             history[user_id] = []
         history[user_id].append("companies_menu")
         logging.info(f"[COMPANY][{user_id}] اختار شركة: {company}")
