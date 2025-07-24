@@ -94,7 +94,30 @@ def register(bot, history):
             if amount:
                 add_balance(user_id, amount)
             typ = payload.get("type")
+            # ——— طلبات المنتجات الرقمية ———
+            if typ == "order":
+                reserved   = payload.get("reserved", 0)
+                product_id = payload.get("product_id")
+                player_id  = payload.get("player_id")
+                name       = f"طلب منتج #{product_id}"
 
+                # نُرجع الحجز أولاً كي لا يُخصم مرتين
+                if reserved:
+                    add_balance(user_id, reserved)
+
+                # ثم نسجل الشراء (يخصم المرة الوحيدة)
+                add_purchase(user_id, reserved, name, reserved, player_id)
+
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تنفيذ طلبك: {name}\nتم خصم {reserved:,} ل.س من محفظتك.",
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
+                
             if typ in ("syr_unit", "mtn_unit"):
                 price = payload.get("price", 0)
                 num   = payload.get("number")
