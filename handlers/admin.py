@@ -28,9 +28,6 @@ from services.recharge_service import validate_recharge_code
 
 from handlers.products import pending_orders  # هام
 
-from handlers import cash_transfer
-from handlers import companies_transfer
-
 SECRET_CODES_FILE = "data/secret_codes.json"
 os.makedirs("data", exist_ok=True)
 if not os.path.isfile(SECRET_CODES_FILE):
@@ -61,10 +58,6 @@ _cancel_pending = {}
 _accept_pending = {}
 
 def register(bot, history):
-    # تسجيل هاندلرات التحويلات الجديدة
-    cash_transfer.register(bot, history)
-    companies_transfer.register_companies_transfer(bot, history)
-
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text))
     def handle_done(msg):
         req_id = int(re.match(r'/done_(\d+)', msg.text).group(1))
@@ -141,7 +134,6 @@ def register(bot, history):
                 provider  = payload.get("provider")
                 speed     = payload.get("speed")
                 phone     = payload.get("phone")
-                print(f"[DEBUG] Accepting internet order: reserved={reserved}, provider={provider}, speed={speed}, phone={phone}")
                 # لا نخصم مرة ثانية لأن الحجز تم مسبقًا
                 add_purchase(user_id, reserved, f"إنترنت {provider} {speed}", reserved, phone)
                 bot.send_message(
@@ -151,33 +143,7 @@ def register(bot, history):
                     parse_mode="HTML"
                 )
                 delete_pending_request(request_id)
-            elif typ == "cash_transfer":
-                reserved = payload.get("reserved", 0)
-                number = payload.get("number")
-                cash_type = payload.get("cash_type")
-                add_purchase(user_id, reserved, f"تحويل كاش {cash_type}", reserved, number)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم تنفيذ تحويل كاش {cash_type} للرقم {number}.\nتم خصم {reserved:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                delete_pending_request(request_id)
-            elif typ == "companies_transfer":
-                reserved = payload.get("reserved", 0)
-                beneficiary_name = payload.get("beneficiary_name")
-                beneficiary_number = payload.get("beneficiary_number")
-                company = payload.get("company")
-                add_purchase(user_id, reserved, f"حوالة مالية عبر {company}", reserved, beneficiary_number)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم تنفيذ حوالة مالية عبر {company} للمستفيد {beneficiary_name}.\nتم خصم {reserved:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                delete_pending_request(request_id)
-            else:
-                bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
-                return
-
+            
             bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
             queue_cooldown_start(bot)
 
