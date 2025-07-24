@@ -51,7 +51,9 @@ def start_cash_transfer(bot, message, history=None):
     user_id = message.from_user.id
     register_user_if_not_exist(user_id)
     if history is not None:
-        history.setdefault(user_id, []).append("cash_menu")
+        if not isinstance(history.get(user_id), list):
+            history[user_id] = []
+        history[user_id].append("cash_menu")
     logging.info(f"[CASH][{user_id}] فتح قائمة تحويل كاش")
     bot.send_message(
         message.chat.id,
@@ -102,7 +104,9 @@ def register(bot, history):
             return
 
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
-        history.setdefault(user_id, []).append("cash_menu")
+        if not isinstance(history.get(user_id), list):
+            history[user_id] = []
+        history[user_id].append("cash_menu")
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type}")
         text = (
             "⚠️ تنويه:\n"
@@ -137,7 +141,9 @@ def register(bot, history):
 
         cash_type = msg.text
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
-        history.setdefault(user_id, []).append("cash_menu")
+        if not isinstance(history.get(user_id), list):
+            history[user_id] = []
+        history[user_id].append("cash_menu")
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type} (من رسالة)")
         text = (
             "⚠️ تنويه:\n"
