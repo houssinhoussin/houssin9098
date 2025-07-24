@@ -1,14 +1,19 @@
-from services.queue_service import add_pending_request, process_queue, delete_pending_request, postpone_request, queue_cooldown_start
-import logging
-import json
-import os
-import re
-from datetime import datetime
+# admin.py
 
+import re
+import logging
+from datetime import datetime
 from telebot import types
 
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
+from services.queue_service import (
+    add_pending_request,
+    process_queue,
+    delete_pending_request,
+    postpone_request,
+    queue_cooldown_start,
+)
 from services.wallet_service import (
     register_user_if_not_exist,
     deduct_balance,
@@ -17,44 +22,15 @@ from services.wallet_service import (
     get_balance,
 )
 from services.cleanup_service import delete_inactive_users
-from services.recharge_service import validate_recharge_code
 
-from handlers.products import pending_orders  # هام
-
-from handlers import cash_transfer
-from handlers import companies_transfer
-
-SECRET_CODES_FILE = "data/secret_codes.json"
-os.makedirs("data", exist_ok=True)
-if not os.path.isfile(SECRET_CODES_FILE):
-    with open(SECRET_CODES_FILE, "w", encoding="utf-8") as f:
-        json.dump({}, f)
-
-def load_code_operations():
-    with open(SECRET_CODES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_code_operations(data):
-    with open(SECRET_CODES_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-VALID_SECRET_CODES = [
-    "363836369", "36313251", "646460923",
-    "91914096", "78708501", "06580193"
-]
-
-def clear_pending_request(user_id):
-    try:
-        from handlers.recharge import recharge_pending
-        recharge_pending.discard(user_id)
-    except Exception:
-        pass
+from handlers.products import pending_orders  # هام: تُستخدم في أماكن أخرى
+from handlers import cash_transfer, companies_transfer
 
 _cancel_pending = {}
 _accept_pending = {}
 
 def register(bot, history):
-    # تسجيل هاندلرات التحويلات الجديدة
+    # تسجيل الهاندلرات للتحويلات
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
 
@@ -72,196 +48,127 @@ def register(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_queue_"))
     def handle_queue_action(call):
-        parts = call.data.split("_")
-        action = parts[2]
+        parts      = call.data.split("_")
+        action     = parts[2]
         request_id = int(parts[3])
 
-        # Fetch request with payload
-        res = get_table("pending_requests") \
-            .select("user_id", "request_text", "payload") \
-            .eq("id", request_id) \
+        # جلب الطلب
+        res = (
+            get_table("pending_requests")
+            .select("user_id", "request_text", "payload")
+            .eq("id", request_id)
             .execute()
-        if not getattr(res, 'data', None):
+        )
+        if not getattr(res, "data", None):
             return bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
-        req = res.data[0]
-        user_id = req["user_id"]
-        payload = req.get("payload") or {}
+        req      = res.data[0]
+        user_id  = req["user_id"]
+        payload  = req.get("payload") or {}
 
-        # Remove admin message
+        # حذف رسالة الأدمن
         bot.delete_message(call.message.chat.id, call.message.message_id)
 
+        # === تأجيل الطلب ===
         if action == "postpone":
             postpone_request(request_id)
-            bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
             bot.send_message(user_id, "⏳ نعتذر؛ طلبك أعيد إلى نهاية القائمة.")
-            # لا نقوم بجدولة جديدة هنا لأن التأجيل فعلٌ بحد ذاته
+            bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
+            queue_cooldown_start(bot)
             return
 
-        elif action == "cancel":
+        # === إلغاء الطلب ===
+        if action == "cancel":
             delete_pending_request(request_id)
             reserved = payload.get("reserved", 0)
             if reserved:
                 add_balance(user_id, reserved)
-                bot.send_message(user_id, f"🚫 تم إلغاء طلبك واسترجاع {reserved:,} ل.س.")
-     
-            bot.answer_callback_query(call.id, "🚫 تم إلغاء الطلب.")
+                bot.send_message(user_id, f"🚫 تم استرجاع {reserved:,} ل.س إلى محفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
+            queue_cooldown_start(bot)
             return
 
-        elif action == "accept":
+        # === قبول الطلب ===
+        if action == "accept":
             typ = payload.get("type")
+
             if typ in ("syr_unit", "mtn_unit"):
                 price = payload.get("price", 0)
                 num   = payload.get("number")
                 name  = payload.get("unit_name")
-                # تسجيل الشراء (الخصم تم مسبقًا عند الإرسال)
                 add_purchase(user_id, price, name, price, num)
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم تحويل {name} بنجاح إلى {num}.\nتم خصم {price:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                return
 
             elif typ in ("syr_bill", "mtn_bill"):
-                reserved = payload.get("reserved", 0)
-                num = payload.get("number")
-                label = "فاتورة سيرياتيل" if typ == "syr_bill" else "فاتورة MTN"
-                # لا نخصم مرة ثانية لأن الحجز تم مسبقًا
-                add_purchase(user_id, reserved, label, reserved, num)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم دفع {label} للرقم {num}.\n"
-                    f"تم خصم {reserved:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                delete_pending_request(request_id)
-            elif typ == "internet":
                 reserved  = payload.get("reserved", 0)
-                provider  = payload.get("provider")
-                speed     = payload.get("speed")
-                phone     = payload.get("phone")
-                print(f"[DEBUG] Accepting internet order: reserved={reserved}, provider={provider}, speed={speed}, phone={phone}")
-                # لا نخصم مرة ثانية لأن الحجز تم مسبقًا
-                add_purchase(user_id, reserved, f"إنترنت {provider} {speed}", reserved, phone)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم شحن إنترنت {provider} بسرعة {speed} للرقم {phone}.\n"
-                    f"تم خصم {reserved:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                delete_pending_request(request_id)
-            elif typ == "cash_transfer":
+                num       = payload.get("number")
+                cash_type = payload.get("cash_type")
+                label     = f"فاتورة {cash_type}"
+                add_purchase(user_id, reserved, label, reserved, num)
+
+            elif typ == "internet":
                 reserved = payload.get("reserved", 0)
-                number = payload.get("number")
+                provider = payload.get("provider")
+                speed    = payload.get("speed")
+                phone    = payload.get("phone")
+                add_purchase(user_id, reserved, f"إنترنت {provider} {speed}", reserved, phone)
+
+            elif typ == "cash_transfer":
+                reserved  = payload.get("reserved", 0)
+                number    = payload.get("number")
                 cash_type = payload.get("cash_type")
                 add_purchase(user_id, reserved, f"تحويل كاش {cash_type}", reserved, number)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم تنفيذ تحويل كاش {cash_type} للرقم {number}.\nتم خصم {reserved:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                delete_pending_request(request_id)
+
             elif typ == "companies_transfer":
-                reserved = payload.get("reserved", 0)
-                beneficiary_name = payload.get("beneficiary_name")
+                reserved           = payload.get("reserved", 0)
+                beneficiary_name   = payload.get("beneficiary_name")
                 beneficiary_number = payload.get("beneficiary_number")
-                company = payload.get("company")
-                add_purchase(user_id, reserved, f"حوالة مالية عبر {company}", reserved, beneficiary_number)
-                bot.send_message(
+                company            = payload.get("company")
+                add_purchase(
                     user_id,
-                    f"✅ تم تنفيذ حوالة مالية عبر {company} للمستفيد {beneficiary_name}.\nتم خصم {reserved:,} ل.س.",
-                    parse_mode="HTML"
+                    reserved,
+                    f"حوالة مالية عبر {company}",
+                    reserved,
+                    beneficiary_number,
                 )
-                delete_pending_request(request_id)
+
             else:
-                bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
-                return
+                return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
 
-            bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-            queue_cooldown_start(bot)
-
-        else:
-            bot.answer_callback_query(call.id, "❌ حدث خطأ.")
-
-        # الإجرائات الإضافية لو تكررت الأكشنات، احفظها ضمن else لو لزم الأمر
-        if action == "cancel":
-            bot.answer_callback_query(call.id, "🚫 يرجى كتابة سبب الإلغاء أو إرسال صورة (سيتم إرساله للعميل):")
-            _cancel_pending[call.from_user.id] = {"request_id": request_id, "user_id": user_id}
-            bot.send_message(call.message.chat.id, "✏️ أرسل سبب الإلغاء كتابياً أو أرسل صورة للعميل:")
-            bot.register_next_step_handler_by_chat_id(
-                call.message.chat.id,
-                lambda msg: handle_cancel_reason(msg, call)
-            )
-
-        elif action == "accept":
-            # استخراج السعر والمنتج وplayer_id من نص الطلب
-            text = req.get("request_text", "")
-            m_price = re.search(r"💵 السعر: ([\d,]+) ل\.س", text)
-            price = int(m_price.group(1).replace(",", "")) if m_price else 0
-            m_prod = re.search(r"🔖 المنتج: (.+)", text)
-            product_name = m_prod.group(1) if m_prod else ""
-            m_player = re.search(r"آيدي اللاعب: <code>(.+?)</code>", text)
-            player_id = m_player.group(1) if m_player else ""
-
-            # حذف الطلب
+            # حذف الطلب وإعلام العميل
             delete_pending_request(request_id)
-            bot.answer_callback_query(call.id, "✅ تم قبول وتنفيذ الطلب.")
-
-            # إعلام العميل أن الطلب تم تنفيذه مع الخصم
+            amount = payload.get("reserved", payload.get("price", 0))
             bot.send_message(
                 user_id,
-                f"✅ تم تنفيذ طلبك: {product_name}\nتم خصم {price:,} ل.س من محفظتك."
+                f"✅ تم تنفيذ طلبك بنجاح.\nتم خصم {amount:,} ل.س.",
+                parse_mode="HTML",
             )
-
-            _accept_pending[call.from_user.id] = user_id
-            bot.send_message(call.message.chat.id, "✉️ أرسل رسالة للعميل أو صورة (أرسل /skip لتخطي):")
-            bot.register_next_step_handler_by_chat_id(
-                call.message.chat.id,
-                lambda msg: handle_accept_message(msg, call)
-            )
-            pending_orders.discard(user_id)
+            bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
             queue_cooldown_start(bot)
+            return
 
-        elif action == "message":
-            _accept_pending[call.from_user.id] = user_id
-            bot.send_message(call.message.chat.id, "✉️ أرسل الرسالة للعميل:")
-            bot.register_next_step_handler_by_chat_id(
-                call.message.chat.id,
-                lambda msg: handle_accept_message(msg, call)
-            )
-        elif action == "photo":
-            _accept_pending[call.from_user.id] = user_id
-            bot.send_message(call.message.chat.id, "🖼️ أرسل الصورة للعميل:")
-            bot.register_next_step_handler_by_chat_id(
-                call.message.chat.id,
-                lambda msg: handle_accept_message(msg, call)
-            )
-
-        else:
-            bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
+        # أيّ أكشن آخر
+        bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
 
     def handle_cancel_reason(msg, call):
         data = _cancel_pending.get(msg.from_user.id)
         if not data:
             return
-        user_id = data["user_id"]
+        user_id    = data["user_id"]
         request_id = data["request_id"]
-        if msg.content_type == 'text':
+        if msg.content_type == "text":
             reason_text = msg.text.strip()
             bot.send_message(
                 user_id,
-                f"❌ تم إلغاء طلبك من الإدارة.\n📝 السبب: {reason_text}"
+                f"❌ تم إلغاء طلبك من الإدارة.\n📝 السبب: {reason_text}",
             )
-        elif msg.content_type == 'photo':
-            bot.send_photo(user_id, msg.photo[-1].file_id, caption="❌ تم إلغاء طلبك من الإدارة.")
+        elif msg.content_type == "photo":
+            bot.send_photo(
+                user_id,
+                msg.photo[-1].file_id,
+                caption="❌ تم إلغاء طلبك من الإدارة.",
+            )
         else:
             bot.send_message(user_id, "❌ تم إلغاء طلبك من الإدارة.")
-        bot.send_message(msg.chat.id, "تم إرسال سبب الإلغاء للعميل وحذف الطلب.")
         delete_pending_request(request_id)
-        pending_orders.discard(user_id)
         queue_cooldown_start(bot)
         _cancel_pending.pop(msg.from_user.id, None)
 
@@ -275,24 +182,28 @@ def register(bot, history):
             bot.send_message(user_id, f"📩 رسالة من الإدارة:\n{msg.text.strip()}")
             bot.send_message(msg.chat.id, "✅ تم إرسال الرسالة للعميل.")
         elif msg.content_type == "photo":
-            bot.send_photo(user_id, msg.photo[-1].file_id, caption="📩 صورة من الإدارة.")
+            bot.send_photo(
+                user_id,
+                msg.photo[-1].file_id,
+                caption="📩 صورة من الإدارة.",
+            )
             bot.send_message(msg.chat.id, "✅ تم إرسال الصورة للعميل.")
         else:
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم.")
         _accept_pending.pop(msg.from_user.id, None)
 
-    # ========== شحن المحفظة ==========
     @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_add_"))
     def confirm_wallet_add(call):
         _, _, user_id_str, amount_str = call.data.split("_")
         user_id = int(user_id_str)
-        amount = int(float(amount_str))
+        amount  = int(float(amount_str))
         register_user_if_not_exist(user_id)
         add_balance(user_id, amount)
-        clear_pending_request(user_id)
         bot.send_message(user_id, f"✅ تم إضافة {amount:,} ل.س إلى محفظتك بنجاح.")
         bot.answer_callback_query(call.id, "✅ تمت الموافقة")
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.edit_message_reply_markup(
+            call.message.chat.id, call.message.message_id, reply_markup=None
+        )
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("reject_add_"))
     def reject_wallet_add(call):
@@ -307,10 +218,9 @@ def register(bot, history):
         reason = msg.text.strip()
         bot.send_message(
             user_id,
-            f"❌ تم رفض عملية الشحن.\n📝 السبب: {reason}"
+            f"❌ تم رفض عملية الشحن.\n📝 السبب: {reason}",
         )
         bot.answer_callback_query(call.id, "❌ تم رفض العملية")
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        clear_pending_request(user_id)
-
-  
+        bot.edit_message_reply_markup(
+            call.message.chat.id, call.message.message_id, reply_markup=None
+        )
