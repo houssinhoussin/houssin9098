@@ -1,4 +1,15 @@
 import logging
+from database.db import get_table
+def has_pending_request(user_id: int) -> bool:
+    """ترجع True إذا كان لدى المستخدم طلب قيد الانتظار."""
+    res = (
+        get_table("pending_requests")
+        .select("id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return bool(res.data)
+user_orders = {}
 from telebot import types
 from services.wallet_service import register_user_if_not_exist, get_balance, deduct_balance
 from config import BOT_NAME
@@ -6,8 +17,6 @@ from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
 from database.models.product import Product
 
-pending_orders = set()
-user_orders = {}
 
 # ============= تعريف المنتجات =============
 PRODUCTS = {
@@ -59,10 +68,6 @@ def show_product_options(bot, message, category):
     keyboard.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
     bot.send_message(message.chat.id, f"📦 اختر الكمية لـ {category}:", reply_markup=keyboard)
 
-def clear_user_order(user_id):
-    user_orders.pop(user_id, None)
-    pending_orders.discard(user_id)
-
 def handle_player_id(message, bot):
     user_id = message.from_user.id
     player_id = message.text.strip()
@@ -101,8 +106,11 @@ def register_message_handlers(bot, history):
     def handle_main_product_menu(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-        if user_id in pending_orders:
-            bot.send_message(msg.chat.id, "⚠️ لديك طلب قيد الانتظار ولا يمكنك تقديم طلب جديد حتى يتم معالجته.")
+        if has_pending_request(user_id):
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
+            )
             return
         history.setdefault(user_id, []).append("products_menu")
         show_products_menu(bot, msg)
@@ -122,8 +130,11 @@ def register_message_handlers(bot, history):
     def game_handler(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-        if user_id in pending_orders:
-            bot.send_message(msg.chat.id, "⚠️ لديك طلب قيد الانتظار ولا يمكنك تقديم طلب جديد حتى يتم معالجته.")
+        if has_pending_request(user_id):
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
+            )
             return
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
@@ -139,8 +150,11 @@ def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data.startswith("select_"))
     def on_select_product(call):
         user_id = call.from_user.id
-        if user_id in pending_orders:
-            bot.answer_callback_query(call.id, "⚠️ لا يمكنك إرسال طلب جديد الآن، لديك طلب قيد التنفيذ.", show_alert=True)
+        if has_pending_request(user_id):
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
+            )
             return
         product_id = int(call.data.split("_", 1)[1])
         selected = None
@@ -180,8 +194,11 @@ def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
         user_id = call.from_user.id
-        if user_id in pending_orders:
-            bot.answer_callback_query(call.id, "⚠️ لديك طلب قيد الانتظار بالفعل.", show_alert=True)
+        if has_pending_request(user_id):
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
+            )
             return
         order = user_orders.get(user_id)
         if not order or "product" not in order or "player_id" not in order:
@@ -204,8 +221,6 @@ def setup_inline_handlers(bot, admin_ids):
         # تحديث الرصيد اللحظي بعد الحجز
         balance = get_balance(user_id)
 
-
-        pending_orders.add(user_id)
         admin_msg = (
             f"💰 رصيد المستخدم: {balance:,} ل.س\n"
 
