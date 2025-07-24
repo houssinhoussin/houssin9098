@@ -1,5 +1,12 @@
 import logging
 from database.db import get_table
+from telebot import types
+from services.wallet_service import register_user_if_not_exist, get_balance, deduct_balance
+from config import BOT_NAME
+from handlers import keyboards
+from services.queue_service import process_queue, add_pending_request
+from database.models.product import Product
+user_orders = {}
 def has_pending_request(user_id: int) -> bool:
     """ترجع True إذا كان لدى المستخدم طلب قيد الانتظار."""
     res = (
@@ -9,14 +16,6 @@ def has_pending_request(user_id: int) -> bool:
         .execute()
     )
     return bool(res.data)
-user_orders = {}
-from telebot import types
-from services.wallet_service import register_user_if_not_exist, get_balance, deduct_balance
-from config import BOT_NAME
-from handlers import keyboards
-from services.queue_service import process_queue, add_pending_request
-from database.models.product import Product
-
 
 # ============= تعريف المنتجات =============
 PRODUCTS = {
@@ -106,12 +105,6 @@ def register_message_handlers(bot, history):
     def handle_main_product_menu(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-        if has_pending_request(user_id):
-            bot.send_message(
-                msg.chat.id,
-                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
-            return
         history.setdefault(user_id, []).append("products_menu")
         show_products_menu(bot, msg)
 
@@ -136,6 +129,12 @@ def register_message_handlers(bot, history):
                 "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
             )
             return
+        if has_pending_request(user_id):
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
+            )
+            return
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
@@ -152,10 +151,11 @@ def setup_inline_handlers(bot, admin_ids):
         user_id = call.from_user.id
         if has_pending_request(user_id):
             bot.send_message(
-                msg.chat.id,
+                call.message.chat.id,
                 "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
             )
             return
+
         product_id = int(call.data.split("_", 1)[1])
         selected = None
         for items in PRODUCTS.values():
@@ -188,7 +188,7 @@ def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data == "cancel_order")
     def cancel_order(call):
         user_id = call.from_user.id
-        clear_user_order(user_id)
+        user_orders.pop(user_id, None)
         bot.send_message(user_id, "❌ تم إلغاء الطلب.", reply_markup=keyboards.products_menu())
 
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
@@ -196,7 +196,7 @@ def setup_inline_handlers(bot, admin_ids):
         user_id = call.from_user.id
         if has_pending_request(user_id):
             bot.send_message(
-                msg.chat.id,
+                call.message.chat.id,
                 "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
             )
             return
