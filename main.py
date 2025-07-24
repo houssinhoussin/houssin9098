@@ -16,13 +16,10 @@ from handlers import admin, bill_and_units, products, wallet
 from services import wallet_service, queue_service
 
 # ----------- تسجيل الهاندلرز (حسب الحاجة): -----------
-# تعريف متغير history كقاموس مشترك لتتبع التاريخ (history)
-history = {}
-
-admin.register(bot, history)
-bill_and_units.register(bot)         # فقط (bot) إذا كانت الدالة لا تحتاج user_state أو history
-products.register(bot, history)
-wallet.register(bot, history)
+admin.register(bot, user_state)
+bill_and_units.register(bot)         # فقط (bot) إذا كانت الدالة لا تحتاج user_state
+products.register(bot, user_state)
+wallet.register(bot, user_state)
 
 
 PORT = 8081
@@ -108,15 +105,14 @@ from handlers.keyboards import (
     support_menu,
     links_menu,
     media_services_menu,
-    transfers_menu,
+    transfers_menu,      # أضفناها هنا للاستخدام
 )
 
 # ---------------------------------------------------------
 # 3) حالة المستخدم
 # ---------------------------------------------------------
 user_state: dict[int, str] = {}
-# حافظ على متغير history الذي عرفناه سابقاً كقاموس مشترك
-# history = {} # تم تعريفه أعلاه
+history: dict[int, list] = {}
 
 # ---------------------------------------------------------
 # 4) تسجيل جميع الهاندلرز (بدون تغيير أي شيء في القائمة الرئيسية)
@@ -124,12 +120,12 @@ user_state: dict[int, str] = {}
 start.register(bot, user_state)
 wallet.register(bot, history)
 support.register(bot, user_state)
-admin.register(bot, history)
+admin.register(bot, user_state)
 recharge.register(bot, user_state)
 cash_transfer.register(bot, history)
 companies_transfer.register_companies_transfer(bot, history)
 bill_and_units.register(bot)
-products.register(bot, history)
+products.register(bot, user_state)
 media_services.register(bot, user_state)
 wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
