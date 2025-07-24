@@ -19,7 +19,7 @@ user_state = {}
 history = {}
 
 admin.register(bot, user_state)
-bill_and_units.register(bot)  # فقط bot لأنه لا يحتاج حالة
+bill_and_units.register_bill_and_units(bot, user_state)
 products.register(bot, user_state)
 wallet.register(bot, user_state)
 
