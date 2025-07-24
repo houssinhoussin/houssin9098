@@ -1,4 +1,4 @@
-from services.queue_service import add_pending_request, process_queue, delete_pending_request
+from services.queue_service import add_pending_request, process_queue, delete_pending_request, postpone_request, queue_cooldown_start
 import logging
 import json
 import os
@@ -16,17 +16,13 @@ from services.wallet_service import (
     add_balance,
     get_balance,
 )
-from services.queue_service import (
-    add_pending_request,
-    delete_pending_request,
-    process_queue,
-    postpone_request,
-    queue_cooldown_start,
-)
 from services.cleanup_service import delete_inactive_users
 from services.recharge_service import validate_recharge_code
 
 from handlers.products import pending_orders  # هام
+
+from handlers import cash_transfer
+from handlers import companies_transfer
 
 SECRET_CODES_FILE = "data/secret_codes.json"
 os.makedirs("data", exist_ok=True)
@@ -58,6 +54,10 @@ _cancel_pending = {}
 _accept_pending = {}
 
 def register(bot, history):
+    # تسجيل هاندلرات التحويلات الجديدة
+    cash_transfer.register(bot, history)
+    companies_transfer.register_companies_transfer(bot, history)
+
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text))
     def handle_done(msg):
         req_id = int(re.match(r'/done_(\d+)', msg.text).group(1))
@@ -113,7 +113,7 @@ def register(bot, history):
                 price = payload.get("price", 0)
                 num = payload.get("number")
                 name = payload.get("unit_name")
-                deduct_balance(user_id, price)
+                # لا نخصم مرة أخرى لأن الحجز تم مسبقًا
                 add_purchase(user_id, price, name, price, num)
                 bot.send_message(user_id, f"✅ تم تحويل {name} بنجاح إلى {num}.\nتم خصم {price:,} ل.س.", parse_mode="HTML")
             elif typ in ("syr_bill", "mtn_bill"):
@@ -134,6 +134,7 @@ def register(bot, history):
                 provider  = payload.get("provider")
                 speed     = payload.get("speed")
                 phone     = payload.get("phone")
+                print(f"[DEBUG] Accepting internet order: reserved={reserved}, provider={provider}, speed={speed}, phone={phone}")
                 # لا نخصم مرة ثانية لأن الحجز تم مسبقًا
                 add_purchase(user_id, reserved, f"إنترنت {provider} {speed}", reserved, phone)
                 bot.send_message(
@@ -143,7 +144,33 @@ def register(bot, history):
                     parse_mode="HTML"
                 )
                 delete_pending_request(request_id)
-            
+            elif typ == "cash_transfer":
+                reserved = payload.get("reserved", 0)
+                number = payload.get("number")
+                cash_type = payload.get("cash_type")
+                add_purchase(user_id, reserved, f"تحويل كاش {cash_type}", reserved, number)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تنفيذ تحويل كاش {cash_type} للرقم {number}.\nتم خصم {reserved:,} ل.س.",
+                    parse_mode="HTML"
+                )
+                delete_pending_request(request_id)
+            elif typ == "companies_transfer":
+                reserved = payload.get("reserved", 0)
+                beneficiary_name = payload.get("beneficiary_name")
+                beneficiary_number = payload.get("beneficiary_number")
+                company = payload.get("company")
+                add_purchase(user_id, reserved, f"حوالة مالية عبر {company}", reserved, beneficiary_number)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تنفيذ حوالة مالية عبر {company} للمستفيد {beneficiary_name}.\nتم خصم {reserved:,} ل.س.",
+                    parse_mode="HTML"
+                )
+                delete_pending_request(request_id)
+            else:
+                bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
+                return
+
             bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
             queue_cooldown_start(bot)
 
@@ -170,7 +197,7 @@ def register(bot, history):
             m_player = re.search(r"آيدي اللاعب: <code>(.+?)</code>", text)
             player_id = m_player.group(1) if m_player else ""
 
-            # التحقق من الرصيد مجدداً قبل الخصم
+            # التحقق من الرصيد مجدداً قبل الخصم (في حالة الطلبات غير المحجوزة مسبقاً)
             balance = get_balance(user_id)
             if balance < price:
                 bot.send_message(call.message.chat.id, f"❌ لا يوجد رصيد كافٍ لدى العميل (الرصيد: {balance:,} ل.س). الطلب تم حذفه.")
@@ -187,8 +214,8 @@ def register(bot, history):
             m_pid = re.search(r"select_(\d+)", text)
             product_id = int(m_pid.group(1)) if m_pid else 0
             add_purchase(user_id, product_id, product_name, price, player_id)
-            deduct_balance(user_id, price)
 
+            # حذف الطلب
             delete_pending_request(request_id)
             bot.answer_callback_query(call.id, "✅ تم قبول وتنفيذ الطلب.")
 
