@@ -329,6 +329,7 @@ def register_bill_and_units(bot, history):
                 "reserved": price,
             }
         )
+        process_queue(bot)
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
 
     ########## وحدات MTN ##########
@@ -416,6 +417,7 @@ def register_bill_and_units(bot, history):
                 "reserved": price,
             }
         )
+        process_queue(bot)
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
 
     ########## فاتورة سيرياتيل ##########
@@ -552,6 +554,7 @@ def register_bill_and_units(bot, history):
                 "reserved": total,
             }
         )
+        process_queue(bot)
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
 
     ########## فاتورة MTN ##########
@@ -688,4 +691,5 @@ def register_bill_and_units(bot, history):
                 "reserved": total,
             }
         )
+        process_queue(bot)
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
