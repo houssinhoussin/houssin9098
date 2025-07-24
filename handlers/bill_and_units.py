@@ -330,7 +330,6 @@ def register_bill_and_units(bot, history):
             }
         )
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
-        process_queue(bot)
 
     ########## وحدات MTN ##########
     @bot.message_handler(func=lambda msg: msg.text == "🟡 وحدات MTN")
@@ -418,7 +417,6 @@ def register_bill_and_units(bot, history):
             }
         )
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
-        process_queue(bot)
 
     ########## فاتورة سيرياتيل ##########
     @bot.message_handler(func=lambda msg: msg.text == "🔴 فاتورة سيرياتيل")
@@ -555,7 +553,6 @@ def register_bill_and_units(bot, history):
             }
         )
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
-        process_queue(bot)
 
     ########## فاتورة MTN ##########
     @bot.message_handler(func=lambda msg: msg.text == "🟡 فاتورة MTN")
@@ -692,17 +689,3 @@ def register_bill_and_units(bot, history):
             }
         )
         bot.send_message(call.message.chat.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
-        process_queue(bot)
-
-    # زر الذهاب للمحفظة في حال الرصيد غير كافٍ
-    @bot.callback_query_handler(func=lambda call: call.data == "go_wallet")
-    def go_wallet(call):
-        user_states.pop(call.from_user.id, None)
-        bot.send_message(call.message.chat.id, "💼 للذهاب للمحفظة، اضغط على زر المحفظة في القائمة الرئيسية.") 
-
-
-def register(bot):
-    """
-    تستدعى من main.py لتسجيل جميع هاندلرات bill_and_units
-    """
-    register_bill_and_units(bot, {})
