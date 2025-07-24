@@ -22,8 +22,6 @@ from services.wallet_service import (
     get_balance,
 )
 from services.cleanup_service import delete_inactive_users
-
-from handlers.products import pending_orders  # هام: تُستخدم في أماكن أخرى
 from handlers import cash_transfer, companies_transfer
 
 _cancel_pending = {}
