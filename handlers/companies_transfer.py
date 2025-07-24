@@ -51,7 +51,10 @@ def register_companies_transfer(bot, history):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id)
         user_states[user_id] = {"step": None}
-        history.setdefault(user_id, []).append("companies_menu")
+        if not isinstance(history.get(user_id), list):
+            history[user_id] = []
+        history[user_id].append("companies_menu")
+
         logging.info(f"[COMPANY][{user_id}] فتح قائمة تحويل الشركات")
         bot.send_message(msg.chat.id, "💸 اختر الشركة التي تريد التحويل عبرها:", reply_markup=companies_transfer_menu())
 
@@ -74,7 +77,9 @@ def register_companies_transfer(bot, history):
         }
         company = company_map[call.data]
         user_states[user_id] = {"step": "show_commission", "company": company}
-        history.setdefault(user_id, []).append("companies_menu")
+         if not isinstance(history.get(user_id), list):
+            history[user_id] = []
+        history[user_id].append("companies_menu")
         logging.info(f"[COMPANY][{user_id}] اختار شركة: {company}")
         text = (
             "⚠️ تنويه:\n"
