@@ -94,28 +94,37 @@ def register(bot, history):
             postpone_request(request_id)
             bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
             bot.send_message(user_id, "⏳ نعتذر؛ طلبك أعيد إلى نهاية القائمة.")
-            queue_cooldown_start(bot)
+            # لا نقوم بجدولة جديدة هنا لأن التأجيل فعلٌ بحد ذاته
+            return
 
         elif action == "cancel":
             delete_pending_request(request_id)
-            # إرجاع المبلغ المحجوز عند إلغاء الأدمن
             reserved = payload.get("reserved", 0)
             if reserved:
                 add_balance(user_id, reserved)
                 bot.send_message(user_id, f"🚫 تم إلغاء طلبك واسترجاع {reserved:,} ل.س.")
-            
+     
             bot.answer_callback_query(call.id, "🚫 تم إلغاء الطلب.")
-            queue_cooldown_start(bot)
+            bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
+            return
 
         elif action == "accept":
             typ = payload.get("type")
             if typ in ("syr_unit", "mtn_unit"):
                 price = payload.get("price", 0)
-                num = payload.get("number")
-                name = payload.get("unit_name")
-                # لا نخصم مرة أخرى لأن الحجز تم مسبقًا
+                num   = payload.get("number")
+                name  = payload.get("unit_name")
+                # تسجيل الشراء (الخصم تم مسبقًا عند الإرسال)
                 add_purchase(user_id, price, name, price, num)
-                bot.send_message(user_id, f"✅ تم تحويل {name} بنجاح إلى {num}.\nتم خصم {price:,} ل.س.", parse_mode="HTML")
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تحويل {name} بنجاح إلى {num}.\nتم خصم {price:,} ل.س.",
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                return
+
             elif typ in ("syr_bill", "mtn_bill"):
                 reserved = payload.get("reserved", 0)
                 num = payload.get("number")
@@ -196,24 +205,6 @@ def register(bot, history):
             product_name = m_prod.group(1) if m_prod else ""
             m_player = re.search(r"آيدي اللاعب: <code>(.+?)</code>", text)
             player_id = m_player.group(1) if m_player else ""
-
-            # التحقق من الرصيد مجدداً قبل الخصم (في حالة الطلبات غير المحجوزة مسبقاً)
-            balance = get_balance(user_id)
-            if balance < price:
-                bot.send_message(call.message.chat.id, f"❌ لا يوجد رصيد كافٍ لدى العميل (الرصيد: {balance:,} ل.س). الطلب تم حذفه.")
-                bot.send_message(
-                    user_id,
-                    f"❌ عذراً، لم يتم تنفيذ طلبك بسبب عدم كفاية الرصيد."
-                )
-                delete_pending_request(request_id)
-                pending_orders.discard(user_id)
-                queue_cooldown_start(bot)
-                return
-
-            # إضافة الشراء في سجل المشتريات (يخصم تلقائياً بعد الموافقة)
-            m_pid = re.search(r"select_(\d+)", text)
-            product_id = int(m_pid.group(1)) if m_pid else 0
-            add_purchase(user_id, product_id, product_name, price, player_id)
 
             # حذف الطلب
             delete_pending_request(request_id)
