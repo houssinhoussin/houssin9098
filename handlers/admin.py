@@ -89,6 +89,10 @@ def register(bot, history):
 
         # === قبول الطلب ===
         if action == "accept":
+            # ==== إعادة المبلغ المحجوز قبل تسجيل الشراء لمنع الخصم المزدوج ====
+            amount = payload.get("reserved", payload.get("price", 0))
+            if amount:
+                add_balance(user_id, amount)
             typ = payload.get("type")
 
             if typ in ("syr_unit", "mtn_unit"):
