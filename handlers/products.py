@@ -105,14 +105,31 @@ def register_message_handlers(bot, history):
     def handle_main_product_menu(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-        history.setdefault(user_id, []).append("products_menu")
+        val = history.get(user_id)
+        if val is None:
+            history[user_id] = ["products_menu"]
+        elif isinstance(val, list):
+            history[user_id].append("products_menu")
+        elif isinstance(val, str):
+            history[user_id] = [val, "products_menu"]
+        else:
+            history[user_id] = ["products_menu"]
+
         show_products_menu(bot, msg)
 
     @bot.message_handler(func=lambda msg: msg.text == "🎮 شحن ألعاب و تطبيقات")
     def handle_games_menu(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-        history.setdefault(user_id, []).append("games_menu")
+        val = history.get(user_id)
+        if val is None:
+            history[user_id] = ["games_menu"]
+        elif isinstance(val, list):
+            history[user_id].append("games_menu")
+        elif isinstance(val, str):
+            history[user_id] = [val, "games_menu"]
+        else:
+            history[user_id] = ["games_menu"]
         show_game_categories(bot, msg)
 
     @bot.message_handler(func=lambda msg: msg.text in [
