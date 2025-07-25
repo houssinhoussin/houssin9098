@@ -150,7 +150,7 @@ def register_university_fees(bot, history):
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
-            request_text=msg,
+            request_text=message.text if hasattr(message, "text") else str(message),
             payload={
                 "type": "university_fees",
                 "university": state['university'],
