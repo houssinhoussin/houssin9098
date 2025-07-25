@@ -19,13 +19,12 @@ def add_channel_ad(user_id, times_total, price, contact, ad_text, images):
         "expire_at": expire_at.isoformat(),
         "times_posted": 0,
         "last_posted_at": None,
-        "message_ids": None,
+        "message_ids": None,  # تستطيع لاحقا حفظ الرسائل المنشورة إذا أردت حذفها تلقائيًا
     }
     get_table(CHANNEL_ADS_TABLE).insert(data).execute()
 
 def get_active_ads():
     now = datetime.utcnow().isoformat()
-    # جلب الإعلانات الفعالة وغير منتهية وعدد النشر أقل من المسموح
     res = (
         get_table(CHANNEL_ADS_TABLE)
         .select("*")
@@ -49,5 +48,4 @@ def increment_ad_posted(ad_id):
 
 def expire_old_ads():
     now = datetime.utcnow().isoformat()
-    # تعديل حالة المنتهي
     get_table(CHANNEL_ADS_TABLE).update({"status": "expired"}).lt("expire_at", now).execute()
