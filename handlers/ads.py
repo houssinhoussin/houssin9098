@@ -141,8 +141,6 @@ def register(bot, history):
     def skip_images(call):
         user_id = call.from_user.id
         preview_ad(call.message, user_id)
-            # مباشرة إلى المعاينة
-            preview_ad(call.message, user_id)
 
     # معاينة الإعلان للعميل
     def preview_ad(msg, user_id):
