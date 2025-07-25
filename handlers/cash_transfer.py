@@ -320,10 +320,7 @@ def register(bot, history):
                 "reserved": total,
             }
         )
-        msg_admin = bot.send_message(ADMIN_MAIN_ID, message, reply_markup=kb_admin)
-        user_states[user_id]["admin_message_id"] = msg_admin.message_id
-        user_states[user_id]["admin_chat_id"] = ADMIN_MAIN_ID
-
+        
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet")
     def show_recharge_methods(call):
         bot.send_message(call.message.chat.id, "💳 اختر طريقة شحن المحفظة:", reply_markup=keyboards.recharge_menu())
