@@ -92,18 +92,24 @@ def register(bot, history):
         )
 
     # استقبال الصور
-    @bot.message_handler(func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "images")
-    def ask_image_option(msg):
+    @bot.message_handler(func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "ad_text")
+    def receive_ad_text(msg):
         user_id = msg.from_user.id
-        state = user_ads_state[user_id]
+        if user_id not in user_ads_state or user_ads_state[user_id].get("step") != "ad_text":
+            bot.send_message(msg.chat.id, "⚠️ لا يمكنك إرسال نص إعلان في هذه المرحلة. أعد البدء.")
+            user_ads_state.pop(user_id, None)
+            return
+        user_ads_state[user_id]["step"] = "wait_image_option"
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📸 أضف صورة واحدة", callback_data="ads_one_image"))
         markup.add(types.InlineKeyboardButton("🖼️ أضف صورتين", callback_data="ads_two_images"))
         markup.add(types.InlineKeyboardButton("➡️ تخطي الصور", callback_data="ads_skip_images"))
-        bot.send_message(msg.chat.id, "🖼️ يمكنك اختيار إضافة صورة واحدة أو صورتين أو تخطي:", reply_markup=markup)
-        state["step"] = "wait_image_option"
-        user_ads_state[user_id] = state
-
+        bot.send_message(
+            msg.chat.id,
+            "🖼️ يمكنك اختيار إضافة صورة واحدة أو صورتين أو تخطي:",
+            reply_markup=markup
+        )
+        
     # المستخدم يختار صورة واحدة
     @bot.callback_query_handler(func=lambda call: call.data == "ads_one_image")
     def handle_one_image(call):
