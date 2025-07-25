@@ -23,6 +23,8 @@ from services.wallet_service import (
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
+from services.ads_service import add_channel_ad
+add_channel_ad(user_id, times_total, price, contact, ad_text, images)
 
 _cancel_pending = {}
 _accept_pending = {}
