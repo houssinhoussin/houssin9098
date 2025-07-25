@@ -308,21 +308,45 @@ def register_companies_transfer(bot, history):
             parts = call.data.split("_")
             user_id = int(parts[-2])
             total = int(parts[-1])
-            data = user_states.get(user_id, {})
-            if not has_sufficient_balance(user_id, total):
+            # جلب بيانات الطلب من الطابور
+            from database.db import get_table
+            res = get_table("pending_requests").select("payload").eq("user_id", user_id).execute()
+            if not res.data:
+                bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
+                return
+            payload = res.data[0].get("payload", {})
+            reserved = payload.get("reserved", total)
+            company = payload.get("company")
+            beneficiary_name = payload.get("beneficiary_name")
+            beneficiary_number = payload.get("beneficiary_number")
+            amount = payload.get("amount")
+
+            if not has_sufficient_balance(user_id, reserved):
                 logging.warning(f"[COMPANY][ADMIN][{user_id}] فشل الحوالة، لا يوجد رصيد كافٍ")
                 bot.send_message(user_id, "❌ فشل الحوالة: لا يوجد رصيد كافٍ في محفظتك.")
                 bot.answer_callback_query(call.id, "❌ لا يوجد رصيد كافٍ لدى العميل.")
                 bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                 return
-            deduct_balance(user_id, total)
-            logging.info(f"[COMPANY][ADMIN][{user_id}] تم الخصم وقبول الحوالة، الإجمالي: {total}")
+
+            # خصم الرصيد فعليًا الآن فقط!
+            from services.wallet_service import deduct_balance, add_purchase
+            deduct_balance(user_id, reserved)
+            add_purchase(
+                user_id,
+                reserved,
+                f"حوالة مالية عبر {company}",
+                reserved,
+                beneficiary_number,
+            )
+
+            logging.info(f"[COMPANY][ADMIN][{user_id}] تم الخصم وقبول الحوالة، الإجمالي: {reserved}")
             bot.send_message(
                 user_id,
-                f"✅ تم تنفيذ الحوالة عبر {data.get('company')} للمستفيد {data.get('beneficiary_name')} بمبلغ {data.get('amount'):,} ل.س بنجاح."
+                f"✅ تم تنفيذ الحوالة عبر {company} للمستفيد {beneficiary_name} بمبلغ {amount:,} ل.س بنجاح."
             )
             bot.answer_callback_query(call.id, "✅ تم قبول الطلب")
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+
             def forward_admin_message(m):
                 if m.content_type == "photo":
                     file_id = m.photo[-1].file_id
@@ -331,10 +355,14 @@ def register_companies_transfer(bot, history):
                     bot.send_message(user_id, m.text or "تمت العملية بنجاح.")
             bot.send_message(call.message.chat.id, "📝 أرسل رسالة أو صورة للعميل مع صورة الحوالة أو تأكيد العملية.")
             bot.register_next_step_handler_by_chat_id(call.message.chat.id, forward_admin_message)
+            # حذف الطلب من الطابور
+            from services.queue_service import delete_pending_request
+            delete_pending_request(payload.get("id") or res.data[0].get("id"))
             user_states.pop(user_id, None)
         except Exception as e:
             logging.error(f"[COMPANY][ADMIN][{user_id}] خطأ أثناء تأكيد الحوالة: {e}", exc_info=True)
             bot.send_message(call.message.chat.id, f"❌ حدث خطأ: {e}")
+
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_company_reject_"))
     def admin_reject_company_transfer(call):
