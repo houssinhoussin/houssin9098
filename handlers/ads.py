@@ -4,7 +4,6 @@ from services.queue_service import add_pending_request
 import logging
 from handlers.keyboards import main_menu  # لو استخدمته في الرسائل
 
-
 # خيارات الإعلان
 AD_OPTIONS = [
     ("✨ إعلان مرة (5000 ل.س)", 1, 5000),
@@ -46,6 +45,10 @@ def register(bot, history):
     @bot.message_handler(func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "contact")
     def receive_contact(msg):
         user_id = msg.from_user.id
+        if user_id not in user_ads_state or user_ads_state[user_id].get("step") != "contact":
+            bot.send_message(msg.chat.id, "⚠️ يرجى البدء من جديد لاكتمال خطوات الإعلان.")
+            user_ads_state.pop(user_id, None)
+            return
         user_ads_state[user_id]["contact"] = msg.text.strip()
         user_ads_state[user_id]["step"] = "ad_text"
         markup = types.InlineKeyboardMarkup()
@@ -57,6 +60,10 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data in ["ads_contact_confirm", "ads_cancel"])
     def confirm_contact(call):
         user_id = call.from_user.id
+        if user_id not in user_ads_state or user_ads_state[user_id].get("step") not in ["ad_text", "contact"]:
+            bot.send_message(call.message.chat.id, "⚠️ لا يمكن المتابعة. أعد بدء إعلان جديد.")
+            user_ads_state.pop(user_id, None)
+            return
         if call.data == "ads_contact_confirm":
             user_ads_state[user_id]["step"] = "ad_text"
             bot.send_message(call.message.chat.id, "📝 أرسل نص إعلانك (سيظهر في القناة):")
@@ -68,6 +75,10 @@ def register(bot, history):
     @bot.message_handler(func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "ad_text")
     def receive_ad_text(msg):
         user_id = msg.from_user.id
+        if user_id not in user_ads_state or user_ads_state[user_id].get("step") != "ad_text":
+            bot.send_message(msg.chat.id, "⚠️ لا يمكنك إرسال نص إعلان في هذه المرحلة. أعد البدء.")
+            user_ads_state.pop(user_id, None)
+            return
         user_ads_state[user_id]["ad_text"] = msg.text.strip()
         user_ads_state[user_id]["step"] = "images"
         markup = types.InlineKeyboardMarkup()
@@ -84,15 +95,23 @@ def register(bot, history):
                 preview_ad(msg, user_id)
             else:
                 bot.send_message(msg.chat.id, "📸 أرسل صورة أخرى أو اضغط تخطي إذا اكتفيت.")
+        # حماية: إذا أرسل صورة بغير وقته لا تفعل شيء
 
     # تخطي الصور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_skip_images")
     def skip_images(call):
         user_id = call.from_user.id
+        if user_id not in user_ads_state or user_ads_state[user_id].get("step") != "images":
+            bot.send_message(call.message.chat.id, "⚠️ لا يمكنك تخطي الصور الآن. أعد البدء.")
+            user_ads_state.pop(user_id, None)
+            return
         preview_ad(call.message, user_id)
 
     # معاينة الإعلان للعميل
     def preview_ad(msg, user_id):
+        if user_id not in user_ads_state:
+            bot.send_message(msg.chat.id, "⚠️ انتهت جلسة الإعلان. ابدأ من جديد.")
+            return
         data = user_ads_state[user_id]
         ad_preview = (
             "🚀✨✨ إعلان مميز من المتجر العالمي ✨✨🚀\n\n"
@@ -117,6 +136,9 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "ads_edit")
     def edit_ad(call):
         user_id = call.from_user.id
+        if user_id not in user_ads_state:
+            bot.send_message(call.message.chat.id, "⚠️ انتهت جلسة الإعلان. أعد البدء.")
+            return
         user_ads_state[user_id]["step"] = "ad_text"
         bot.send_message(call.message.chat.id, "🔄 عدل نص إعلانك أو أرسل إعلان جديد:")
 
@@ -131,6 +153,10 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")
     def confirm_ad(call):
         user_id = call.from_user.id
+        if user_id not in user_ads_state or user_ads_state[user_id].get("step") != "confirm":
+            bot.send_message(call.message.chat.id, "⚠️ انتهت الجلسة أو حصل خطأ. أعد البدء.")
+            user_ads_state.pop(user_id, None)
+            return
         data = user_ads_state[user_id]
         price = data["price"]
         balance = get_balance(user_id)
@@ -157,4 +183,3 @@ def register(bot, history):
         )
         bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته قبل النشر.")
         user_ads_state.pop(user_id, None)
-
