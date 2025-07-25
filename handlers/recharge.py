@@ -55,8 +55,11 @@ def clear_pending_request(user_id):
     recharge_requests.pop(user_id, None)
 
 def start_recharge_menu(bot, message, history=None):
-    if history:
-        history.setdefault(message.from_user.id, []).append("recharge_menu")
+    if history is not None:
+        # تصحيح نوع history ليكون دائماً قائمة (list)
+        if not isinstance(history.get(message.from_user.id), list):
+            history[message.from_user.id] = []
+        history[message.from_user.id].append("recharge_menu")
     logging.info(f"[RECHARGE][{message.from_user.id}] فتح قائمة الشحن")
     bot.send_message(
         message.chat.id,
@@ -256,12 +259,16 @@ def register(bot, history):
                 "❌ تم إلغاء الطلب، يمكنك البدء من جديد.",
                 reply_markup=keyboards.recharge_menu()
             )
+            # تصحيح history قبل استدعاء start_recharge_menu
+            if not isinstance(history.get(user_id), list):
+                history[user_id] = []
+
+            from types import SimpleNamespace
             fake_msg = SimpleNamespace()
             fake_msg.from_user = SimpleNamespace()
             fake_msg.from_user.id = user_id
             fake_msg.chat = SimpleNamespace()
             fake_msg.chat.id = user_id
+
             start_recharge_menu(bot, fake_msg, history)
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-
-# نهاية الملف
