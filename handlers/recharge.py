@@ -218,8 +218,16 @@ def register(bot, history):
             add_pending_request(
                 user_id=user_id,
                 username=call.from_user.username,
-                request_text=caption
+                request_text=caption,
+                payload={
+                    "type": "recharge",
+                    "amount": data['amount'],
+                    "method": data['method'],
+                    "ref": data['ref'],
+                    "photo": data["photo"],
+                }
             )
+
 
             bot.send_photo(
                 ADMIN_MAIN_ID,
