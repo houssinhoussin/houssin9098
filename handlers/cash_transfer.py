@@ -280,7 +280,7 @@ def register(bot, history):
                 reply_markup=kb
             )
             return
-
+        deduct_balance(user_id, total)
         user_states[user_id]["step"] = "waiting_admin"
         kb_admin = make_inline_buttons(
             ("✅ تأكيد التحويل", f"admin_cash_accept_{user_id}_{total}"),
