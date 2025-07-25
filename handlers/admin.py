@@ -206,7 +206,35 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
                 return
+            elif typ == "ads":
+                # بيانات الإعلان من الـpayload
+                ad_text = payload.get("ad_text", "")
+                contact = payload.get("contact", "")
+                images = payload.get("images", [])
+                ad_option = payload.get("ad_option", "")
+                # يمكنك جلب أي بيانات إضافية حسب تصميمك
+                delete_pending_request(request_id)
 
+                # نص الرسالة المرسل للقناة
+                channel_msg = f"🚀✨✨ إعلان مميز من المتجر العالمي ✨✨🚀\n\n{ad_text}\n━━━━━━━━━━━━━━━━━━\n📱 *للتواصل عبر التليجرام:*\n{contact}\n━━━━━━━━━━━━━━━━━━"
+
+                # أرسل الصور إن وجدت (واحدة أو أكثر)
+                if images:
+                    if len(images) == 1:
+                        bot.send_photo("@اسم_قناتك", images[0], caption=channel_msg, parse_mode="Markdown")
+                    else:
+                        media = [types.InputMediaPhoto(img) for img in images]
+                        media[0].caption = channel_msg
+                        media[0].parse_mode = "Markdown"
+                        bot.send_media_group("@اسم_قناتك", media)
+                else:
+                    bot.send_message("@اسم_قناتك", channel_msg, parse_mode="Markdown")
+
+                bot.send_message(user_id, "✅ تم نشر إعلانك بنجاح وسيتم تكرار نشره حسب العدد الذي اخترته في اليوم لمدة 5 أيام.")
+
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ الإعلان")
+                queue_cooldown_start(bot)
+                return
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
                 
