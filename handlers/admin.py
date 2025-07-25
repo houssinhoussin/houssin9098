@@ -125,13 +125,35 @@ def register(bot, history):
                 num   = payload.get("number")
                 name  = payload.get("unit_name")
                 add_purchase(user_id, price, name, price, num)
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تنفيذ عملية تحويل الوحدات بنجاح!\n"
+                    f"• الرقم: <code>{num}</code>\n"
+                    f"• الكمية: {name}\n"
+                    f"• السعر: {price:,} ل.س",
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
 
             elif typ in ("syr_bill", "mtn_bill"):
                 reserved  = payload.get("reserved", 0)
                 num       = payload.get("number")
-                cash_type = payload.get("cash_type")
-                label     = f"فاتورة {cash_type}"
+                label     = payload.get("unit_name", f"فاتورة")  # أو اسم خاص لو كان موجودًا
                 add_purchase(user_id, reserved, label, reserved, num)
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم دفع الفاتورة بنجاح!\n"
+                    f"• الرقم: <code>{num}</code>\n"
+                    f"• المبلغ: {reserved:,} ل.س",
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
 
             elif typ == "internet":
                 reserved = payload.get("reserved", 0)
