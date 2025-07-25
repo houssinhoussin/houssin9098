@@ -146,29 +146,13 @@ def register_university_fees(bot, history):
             )
             return
 
-        # خصم الرصيد مباشرة من المستخدم
-        add_pending_request(
-            user_id=user_id,
-            username=call.from_user.username,
-            request_text=message.text if hasattr(message, "text") else str(message),
-            payload={
-                "type": "university_fees",
-                "university": state['university'],
-                "national_id": state['national_id'],
-                "university_id": state['university_id'],
-                "amount": state['amount'],
-                "commission": state['commission'],
-                "total": state['total'],
-                "reserved": total,
-            }
-        )
-
         # إرسال الطلب إلى الأدمن مع أزرار قبول/رفض
         kb_admin = make_inline_buttons(
             ("✅ تأكيد دفع الرسوم", f"admin_uni_accept_{user_id}_{total}"),
             ("❌ رفض الدفع", f"admin_uni_reject_{user_id}")
         )
 
+        # تجهيز الرسالة للإدارة
         msg = (
             f"📚 طلب دفع رسوم جامعية:\n"
             f"👤 المستخدم: {user_id}\n"
@@ -180,15 +164,29 @@ def register_university_fees(bot, history):
             f"✅ الإجمالي: {total:,} ل.س"
         )
 
-        bot.edit_message_text("✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.",
-                              call.message.chat.id, call.message.message_id)
+        bot.edit_message_text(
+            "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.",
+            call.message.chat.id, call.message.message_id
+        )
 
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
-            request_text=msg
+            request_text=msg,
+            payload={
+                "type": "university_fees",
+                "university": state['university'],
+                "national_id": state['national_id'],
+                "university_id": state['university_id'],
+                "amount": state['amount'],
+                "commission": state['commission'],
+                "total": state['total'],
+                "reserved": total,
+            }
         )
         user_uni_state[user_id]["step"] = "waiting_admin"
+
+        process_queue(bot)
 
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet_uni")
     def show_recharge_methods_uni(call):
