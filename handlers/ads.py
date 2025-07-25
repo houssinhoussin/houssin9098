@@ -28,6 +28,7 @@ def register(bot, history):
     # اختيار نوع الإعلان
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ads_") and call.data[4:].isdigit())
     def select_ad_type(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         times = int(call.data.split("_")[1])
         for text, t, price in AD_OPTIONS:
@@ -54,6 +55,7 @@ def register(bot, history):
     # تأكيد وسيلة التواصل أو إلغاء
     @bot.callback_query_handler(func=lambda call: call.data in ["ads_contact_confirm", "ads_cancel"])
     def confirm_contact(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         if call.data == "ads_contact_confirm":
             user_ads_state[user_id]["step"] = "ad_text"
@@ -77,6 +79,7 @@ def register(bot, history):
     # اختيار صورة واحدة
     @bot.callback_query_handler(func=lambda call: call.data == "ads_one_image")
     def handle_one_image(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         state = user_ads_state.get(user_id, {})
         state["expect_images"] = 1
@@ -88,6 +91,7 @@ def register(bot, history):
     # اختيار صورتين
     @bot.callback_query_handler(func=lambda call: call.data == "ads_two_images")
     def handle_two_images(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         state = user_ads_state.get(user_id, {})
         state["expect_images"] = 2
@@ -103,6 +107,7 @@ def register(bot, history):
         state = user_ads_state.get(user_id, {})
         if state.get("step") == "wait_images":
             state.setdefault("images", []).append(msg.photo[-1].file_id)
+            print(f"User {user_id} sent image {len(state['images'])}/{state['expect_images']}")
             if len(state["images"]) >= state["expect_images"]:
                 preview_ad(msg, user_id)
                 state["step"] = "confirm"
@@ -114,6 +119,7 @@ def register(bot, history):
     # زر تخطي الصور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_skip_images")
     def skip_images(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         preview_ad(call.message, user_id)
         state = user_ads_state.get(user_id, {})
@@ -139,13 +145,18 @@ def register(bot, history):
         markup.add(types.InlineKeyboardButton("📝 تعديل الإعلان", callback_data="ads_edit"))
         markup.add(types.InlineKeyboardButton("❌ إلغاء", callback_data="ads_cancel"))
         if data.get("images"):
-            media = [types.InputMediaPhoto(photo) for photo in data["images"]]
-            bot.send_media_group(msg.chat.id, media)
+            try:
+                media = [types.InputMediaPhoto(photo) for photo in data["images"]]
+                bot.send_media_group(msg.chat.id, media)
+            except Exception as e:
+                print(f"Error sending media group: {e}")
+                bot.send_message(msg.chat.id, "⚠️ حدث خطأ في عرض الصور، سيتم عرض الإعلان بدون صور.")
         bot.send_message(msg.chat.id, ad_preview, reply_markup=markup)
 
     # تعديل الإعلان
     @bot.callback_query_handler(func=lambda call: call.data == "ads_edit")
     def edit_ad(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         user_ads_state[user_id]["step"] = "ad_text"
         bot.send_message(call.message.chat.id, "🔄 عدل نص إعلانك أو أرسل إعلان جديد:")
@@ -153,6 +164,7 @@ def register(bot, history):
     # إلغاء الإعلان
     @bot.callback_query_handler(func=lambda call: call.data == "ads_cancel")
     def cancel_ad(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         user_ads_state.pop(user_id, None)
         bot.send_message(call.message.chat.id, "❌ تم إلغاء عملية الإعلان.", reply_markup=types.ReplyKeyboardRemove())
@@ -160,6 +172,7 @@ def register(bot, history):
     # تأكيد الإعلان ونقله للطابور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")
     def confirm_ad(call):
+        bot.answer_callback_query(call.id)  # مهم جداً
         user_id = call.from_user.id
         data = user_ads_state.get(user_id)
         if not data or data.get("step") != "confirm":
@@ -188,5 +201,5 @@ def register(bot, history):
             payload=payload,
         )
         process_queue(bot)
-        bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته قبل النشر.")
+        bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعتها قبل النشر.")
         user_ads_state.pop(user_id, None)
