@@ -27,7 +27,7 @@ def register(bot, history):
         bot.send_message(msg.chat.id, "🟢 اختر نوع إعلانك:", reply_markup=markup)
 
     # عند اختيار نوع الإعلان
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("ads_"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ads_") and call.data[4:].isdigit())
     def select_ad_type(call):
         user_id = call.from_user.id
         times = int(call.data.split("_")[1])
