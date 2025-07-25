@@ -19,7 +19,7 @@ user_ads_state = {}
 
 def register(bot, history):
     # زر القائمة الرئيسية
-    @bot.message_handler(func=lambda msg: msg.text == "🗞️ إعلاناتك")
+    @bot.message_handler(func=lambda msg: msg.text == "📢 إعلاناتك")
     def open_ads_menu(msg):
         markup = types.InlineKeyboardMarkup()
         for text, times, price in AD_OPTIONS:
