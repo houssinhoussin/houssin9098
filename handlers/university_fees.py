@@ -6,7 +6,9 @@ from services.wallet_service import register_user_if_not_exist
 from handlers import keyboards
 from services.queue_service import add_pending_request
 from database.db import get_table
+from services.queue_service import process_queue
 import logging
+
 
 user_uni_state = {}
 
