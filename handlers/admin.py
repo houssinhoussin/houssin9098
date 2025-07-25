@@ -158,46 +158,46 @@ def register(bot, history):
                     beneficiary_number,
                 )
 
+                delete_pending_request(request_id)
+                amount = payload.get("reserved", payload.get("price", 0))
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تنفيذ طلبك بنجاح.\nتم خصم {amount:,} ل.س.",
+                    parse_mode="HTML",
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
+
+            elif typ == "university_fees":
+                reserved      = payload.get("reserved", 0)
+                university    = payload.get("university")
+                national_id   = payload.get("national_id")
+                university_id = payload.get("university_id")
+                amount        = payload.get("amount")
+                commission    = payload.get("commission")
+                total         = payload.get("total")
+
+                deduct_balance(user_id, reserved)
+                add_purchase(
+                    user_id,
+                    reserved,
+                    f"دفع رسوم جامعية ({university})",
+                    reserved,
+                    university_id
+                )
+
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم دفع رسومك الجامعية ({university}) بمبلغ {reserved:,} ل.س بنجاح."
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
+
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
-
-            # حذف الطلب وإعلام العميل
-            delete_pending_request(request_id)
-            amount = payload.get("reserved", payload.get("price", 0))
-            bot.send_message(
-                user_id,
-                f"✅ تم تنفيذ طلبك بنجاح.\nتم خصم {amount:,} ل.س.",
-                parse_mode="HTML",
-            )
-            bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-            queue_cooldown_start(bot)
-            return
-            elif typ == "university_fees":
-            reserved      = payload.get("reserved", 0)
-            university    = payload.get("university")
-            national_id   = payload.get("national_id")
-            university_id = payload.get("university_id")
-            amount        = payload.get("amount")
-            commission    = payload.get("commission")
-            total         = payload.get("total")
-
-            deduct_balance(user_id, reserved)
-            add_purchase(
-                user_id,
-                reserved,
-                f"دفع رسوم جامعية ({university})",
-                reserved,
-                university_id
-            )
-
-            delete_pending_request(request_id)
-            bot.send_message(
-                user_id,
-                f"✅ تم دفع رسومك الجامعية ({university}) بمبلغ {reserved:,} ل.س بنجاح."
-            )
-            bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-            queue_cooldown_start(bot)
-            return
 
         # أيّ أكشن آخر
         bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
