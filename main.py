@@ -11,7 +11,7 @@ import socketserver
 bot = telebot.TeleBot(API_TOKEN, parse_mode="HTML")
 
 # ----------- الاستيرادات الصحيحة: -----------
-from handlers import admin, bill_and_units, products, wallet
+from handlers import admin, bill_and_units, products, wallet, ads
 from services import wallet_service, queue_service
 
 # ----------- تسجيل الهاندلرز (حسب الحاجة): -----------
@@ -91,6 +91,7 @@ from handlers import (
     university_fees,
     internet_providers,
     bill_and_units,
+    ads,
 )
 from handlers.keyboards import (
     main_menu,
@@ -129,6 +130,7 @@ media_services.register(bot, user_state)
 wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
+ads.register(bot, user_state)
 CHANNEL_USERNAME = "@shop100sho"
 
 def notify_channel_on_start(bot):
