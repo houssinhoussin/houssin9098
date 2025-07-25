@@ -182,5 +182,6 @@ def register(bot, history):
             request_text="إعلان جديد بانتظار الموافقة",
             payload=payload,
         )
+        process_queue(bot)
         bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته قبل النشر.")
         user_ads_state.pop(user_id, None)
