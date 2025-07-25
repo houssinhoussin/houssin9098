@@ -147,7 +147,7 @@ def register_university_fees(bot, history):
                 reply_markup=kb
             )
             return
-
+        deduct_balance(user_id, total)
         # إرسال الطلب إلى الأدمن مع أزرار قبول/رفض
         kb_admin = make_inline_buttons(
             ("✅ تأكيد دفع الرسوم", f"admin_uni_accept_{user_id}_{total}"),
