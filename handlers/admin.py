@@ -178,7 +178,6 @@ def register(bot, history):
                 commission    = payload.get("commission")
                 total         = payload.get("total")
 
-                deduct_balance(user_id, reserved)
                 add_purchase(
                     user_id,
                     reserved,
