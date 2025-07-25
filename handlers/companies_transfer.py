@@ -259,7 +259,7 @@ def register_companies_transfer(bot, history):
                 reply_markup=kb
             )
             return
-
+        deduct_balance(user_id, total)
         user_states[user_id]["step"] = "waiting_admin"
         kb_admin = make_inline_buttons(
             ("✅ تأكيد الحوالة", f"admin_company_accept_{user_id}_{total}"),
