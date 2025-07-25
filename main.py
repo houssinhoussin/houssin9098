@@ -13,6 +13,9 @@ bot = telebot.TeleBot(API_TOKEN, parse_mode="HTML")
 # ----------- الاستيرادات الصحيحة: -----------
 from handlers import admin, bill_and_units, products, wallet, ads
 from services import wallet_service, queue_service
+from scheduled_tasks import post_ads_task
+post_ads_task(bot)
+
 
 # ----------- تسجيل الهاندلرز (حسب الحاجة): -----------
 user_state = {}
