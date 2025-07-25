@@ -80,11 +80,16 @@ def register(bot, history):
             bot.send_message(msg.chat.id, "⚠️ لا يمكنك إرسال نص إعلان في هذه المرحلة. أعد البدء.")
             user_ads_state.pop(user_id, None)
             return
-        user_ads_state[user_id]["ad_text"] = msg.text.strip()
-        user_ads_state[user_id]["step"] = "images"
+        user_ads_state[user_id]["step"] = "wait_image_option"
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("تخطي الصور", callback_data="ads_skip_images"))
-        bot.send_message(msg.chat.id, "🖼️ يمكنك إرسال صورة أو صورتين (أو اضغط تخطي):", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton("📸 أضف صورة واحدة", callback_data="ads_one_image"))
+        markup.add(types.InlineKeyboardButton("🖼️ أضف صورتين", callback_data="ads_two_images"))
+        markup.add(types.InlineKeyboardButton("➡️ تخطي الصور", callback_data="ads_skip_images"))
+        bot.send_message(
+            msg.chat.id,
+            "🖼️ يمكنك اختيار إضافة صورة واحدة أو صورتين أو تخطي:",
+            reply_markup=markup
+        )
 
     # استقبال الصور
     @bot.message_handler(func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "images")
