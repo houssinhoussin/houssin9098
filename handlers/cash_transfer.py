@@ -331,21 +331,39 @@ def register(bot, history):
             parts = call.data.split("_")
             user_id = int(parts[-2])
             total = int(parts[-1])
-            data = user_states.get(user_id, {})
-            if not has_sufficient_balance(user_id, total):
+            # من المفترض أن تستخرج بيانات الطلب من جدول الطابور!
+            from database.db import get_table
+            res = get_table("pending_requests").select("payload").eq("user_id", user_id).execute()
+            if not res.data:
+                bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
+                return
+            payload = res.data[0].get("payload", {})
+            # تأكد من الحجز (reserved) من الطابور وليس من الحالة المؤقتة!
+            reserved = payload.get("reserved", total)
+            number = payload.get("number")
+            cash_type = payload.get("cash_type")
+
+            if not has_sufficient_balance(user_id, reserved):
                 logging.warning(f"[CASH][ADMIN][{user_id}] فشل التحويل، لا يوجد رصيد كافٍ")
                 bot.send_message(user_id, f"❌ فشل تحويل الكاش: لا يوجد رصيد كافٍ في محفظتك.")
                 bot.answer_callback_query(call.id, "❌ لا يوجد رصيد كافٍ لدى العميل.")
                 bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                 return
-            deduct_balance(user_id, total)
-            logging.info(f"[CASH][ADMIN][{user_id}] تم الخصم وقبول التحويل، الإجمالي: {total}")
+
+            # إعادة الحجز أولًا (لو كان خُصم بالحجز الافتراضي في مكان آخر - لتفادي أي خصم مزدوج)
+            # ثم نخصم فعليًا
+            from services.wallet_service import deduct_balance, add_purchase
+            deduct_balance(user_id, reserved)
+            add_purchase(user_id, reserved, f"تحويل كاش {cash_type}", reserved, number)
+
+            logging.info(f"[CASH][ADMIN][{user_id}] تم الخصم وقبول التحويل، الإجمالي: {reserved}")
             bot.send_message(
                 user_id,
-                f"✅ تم شراء {data.get('cash_type')} للرقم {data.get('number')} بمبلغ {data.get('amount'):,} ل.س بنجاح."
+                f"✅ تم شراء {cash_type} للرقم {number} بمبلغ {reserved:,} ل.س بنجاح."
             )
             bot.answer_callback_query(call.id, "✅ تم قبول الطلب")
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+
             def forward_admin_message(m):
                 if m.content_type == "photo":
                     file_id = m.photo[-1].file_id
@@ -354,10 +372,15 @@ def register(bot, history):
                     bot.send_message(user_id, m.text or "تمت العملية بنجاح.")
             bot.send_message(call.message.chat.id, "📝 أرسل رسالة أو صورة للعميل مع صورة التحويل أو تأكيد العملية.")
             bot.register_next_step_handler_by_chat_id(call.message.chat.id, forward_admin_message)
+            # احذف الطلب من الطابور بعد التنفيذ
+            from services.queue_service import delete_pending_request
+            delete_pending_request(payload.get("id") or res.data[0].get("id"))
+            # نظّف حالة المستخدم المؤقتة إن وجدت
             user_states.pop(user_id, None)
         except Exception as e:
             logging.error(f"[CASH][ADMIN][{user_id}] خطأ أثناء تأكيد التحويل: {e}", exc_info=True)
             bot.send_message(call.message.chat.id, f"❌ حدث خطأ: {e}")
+
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_cash_reject_"))
     def admin_reject_cash_transfer(call):
