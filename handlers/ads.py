@@ -3,6 +3,7 @@ from services.wallet_service import get_balance, deduct_balance
 from services.queue_service import add_pending_request
 import logging
 from handlers.keyboards import main_menu  # لو استخدمته في الرسائل
+from services.queue_service import process_queue
 
 # خيارات الإعلان
 AD_OPTIONS = [
@@ -95,7 +96,7 @@ def register(bot, history):
                 preview_ad(msg, user_id)
             else:
                 bot.send_message(msg.chat.id, "📸 أرسل صورة أخرى أو اضغط تخطي إذا اكتفيت.")
-        # حماية: إذا أرسل صورة بغير وقته لا تفعل شيء
+            # حماية: إذا أرسل صورة بغير وقته لا تفعل شيء
 
     # تخطي الصور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_skip_images")
