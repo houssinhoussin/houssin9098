@@ -2,6 +2,8 @@ from telebot import types
 from services.wallet_service import get_balance, deduct_balance
 from services.queue_service import add_pending_request
 import logging
+from handlers.keyboards import main_menu  # لو استخدمته في الرسائل
+
 
 # خيارات الإعلان
 AD_OPTIONS = [
