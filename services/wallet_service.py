@@ -64,6 +64,7 @@ USER_TABLE        = "houssin363"
 TRANSACTION_TABLE = "transactions"
 PURCHASES_TABLE   = "purchases"
 PRODUCTS_TABLE    = "products"
+CHANNEL_ADS_TABLE = "channel_ads"
 
 # عمليات المستخدم
 def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None:
