@@ -296,6 +296,13 @@ def register_companies_transfer(bot, history):
                 "reserved": total,
             }
         )
+        bot.send_message(
+            user_id,
+            "📝 تم إرسال طلبك إلى الإدارة (الطابور).\n"
+            "سيتم تنفيذ العملية بعد الموافقة خلال دقائق.\n"
+            "يرجى انتظار إشعار التنفيذ أو التواصل مع الإدارة عند الحاجة."
+        )
+        process_queue(bot)
        
 
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet")
