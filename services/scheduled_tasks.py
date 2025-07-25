@@ -3,7 +3,7 @@ from services.ads_service import get_active_ads, increment_ad_posted, expire_old
 from telebot import types
 from datetime import datetime, time as dtime
 
-CHANNEL_USERNAME = "@your_channel"  # غيّر هذا لاسم قناتك
+CHANNEL_USERNAME = "@my_fast_shop_bot"  # غيّر هذا لاسم قناتك
 
 def post_ads_task(bot):
     now = datetime.utcnow()
