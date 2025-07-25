@@ -6,6 +6,7 @@ def main_menu():
     markup.add(
         types.KeyboardButton("🛒 المنتجات"),
         types.KeyboardButton("💳 شحن محفظتي"),
+        types.KeyboardButton("📢 إعلاناتك"),
         types.KeyboardButton("💰 محفظتي"),
         types.KeyboardButton("🛠️ الدعم الفني"),
         types.KeyboardButton("🔄 ابدأ من جديد"),
