@@ -228,13 +228,6 @@ def register(bot, history):
                 }
             )
 
-
-            bot.send_photo(
-                ADMIN_MAIN_ID,
-                photo=data["photo"],
-                caption=caption,
-                reply_markup=markup
-            )
             bot.send_message(
                 user_id,
                 "📨 تم إرسال طلبك إلى الإدارة، الرجاء الانتظار.",
