@@ -147,7 +147,21 @@ def register_university_fees(bot, history):
             return
 
         # خصم الرصيد مباشرة من المستخدم
-        deduct_balance(user_id, total)
+        add_pending_request(
+            user_id=user_id,
+            username=call.from_user.username,
+            request_text=msg,
+            payload={
+                "type": "university_fees",
+                "university": state['university'],
+                "national_id": state['national_id'],
+                "university_id": state['university_id'],
+                "amount": state['amount'],
+                "commission": state['commission'],
+                "total": state['total'],
+                "reserved": total,
+            }
+        )
 
         # إرسال الطلب إلى الأدمن مع أزرار قبول/رفض
         kb_admin = make_inline_buttons(
