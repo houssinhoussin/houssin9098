@@ -5,6 +5,7 @@ from config import ADMIN_MAIN_ID
 from services.wallet_service import register_user_if_not_exist
 from handlers import keyboards
 from services.queue_service import add_pending_request
+from database.db import get_table
 import logging
 
 user_uni_state = {}
@@ -119,7 +120,14 @@ def register_university_fees(bot, history):
         user_id = call.from_user.id
         state = user_uni_state.get(user_id, {})
         total = state.get("total")
-
+        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
+        if existing.data:
+            bot.edit_message_text(
+                "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.",
+                call.message.chat.id,
+                call.message.message_id
+            )
+            return
         balance = get_balance(user_id)
         if balance is None or balance < total:
             shortage = total - (balance or 0)
@@ -166,9 +174,6 @@ def register_university_fees(bot, history):
             username=call.from_user.username,
             request_text=msg
         )
-        msg_admin = bot.send_message(ADMIN_MAIN_ID, msg, reply_markup=kb_admin)
-        user_uni_state[user_id]["admin_message_id"] = msg_admin.message_id
-        user_uni_state[user_id]["admin_chat_id"] = ADMIN_MAIN_ID
         user_uni_state[user_id]["step"] = "waiting_admin"
 
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet_uni")
