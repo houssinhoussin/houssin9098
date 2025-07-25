@@ -195,9 +195,21 @@ def register(bot, history):
                 queue_cooldown_start(bot)
                 return
 
+            elif typ == "recharge":
+                amount = payload.get("amount", 0)
+                delete_pending_request(request_id)
+                add_balance(user_id, amount)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح."
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
+                queue_cooldown_start(bot)
+                return
+
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
-
+                
         # أيّ أكشن آخر
         bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
 
@@ -245,35 +257,3 @@ def register(bot, history):
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم.")
         _accept_pending.pop(msg.from_user.id, None)
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_add_"))
-    def confirm_wallet_add(call):
-        _, _, user_id_str, amount_str = call.data.split("_")
-        user_id = int(user_id_str)
-        amount  = int(float(amount_str))
-        register_user_if_not_exist(user_id)
-        add_balance(user_id, amount)
-        bot.send_message(user_id, f"✅ تم إضافة {amount:,} ل.س إلى محفظتك بنجاح.")
-        bot.answer_callback_query(call.id, "✅ تمت الموافقة")
-        bot.edit_message_reply_markup(
-            call.message.chat.id, call.message.message_id, reply_markup=None
-        )
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("reject_add_"))
-    def reject_wallet_add(call):
-        user_id = int(call.data.split("_")[-1])
-        bot.send_message(call.message.chat.id, "📝 اكتب سبب الرفض:")
-        bot.register_next_step_handler_by_chat_id(
-            call.message.chat.id,
-            lambda m: process_rejection(m, user_id, call),
-        )
-
-    def process_rejection(msg, user_id, call):
-        reason = msg.text.strip()
-        bot.send_message(
-            user_id,
-            f"❌ تم رفض عملية الشحن.\n📝 السبب: {reason}",
-        )
-        bot.answer_callback_query(call.id, "❌ تم رفض العملية")
-        bot.edit_message_reply_markup(
-            call.message.chat.id, call.message.message_id, reply_markup=None
-        )
