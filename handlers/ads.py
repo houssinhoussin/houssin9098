@@ -90,22 +90,53 @@ def register(bot, history):
     @bot.message_handler(content_types=["photo"])
     def receive_images(msg):
         user_id = msg.from_user.id
-        if user_ads_state.get(user_id, {}).get("step") == "images":
-            user_ads_state[user_id].setdefault("images", []).append(msg.photo[-1].file_id)
-            if len(user_ads_state[user_id]["images"]) >= 2:
+        state = user_ads_state.get(user_id, {})
+        if state.get("step") == "images":
+            # إذا لم يكن هناك صور بعد، أضف الصورة واطلب تأكيد أو تخطي
+            if "images" not in state or not state["images"]:
+                state["images"] = [msg.photo[-1].file_id]
+                user_ads_state[user_id] = state
+                markup = types.InlineKeyboardMarkup()
+                markup.add(
+                    types.InlineKeyboardButton("✅ أضف صورة ثانية", callback_data="ads_add_second_image"),
+                    types.InlineKeyboardButton("➡️ تخطي الصور", callback_data="ads_skip_images")
+                )
+                bot.send_message(msg.chat.id, "📸 تم إضافة الصورة الأولى.\nهل ترغب بإضافة صورة ثانية؟", reply_markup=markup)
+                return
+            # إذا أرسل صورة ثانية بعد الضغط على زر إضافة صورة ثانية
+            elif len(state["images"]) == 1 and state.get("awaiting_second_image"):
+                state["images"].append(msg.photo[-1].file_id)
+                user_ads_state[user_id] = state
+                # مباشرة إلى المعاينة
                 preview_ad(msg, user_id)
+                return
+            # حماية إضافية
             else:
-                bot.send_message(msg.chat.id, "📸 أرسل صورة أخرى أو اضغط تخطي إذا اكتفيت.")
-            # حماية: إذا أرسل صورة بغير وقته لا تفعل شيء
-
+                bot.send_message(msg.chat.id, "❌ لا يمكنك إضافة المزيد من الصور.")
+    
+    # عند الضغط على "أضف صورة ثانية"
+    @bot.callback_query_handler(func=lambda call: call.data == "ads_add_second_image")
+    def add_second_image(call):
+        user_id = call.from_user.id
+        state = user_ads_state.get(user_id, {})
+        if not state or state.get("step") != "images" or len(state.get("images", [])) != 1:
+            bot.send_message(call.message.chat.id, "⚠️ لا يمكن المتابعة. أعد البدء.")
+            user_ads_state.pop(user_id, None)
+            return
+        # انتظر من العميل صورة ثانية
+        state["awaiting_second_image"] = True
+        bot.send_message(call.message.chat.id, "📸 أرسل الصورة الثانية الآن (أو أرسل أي رسالة للإلغاء).")
+    
     # تخطي الصور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_skip_images")
     def skip_images(call):
         user_id = call.from_user.id
-        if user_id not in user_ads_state or user_ads_state[user_id].get("step") != "images":
+        state = user_ads_state.get(user_id, {})
+        if not state or state.get("step") != "images":
             bot.send_message(call.message.chat.id, "⚠️ لا يمكنك تخطي الصور الآن. أعد البدء.")
             user_ads_state.pop(user_id, None)
             return
+        # مباشرة إلى المعاينة
         preview_ad(call.message, user_id)
 
     # معاينة الإعلان للعميل
