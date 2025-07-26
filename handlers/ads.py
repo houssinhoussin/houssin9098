@@ -196,4 +196,58 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data == "ads_cancel")
     def cancel_ad(call):
-        bot.answer
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        user_ads_state.pop(user_id, None)
+        bot.send_message(call.message.chat.id, "❌ تم إلغاء عملية الإعلان.", reply_markup=types.ReplyKeyboardRemove())
+
+    # ----------------------------------------------------------------
+    # 12) تأكيد الإعلان (إرساله للطابور)
+    # ----------------------------------------------------------------
+    @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")
+    def confirm_ad(call):
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        data = user_ads_state.get(user_id)
+
+        # تحقق من أن المرحلة صحيحة
+        if not data or data.get("step") != "confirm":
+            bot.send_message(call.message.chat.id, "⚠️ انتهت الجلسة أو حصل خطأ، أعد المحاولة من جديد.")
+            user_ads_state.pop(user_id, None)
+            return
+
+        price = data["price"]
+        balance = get_balance(user_id)
+
+        if balance is None or balance < price:
+            missing = price - (balance or 0)
+            bot.send_message(
+                call.message.chat.id,
+                f"""❌ رصيدك غير كافٍ لهذا الإعلان.
+            الناقص: {missing:,} ل.س"""
+            )
+            return
+
+        # خصم الرصيد وتعبئة الطلب
+        deduct_balance(user_id, price)
+        payload = {
+            "type": "ads",
+            "count": data["times"],
+            "price": data["price"],
+            "contact": data["contact"],
+            "ad_text": data["ad_text"],
+            "images": data.get("images", []),
+        }
+
+        add_pending_request(
+            user_id=user_id,
+            username=call.from_user.username,
+            request_text="إعلان جديد بانتظار الموافقة",
+            payload=payload,
+        )
+
+        # معالجة فورية إن وُجد مشرفون متصلون
+        process_queue(bot)
+
+        bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته.")
+        user_ads_state.pop(user_id, None)
