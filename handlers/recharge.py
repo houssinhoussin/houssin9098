@@ -186,7 +186,7 @@ def register(bot, history):
                 parse_mode="Markdown",
                 reply_markup=markup
             )
-       else:
+        else:
             bot.send_message(
                 msg.chat.id,
                 confirm_text,
