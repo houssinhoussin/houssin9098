@@ -88,7 +88,25 @@ def process_queue(bot):
             InlineKeyboardButton("🖼️ صورة للعميل", callback_data=f"admin_queue_photo_{request_id}")
         )
 
-        bot.send_message(ADMIN_MAIN_ID, text, reply_markup=keyboard, parse_mode="HTML")
+        payload = req.get("payload") or {}
+        typ     = payload.get("type")
+        photo_id = payload.get("photo")
+
+        if typ == "recharge" and photo_id:
+            bot.send_photo(
+                ADMIN_MAIN_ID,
+                photo_id,
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        else:
+            bot.send_message(
+                ADMIN_MAIN_ID,
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
 
 def queue_cooldown_start(bot=None):
     global _queue_cooldown
