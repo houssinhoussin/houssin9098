@@ -12,9 +12,13 @@ AD_OPTIONS = [
     ("🏆 إعلان 10 مرات (100000 ل.س)", 10, 100000),
 ]
 
+# حالة جلسات الإعلان لكل مستخدم
 user_ads_state = {}
 
 def register(bot, history):
+    """يسجل جميع هاندلرات مسار الإعلانات فى البوت."""
+
+    # 1️⃣ الدخول إلى قائمة الإعلانات
     @bot.message_handler(func=lambda msg: msg.text == "📢 إعلاناتك")
     def open_ads_menu(msg):
         markup = types.InlineKeyboardMarkup()
@@ -23,12 +27,14 @@ def register(bot, history):
         markup.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="ads_back"))
         bot.send_message(msg.chat.id, "🟢 اختر نوع إعلانك:", reply_markup=markup)
 
+    # 2️⃣ اختيار نوع الإعلان
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ads_") and call.data[4:].isdigit())
     def select_ad_type(call):
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         times = int(call.data.split("_")[1])
 
+        # تعريف الحالة الأولية
         for text, t, price in AD_OPTIONS:
             if t == times:
                 user_ads_state[user_id] = {
@@ -43,6 +49,7 @@ def register(bot, history):
             "✏️ أرسل رقم التواصل، صفحتك أو موقعك (سيظهر للإعلان):"
         )
 
+    # 3️⃣ استقبال وسيلة التواصل
     @bot.message_handler(
         content_types=["text"],
         func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "contact",
@@ -62,6 +69,7 @@ def register(bot, history):
             reply_markup=markup,
         )
 
+    # 4️⃣ تأكيد وسيلة التواصل أو إلغاء
     @bot.callback_query_handler(func=lambda call: call.data in ["ads_contact_confirm", "ads_cancel"])
     def confirm_contact(call):
         bot.answer_callback_query(call.id)
@@ -78,6 +86,7 @@ def register(bot, history):
                 reply_markup=types.ReplyKeyboardRemove(),
             )
 
+    # 5️⃣ استقبال نص الإعلان
     @bot.message_handler(
         content_types=["text"],
         func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "ad_text",
@@ -98,6 +107,7 @@ def register(bot, history):
             reply_markup=markup,
         )
 
+    # 6️⃣ اختيار عدد الصور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_one_image")
     def handle_one_image(call):
         bot.answer_callback_query(call.id)
@@ -116,16 +126,16 @@ def register(bot, history):
         user_ads_state[user_id] = state
         bot.send_message(call.message.chat.id, "📸 أرسل صورتين الآن واحدة تلو الأخرى.")
 
-    @bot.message_handler(content_types=["photo", "document"])
+    # 7️⃣ استقبال الصور (مع فلتر دقيق لتجنّب التعارض مع recharge)
+    @bot.message_handler(
+        content_types=["photo", "document"],
+        func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "wait_images",
+    )
     def receive_images(msg):
         user_id = msg.from_user.id
         state = user_ads_state.get(user_id)
 
-        if not state or state.get("step") != "wait_images":
-            return
-
         file_id = None
-
         if msg.content_type == "photo":
             file_id = msg.photo[-1].file_id
         elif msg.content_type == "document":
@@ -139,6 +149,7 @@ def register(bot, history):
 
         state.setdefault("images", []).append(file_id)
 
+        # عند اكتمال العدد المطلوب من الصور
         if len(state["images"]) >= state["expect_images"]:
             state["step"] = "confirm"
             user_ads_state[user_id] = state
@@ -147,8 +158,7 @@ def register(bot, history):
             remaining = state["expect_images"] - len(state["images"])
             bot.send_message(msg.chat.id, f"📸 أرسل الصورة المتبقية ({remaining} متبقية).")
 
-        user_ads_state[user_id] = state
-
+    # 8️⃣ تخطي الصور
     @bot.callback_query_handler(func=lambda call: call.data == "ads_skip_images")
     def skip_images(call):
         bot.answer_callback_query(call.id)
@@ -158,11 +168,14 @@ def register(bot, history):
         user_ads_state[user_id] = state
         preview_ad(call.message, user_id)
 
+    # 9️⃣ معاينة الإعلان
     def preview_ad(msg, user_id):
         data = user_ads_state.get(user_id)
         if not data:
             bot.send_message(msg.chat.id, "⚠️ انتهت جلسة الإعلان. ابدأ من جديد.")
             return
+
+        # إرسال الصور إذا وُجدت
         if data.get("images"):
             try:
                 if len(data["images"]) == 1:
@@ -172,6 +185,8 @@ def register(bot, history):
                     bot.send_media_group(msg.chat.id, media)
             except Exception:
                 bot.send_message(msg.chat.id, "⚠️ تعذّر عرض الصور، سيتم المتابعة بدونها.")
+
+        # نص المعاينة
         ad_preview = (
             "<b><u>📢 إعـــــــلان</u></b>\n\n"
             f"{data['ad_text']}\n"
@@ -183,68 +198,4 @@ def register(bot, history):
         markup = types.InlineKeyboardMarkup()
         markup.add(
             types.InlineKeyboardButton("✅ تأكيد الإعلان", callback_data="ads_confirm_send"),
-            types.InlineKeyboardButton("📝 تعديل الإعلان", callback_data="ads_edit"),
-            types.InlineKeyboardButton("❌ إلغاء", callback_data="ads_cancel"),
-        )
-        bot.send_message(msg.chat.id, ad_preview, reply_markup=markup, parse_mode="HTML")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "ads_edit")
-    def edit_ad(call):
-        bot.answer_callback_query(call.id)
-        user_id = call.from_user.id
-        user_ads_state[user_id]["step"] = "ad_text"
-        bot.send_message(call.message.chat.id, "🔄 عدل نص إعلانك أو أرسل إعلان جديد:")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "ads_cancel")
-    def cancel_ad(call):
-        bot.answer_callback_query(call.id)
-        user_id = call.from_user.id
-        user_ads_state.pop(user_id, None)
-        bot.send_message(
-            call.message.chat.id,
-            "❌ تم إلغاء عملية الإعلان.",
-            reply_markup=types.ReplyKeyboardRemove(),
-        )
-
-    @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")
-    def confirm_ad(call):
-        bot.answer_callback_query(call.id)
-        user_id = call.from_user.id
-        data = user_ads_state.get(user_id)
-
-        if not data or data.get("step") != "confirm":
-            bot.send_message(call.message.chat.id, "⚠️ انتهت الجلسة أو حصل خطأ. أعد البدء.")
-            user_ads_state.pop(user_id, None)
-            return
-
-        price = data["price"]
-        balance = get_balance(user_id)
-
-        if balance is None or balance < price:
-            missing = price - (balance or 0)
-            bot.send_message(
-                call.message.chat.id,
-                f"❌ رصيدك غير كافٍ لهذا الإعلان.\nالناقص: {missing:,} ل.س"
-            )
-            return
-
-        deduct_balance(user_id, price)
-        payload = {
-            "type": "ads",
-            "count": data["times"],
-            "price": data["price"],
-            "contact": data["contact"],
-            "ad_text": data["ad_text"],
-            "images": data.get("images", []),
-        }
-
-        add_pending_request(
-            user_id=user_id,
-            username=call.from_user.username,
-            request_text="إعلان جديد بانتظار الموافقة",
-            payload=payload,
-        )
-
-        process_queue(bot)
-        bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته.")
-        user_ads_state.pop(user_id, None)
+            types.InlineKeyboardButton("📝 تعديل الإعلان", callback_data
