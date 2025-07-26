@@ -155,7 +155,7 @@ def register(bot, history):
                 queue_cooldown_start(bot)
                 return
 
-           elif typ == "internet":
+            elif typ == "internet":
                 reserved = payload.get("reserved", 0)
                 provider = payload.get("provider")
                 speed    = payload.get("speed")
