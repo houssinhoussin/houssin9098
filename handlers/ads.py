@@ -24,15 +24,26 @@ def register(bot, _history):
     """تسجيل جميع هاندلرات مسار الإعلانات."""
 
     # ----------------------------------------------------------------
-    # 1) فتح قائمة الإعلانات
+    
+    # 1) مدخل الإعلان – رسالة ترويجية أولية
     # ----------------------------------------------------------------
     @bot.message_handler(func=lambda msg: msg.text == "📢 إعلاناتك")
-    def open_ads_menu(msg):
+    def ads_entry(msg):
+        promo = (
+            "✨ <b>مساحة إعلانات متجرنا</b> ✨\n\n"
+            "عبر قناتنا <a href=\"https://t.me/shop100sho\">@shop100sho</a> تصل رسالتك إلى <b>آلاف</b> المشتركين يوميًا!\n"
+            "• روِّج منتجك أو أعرض أسعارك الجديدة\n"
+            "• ابحث عن سلعة أو عقار\n"
+            "• أعلن عن عقار أو سيارة للبيع\n"
+            "• انشر فرصة عمل أو ابحث عن وظيفة\n\n"
+            "🚀 اضغط «زيارة القناة» للاطّلاع، ثم «متابعة» للبدء الآن."
+        )
+
         markup = types.InlineKeyboardMarkup()
-        for text, times, _ in AD_OPTIONS:
-            markup.add(types.InlineKeyboardButton(text, callback_data=f"ads_{times}"))
-        markup.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="ads_back"))
-        bot.send_message(msg.chat.id, "🟢 اختر نوع إعلانك:", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton("🔎 زيارة القناة", url="https://t.me/shop100sho"))
+        markup.add(types.InlineKeyboardButton("✅ متابعة", callback_data="ads_start"))
+        bot.send_message(msg.chat.id, promo, reply_markup=markup, parse_mode="HTML")
+
 
     # ----------------------------------------------------------------
     # 2) اختيار نوع الإعلان
@@ -52,7 +63,24 @@ def register(bot, _history):
                 }
                 break
 
-        bot.send_message(call.message.chat.id, "✏️ أرسل رقم التواصل، صفحتك أو موقعك (سيظهر للإعلان):")
+        bot.send_message(
+            call.message.chat.id,
+            "✏️ أرسل رقم التواصل، صفحتك أو موقعك (سيظهر للإعلان):"
+        )
+        # ----------------------------------------------------------------
+    # 1‑bis) متابعة إلى باقات الإعلان
+    # ----------------------------------------------------------------
+    def send_ads_menu(chat_id):
+        mk = types.InlineKeyboardMarkup()
+        for text, times, _ in AD_OPTIONS:
+            mk.add(types.InlineKeyboardButton(text, callback_data=f"ads_{times}"))
+        mk.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="ads_back"))
+        bot.send_message(chat_id, "🟢 اختر نوع إعلانك:", reply_markup=mk)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "ads_start")
+    def proceed_to_ads(call):
+        bot.answer_callback_query(call.id)
+        send_ads_menu(call.message.chat.id)
 
     # ----------------------------------------------------------------
     # 3) استقبال وسيلة التواصل
@@ -210,7 +238,7 @@ def register(bot, _history):
         user_id = call.from_user.id
         data = user_ads_state.get(user_id)
 
-        # تحقق من أن المرحلة صحيحة
+        # التحقق من المرحلة
         if not data or data.get("step") != "confirm":
             bot.send_message(call.message.chat.id, "⚠️ انتهت الجلسة أو حصل خطأ، أعد المحاولة من جديد.")
             user_ads_state.pop(user_id, None)
@@ -219,34 +247,49 @@ def register(bot, _history):
         price = data["price"]
         balance = get_balance(user_id)
 
+        # رصيد غير كافٍ
         if balance is None or balance < price:
             missing = price - (balance or 0)
             bot.send_message(
                 call.message.chat.id,
-                f"""❌ رصيدك غير كافٍ لهذا الإعلان.
-            الناقص: {missing:,} ل.س"""
+                f"❌ رصيدك غير كافٍ لهذا الإعلان.\nالناقص: {missing:,} ل.س"
             )
             return
 
-        # خصم الرصيد وتعبئة الطلب
-        deduct_balance(user_id, price)
+        # ——— حجز المبلغ (وليس خصمه نهائياً) ———
+        deduct_balance(user_id, price)          # تُسجَّل معاملة «حجز»
+        new_balance = get_balance(user_id)      # الرصيد بعد الحجز
+
+        # نص يُرسل للمشرفين
+        admin_msg = (
+            f"🆕 طلب إعلان جديد\n"
+            f"👤 <code>{call.from_user.full_name}</code>  —  "
+            f"@{call.from_user.username or 'بدون يوزر'}\n"
+            f"آيدي: <code>{user_id}</code>\n\n"
+            f"🔖 عدد التكرار: {data['times']} مرّة\n"
+            f"💵 السعر: {price:,} ل.س\n"
+            f"💰 الرصيد بعد الحجز: {new_balance:,} ل.س"
+        )
+
+        # إنشاء الـ payload
         payload = {
             "type": "ads",
             "count": data["times"],
-            "price": data["price"],
+            "price": price,
             "contact": data["contact"],
             "ad_text": data["ad_text"],
             "images": data.get("images", []),
+            "reserved": price           # ← مبلغ محجوز بانتظار الموافقة
         }
 
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
-            request_text="إعلان جديد بانتظار الموافقة",
+            request_text=admin_msg,
             payload=payload,
         )
 
-        # معالجة فورية إن وُجد مشرفون متصلون
+        # معالجة فورية إذا كان هناك مشرفون متصلون
         process_queue(bot)
 
         bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته.")
