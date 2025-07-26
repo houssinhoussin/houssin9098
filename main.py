@@ -86,6 +86,7 @@ from handlers import (
     wallet,
     support,
     admin,
+    ads,
     recharge,
     cash_transfer,
     companies_transfer,
@@ -94,8 +95,7 @@ from handlers import (
     wholesale,
     university_fees,
     internet_providers,
-    bill_and_units,
-    ads,
+    bill_and_units,  
 )
 from handlers.keyboards import (
     main_menu,
@@ -125,6 +125,7 @@ start.register(bot, user_state)
 wallet.register(bot, history)
 support.register(bot, user_state)
 admin.register(bot, user_state)
+ads.register(bot, user_state)
 recharge.register(bot, user_state)
 cash_transfer.register(bot, history)
 companies_transfer.register_companies_transfer(bot, history)
@@ -134,9 +135,7 @@ media_services.register(bot, user_state)
 wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
-ads.register(bot, user_state)
 CHANNEL_USERNAME = "@shop100sho"
-
 def notify_channel_on_start(bot):
     try:
         markup = types.InlineKeyboardMarkup()
