@@ -220,6 +220,29 @@ def register(bot, history):
 
             elif typ == "recharge":
                 amount = payload.get("amount", 0)
+                photo_id = payload.get("photo")  # ← جلب file_id للصورة من البايلود
+
+                # أرسل الصورة للأدمن أولاً مع نص الطلب إذا الصورة موجودة
+                if photo_id:
+                    bot.send_photo(
+                        call.message.chat.id,
+                        photo_id,
+                        caption=f"💳 طلب شحن محفظة\n"
+                                f"المستخدم: {user_id}\n"
+                                f"المبلغ: {amount:,} ل.س\n"
+                                f"اسم المستخدم: @{req.get('username','-')}\n"
+                                f"ID: {user_id}"
+                    )
+                else:
+                    bot.send_message(
+                        call.message.chat.id,
+                        f"💳 طلب شحن محفظة\n"
+                        f"المستخدم: {user_id}\n"
+                        f"المبلغ: {amount:,} ل.س\n"
+                        f"(بدون صورة)"
+                    )
+
+                # تنفيذ عملية الشحن للمستخدم كالمعتاد
                 delete_pending_request(request_id)
                 add_balance(user_id, amount)
                 bot.send_message(
