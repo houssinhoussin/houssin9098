@@ -227,15 +227,15 @@ def register(bot, history):
                 # حذف الطلب من الطابور
                 delete_pending_request(request_id)
 
-               # إعلام المستخدم
-               bot.send_message(
-                   user_id,
-                   f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح."
-               )
+                # إعلام المستخدم
+                bot.send_message(
+                    user_id,
+                    f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح."
+                )
 
-               bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
-               queue_cooldown_start(bot)
-               return
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
+                queue_cooldown_start(bot)
+                return
 
                 
             elif typ == "ads":
