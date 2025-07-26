@@ -239,18 +239,28 @@ def register(bot, history):
 
                 
             elif typ == "ads":
+                reserved = payload.get("reserved", payload.get("price", 0))
                 count    = payload.get("count", 1)
-                price    = payload.get("price", 0)
                 contact  = payload.get("contact", "")
                 ad_text  = payload.get("ad_text", "")
                 images   = payload.get("images", [])
-                add_channel_ad(user_id, count, price, contact, ad_text, images)
-                # بعد إضافة الإعلان للجدول يتم إعلام العميل
+
+                # إدراج الإعلان في جدول القناة
+                add_channel_ad(user_id, count, reserved, contact, ad_text, images)
+
+                # حذف الطلب من الطابور
                 delete_pending_request(request_id)
-                bot.send_message(user_id, "✅ تم قبول إعلانك وسيتم نشره في القناة حسب الجدولة.")
+
+                bot.send_message(
+                    user_id,
+                    f"✅ تم قبول إعلانك وسيتم نشره في القناة حسب الجدولة.\n"
+                    f"تم خصم {reserved:,} ل.س.",
+                    parse_mode="HTML"
+                )
                 bot.answer_callback_query(call.id, "✅ تم قبول الإعلان")
                 queue_cooldown_start(bot)
                 return
+
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
                 
