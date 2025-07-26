@@ -219,45 +219,40 @@ def register(bot, history):
                 return
 
             elif typ == "recharge":
-                amount = payload.get("amount", 0)
-                photo_id = payload.get("photo")  # ← جلب file_id للصورة من البايلود
-                username = req.get("username", "-")
-              
-                # زرار الإجراءات: تأكيد – إلغاء – تأجيل
-                markup = types.InlineKeyboardMarkup()
-                markup.add(
-                    types.InlineKeyboardButton("✅ تأكيد", callback_data=f"admin_accept_{request_id}"),
-                    types.InlineKeyboardButton("❌ إلغاء", callback_data=f"admin_cancel_{request_id}"),
-                    types.InlineKeyboardButton("🔁 تأجيل", callback_data=f"admin_postpone_{request_id}")
-                )
+                photo_id  = payload.get("photo")
 
-                # الرسالة التي ستُرسل للأدمن
+                # تحقق من وجود الصورة – إن لم توجد، احذف الطلب فورًا
+                if not photo_id:
+                    bot.send_message(call.message.chat.id, "❌ الطلب غير مكتمل (بدون صورة). تم حذفه.")
+                    delete_pending_request(request_id)
+                    bot.answer_callback_query(call.id, "❌ تم حذف الطلب لعدم وجود صورة.")
+                    return
+
+                amount    = payload.get("amount", 0)
+                method    = payload.get("method", "غير محددة")
+                code      = payload.get("code", "-")
+                username  = req.get("username", "بدون معرف")
+
                 caption = (
-                    f"💳 <b>طلب شحن محفظة</b>\n"
-                    f"👤 المستخدم: @{username}\n"
-                    f"🆔 ID: <code>{user_id}</code>\n"
-                    f"💰 المبلغ: {amount:,} ل.س"
+                    f"💳 <b>طلب شحن محفظة جديد:</b>\n"
+                    f"👤 <b>المستخدم:</b> {username}\n"
+                    f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                    f"💰 <b>المبلغ:</b> {amount:,} ل.س\n"
+                    f"💳 <b>الطريقة:</b> {method}\n"
+                    f"🧾 <b>رقم الإشعار:</b> <code>{code}</code>"
                 )
 
-                if photo_id:
-                    bot.send_photo(
-                        call.message.chat.id,
-                        photo_id,
-                        caption=caption,
-                        parse_mode="HTML",
-                        reply_markup=markup
-                    )
-                else:
-                    bot.send_message(
-                        call.message.chat.id,
-                        caption,
-                        parse_mode="HTML",
-                        reply_markup=markup
-                    )
+                # إرسال رسالة واحدة فقط للأدمن مع الصورة والتفاصيل
+                bot.send_photo(
+                    call.message.chat.id,
+                    photo_id,
+                    caption=caption,
+                    parse_mode="HTML"
+                )
 
-                # لا يتم تنفيذ الشحن أو حذف الطلب حتى ضغط زر التأكيد
-                bot.answer_callback_query(call.id, "📨 تم إرسال الطلب، بانتظار إجراءك.")
+                # يتم توليد الأزرار من الطابور الرئيسي بعد هذا return
                 return
+
                 
             elif typ == "ads":
                 count    = payload.get("count", 1)
