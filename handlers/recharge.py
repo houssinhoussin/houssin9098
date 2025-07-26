@@ -176,12 +176,23 @@ def register(bot, history):
         )
 
         logging.info(f"[RECHARGE][{user_id}] تأكيد معلومات الشحن: مبلغ {amount}")
-        bot.send_message(
-            msg.chat.id,
-            confirm_text,
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
+        # هنا التعديل
+        photo_id = data.get("photo")
+        if photo_id:
+            bot.send_photo(
+                msg.chat.id,
+                photo_id,
+                caption=confirm_text,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+       else:
+            bot.send_message(
+                msg.chat.id,
+                confirm_text,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
 
     @bot.callback_query_handler(
         func=lambda call: call.data in ["user_confirm_recharge", "user_edit_recharge", "user_cancel_recharge"]
