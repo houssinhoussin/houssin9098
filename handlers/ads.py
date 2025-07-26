@@ -125,12 +125,29 @@ def register(bot, history):
             return
 
         file_id = None
+
         if msg.content_type == "photo":
             file_id = msg.photo[-1].file_id
-        elif msg.content_type == "document" and msg.document.mime_type.startswith("image/"):
-            file_id = msg.document.file_id
-        if file_id is None:
+        elif msg.content_type == "document":
+            mime_type = getattr(msg.document, "mime_type", "")
+            if mime_type.startswith("image/"):
+                file_id = msg.document.file_id
+
+        if not file_id:
+            bot.send_message(msg.chat.id, "❌ الملف المرسل ليس صورة صالحة.")
             return
+
+        # متابعة إضافة الصورة
+        state.setdefault("images", []).append(file_id)
+        user_ads_state[user_id] = state
+
+        if len(state["images"]) >= state["expect_images"]:
+            state["step"] = "confirm"
+            preview_ad(msg, user_id)
+        else:
+            remaining = state["expect_images"] - len(state["images"])
+            bot.send_message(msg.chat.id, f"📸 أرسل الصورة المتبقية ({remaining} متبقية).")
+
 
         state.setdefault("images", []).append(file_id)
         if len(state["images"]) >= state["expect_images"]:
