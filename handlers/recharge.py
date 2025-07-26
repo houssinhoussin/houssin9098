@@ -4,7 +4,7 @@ from services.recharge_service import apply_recharge
 from handlers import keyboards  # ✅ الكيبورد الموحد
 from services.wallet_service import register_user_if_not_exist  # ✅ الاستيراد الجديد
 from types import SimpleNamespace  # 🔴 التصحيح هنا
-from services.queue_service import add_pending_request
+from services.queue_service import add_pending_request, process_queue
 import logging
 
 recharge_requests = {}
