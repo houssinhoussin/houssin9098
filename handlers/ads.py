@@ -255,7 +255,7 @@ def register(bot, _history):
             user_ads_state.pop(user_id, None)
             return
 
-        price = data["price"]
+        price   = data["price"]
         balance = get_balance(user_id)
 
         # رصيد غير كافٍ
@@ -267,10 +267,13 @@ def register(bot, _history):
             )
             return
 
-        # ——— حجز المبلغ (وليس خصمه نهائياً) ———
+        # ——— حجز المبلغ (خصم مؤقت) ———
+        deduct_balance(user_id, price)           # حجز
+        new_balance = get_balance(user_id)       # رصيد بعد الحجز
+
         # نص يُرسل للمشرفين
         admin_msg = (
-            f"🆕 طلب إعلان جديد\n"
+            "🆕 طلب إعلان جديد\n"
             f"👤 <code>{call.from_user.full_name}</code>  —  "
             f"@{call.from_user.username or 'بدون يوزر'}\n"
             f"آيدي: <code>{user_id}</code>\n\n"
@@ -287,7 +290,7 @@ def register(bot, _history):
             "contact": data["contact"],
             "ad_text": data["ad_text"],
             "images": data.get("images", []),
-            "reserved": price           # ← مبلغ محجوز بانتظار الموافقة
+            "reserved": price        # مبلغ محجوز بانتظار موافقة الإدارة
         }
 
         add_pending_request(
@@ -302,3 +305,4 @@ def register(bot, _history):
 
         bot.send_message(user_id, "✅ تم إرسال إعلانك إلى الإدارة لمراجعته.")
         user_ads_state.pop(user_id, None)
+
