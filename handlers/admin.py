@@ -236,14 +236,17 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
                 return
-
-                
+              
             elif typ == "ads":
                 reserved = payload.get("reserved", payload.get("price", 0))
                 count    = payload.get("count", 1)
                 contact  = payload.get("contact", "")
                 ad_text  = payload.get("ad_text", "")
                 images   = payload.get("images", [])
+
+                # خصم نهائي للمبلغ (بعد استرجاع الحجز أعلاه)
+                if reserved:
+                    deduct_balance(user_id, reserved)
 
                 # إدراج الإعلان في جدول القناة
                 add_channel_ad(user_id, count, reserved, contact, ad_text, images)
