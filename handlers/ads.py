@@ -67,7 +67,7 @@ def register(bot, _history):
             call.message.chat.id,
             "✏️ أرسل رقم التواصل، صفحتك أو موقعك (سيظهر للإعلان):"
         )
-        # ----------------------------------------------------------------
+    # ----------------------------------------------------------------
     # 1‑bis) متابعة إلى باقات الإعلان
     # ----------------------------------------------------------------
     def send_ads_menu(chat_id):
@@ -81,6 +81,17 @@ def register(bot, _history):
     def proceed_to_ads(call):
         bot.answer_callback_query(call.id)
         send_ads_menu(call.message.chat.id)
+        
+    @bot.callback_query_handler(func=lambda call: call.data == "ads_back")
+    def ads_back(call):
+        bot.answer_callback_query(call.id)
+        # هنا يمكنك إعادة المستخدم للقائمة الرئيسية أو إغلاق الكيبورد
+        bot.send_message(
+            call.message.chat.id,
+            "عدنا إلى القائمة الرئيسية.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+
 
     # ----------------------------------------------------------------
     # 3) استقبال وسيلة التواصل
