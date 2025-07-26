@@ -216,8 +216,7 @@ def register(bot, history):
             missing = price - (balance or 0)
             bot.send_message(
                 call.message.chat.id,
-                f"❌ رصيدك غير كافٍ لهذا الإعلان.
-الناقص: {missing:,} ل.س",
+                f"❌ رصيدك غير كافٍ لهذا الإعلان.\nالناقص: {missing:,} ل.س"
             )
             return
 
