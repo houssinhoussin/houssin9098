@@ -227,7 +227,7 @@ def register(bot, history):
                     "photo": data["photo"],
                 }
             )
-
+            process_queue(bot)
             bot.send_message(
                 user_id,
                 "📨 تم إرسال طلبك إلى الإدارة، الرجاء الانتظار.",
