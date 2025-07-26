@@ -59,10 +59,7 @@ def register(bot, history):
 
         bot.send_message(
             msg.chat.id,
-            f"📞 سيتم عرض للتواصل:
-{msg.text}
-
-هل تريد المتابعة؟",
+            f"📞 سيتم عرض للتواصل:\n{msg.text}\n\nهل تريد المتابعة؟",
             reply_markup=markup,
         )
 
