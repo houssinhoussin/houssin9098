@@ -165,17 +165,11 @@ def register(bot, history):
             except Exception:
                 bot.send_message(msg.chat.id, "⚠️ تعذّر عرض الصور، سيتم المتابعة بدونها.")
         ad_preview = (
-            "🚀✨✨ إعلان مميز من المتجر العالمي ✨✨🚀
-
-"
-            f"{data['ad_text']}
-"
-            "━━━━━━━━━━━━━━━━━━
-"
-            "📱 للتواصل:
-"
-            f"{data['contact']}
-"
+            "<b><u>📢 إعـــــــلان</u></b>\n\n"
+            f"{data['ad_text']}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📱 للتواصل:\n"
+            f"{data['contact']}\n"
             "━━━━━━━━━━━━━━━━━━"
         )
         markup = types.InlineKeyboardMarkup()
@@ -184,7 +178,7 @@ def register(bot, history):
             types.InlineKeyboardButton("📝 تعديل الإعلان", callback_data="ads_edit"),
             types.InlineKeyboardButton("❌ إلغاء", callback_data="ads_cancel"),
         )
-        bot.send_message(msg.chat.id, ad_preview, reply_markup=markup)
+        bot.send_message(msg.chat.id, ad_preview, reply_markup=markup, parse_mode="HTML")
 
     @bot.callback_query_handler(func=lambda call: call.data == "ads_edit")
     def edit_ad(call):
