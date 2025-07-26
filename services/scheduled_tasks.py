@@ -2,8 +2,7 @@ import threading
 from datetime import datetime, timedelta
 from telebot import types
 from services.ads_service import get_active_ads, increment_ad_posted, expire_old_ads
-
-CHANNEL_USERNAME = "@my_fast_shop_bot"  # غيّر هذا إذا كان لديك قناة أخرى
+from config import CHANNEL_USERNAME
 
 def post_ads_task(bot):
     now = datetime.utcnow()
