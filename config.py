@@ -20,6 +20,7 @@ ADMIN_MAIN_USERNAME = "@Houssin363"
 # ✅ قناة الاشتراك الإجباري
 FORCE_SUB_CHANNEL_ID = -1002852510917
 FORCE_SUB_CHANNEL_USERNAME = "@shop100sho"
+CHANNEL_USERNAME = FORCE_SUB_CHANNEL_USERNAME
 
 # ✅ رابط Webhook الخاص بـ Render
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-shop-bot-lo4t.onrender.com/")
