@@ -155,12 +155,29 @@ def register(bot, history):
                 queue_cooldown_start(bot)
                 return
 
-            elif typ == "internet":
+           elif typ == "internet":
                 reserved = payload.get("reserved", 0)
                 provider = payload.get("provider")
                 speed    = payload.get("speed")
                 phone    = payload.get("phone")
+
+                # خصم نهائي (add_purchase يخصم داخلياً)
                 add_purchase(user_id, reserved, f"إنترنت {provider} {speed}", reserved, phone)
+
+                # حذف الطلب من الطابور
+                delete_pending_request(request_id)
+
+                # إشعار العميل
+                bot.send_message(
+                    user_id,
+                    f"✅ تم دفع فاتورة الإنترنت ({provider}) بسرعة {speed} لرقم `{phone}` بنجاح.\n"
+                    f"تم خصم {reserved:,} ل.س من محفظتك.",
+                    parse_mode="HTML"
+                )
+
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
 
             elif typ == "cash_transfer":
                 reserved  = payload.get("reserved", 0)
