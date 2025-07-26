@@ -221,36 +221,42 @@ def register(bot, history):
             elif typ == "recharge":
                 amount = payload.get("amount", 0)
                 photo_id = payload.get("photo")  # ← جلب file_id للصورة من البايلود
+                username = req.get("username", "-")
+              
+                # زرار الإجراءات: تأكيد – إلغاء – تأجيل
+                markup = types.InlineKeyboardMarkup()
+                markup.add(
+                    types.InlineKeyboardButton("✅ تأكيد", callback_data=f"admin_accept_{request_id}"),
+                    types.InlineKeyboardButton("❌ إلغاء", callback_data=f"admin_cancel_{request_id}"),
+                    types.InlineKeyboardButton("🔁 تأجيل", callback_data=f"admin_postpone_{request_id}")
+                )
 
-                # أرسل الصورة للأدمن أولاً مع نص الطلب إذا الصورة موجودة
+                # الرسالة التي ستُرسل للأدمن
+                caption = (
+                    f"💳 <b>طلب شحن محفظة</b>\n"
+                    f"👤 المستخدم: @{username}\n"
+                    f"🆔 ID: <code>{user_id}</code>\n"
+                    f"💰 المبلغ: {amount:,} ل.س"
+                )
+
                 if photo_id:
                     bot.send_photo(
                         call.message.chat.id,
                         photo_id,
-                        caption=f"💳 طلب شحن محفظة\n"
-                                f"المستخدم: {user_id}\n"
-                                f"المبلغ: {amount:,} ل.س\n"
-                                f"اسم المستخدم: @{req.get('username','-')}\n"
-                                f"ID: {user_id}"
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_markup=markup
                     )
                 else:
                     bot.send_message(
                         call.message.chat.id,
-                        f"💳 طلب شحن محفظة\n"
-                        f"المستخدم: {user_id}\n"
-                        f"المبلغ: {amount:,} ل.س\n"
-                        f"(بدون صورة)"
+                        caption,
+                        parse_mode="HTML",
+                        reply_markup=markup
                     )
 
-                # تنفيذ عملية الشحن للمستخدم كالمعتاد
-                delete_pending_request(request_id)
-                add_balance(user_id, amount)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح."
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
-                queue_cooldown_start(bot)
+                # لا يتم تنفيذ الشحن أو حذف الطلب حتى ضغط زر التأكيد
+                bot.answer_callback_query(call.id, "📨 تم إرسال الطلب، بانتظار إجراءك.")
                 return
                 
             elif typ == "ads":
