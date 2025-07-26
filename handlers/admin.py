@@ -219,39 +219,23 @@ def register(bot, history):
                 return
 
             elif typ == "recharge":
-                photo_id  = payload.get("photo")
-
-                # تحقق من وجود الصورة – إن لم توجد، احذف الطلب فورًا
-                if not photo_id:
-                    bot.send_message(call.message.chat.id, "❌ الطلب غير مكتمل (بدون صورة). تم حذفه.")
-                    delete_pending_request(request_id)
-                    bot.answer_callback_query(call.id, "❌ تم حذف الطلب لعدم وجود صورة.")
-                    return
-
                 amount    = payload.get("amount", 0)
-                method    = payload.get("method", "غير محددة")
-                code      = payload.get("code", "-")
-                username  = req.get("username", "بدون معرف")
 
-                caption = (
-                    f"💳 <b>طلب شحن محفظة جديد:</b>\n"
-                    f"👤 <b>المستخدم:</b> {username}\n"
-                    f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
-                    f"💰 <b>المبلغ:</b> {amount:,} ل.س\n"
-                    f"💳 <b>الطريقة:</b> {method}\n"
-                    f"🧾 <b>رقم الإشعار:</b> <code>{code}</code>"
-                )
+                # تنفيذ عملية الشحن
+                add_balance(user_id, amount)
 
-                # إرسال رسالة واحدة فقط للأدمن مع الصورة والتفاصيل
-                bot.send_photo(
-                    call.message.chat.id,
-                    photo_id,
-                    caption=caption,
-                    parse_mode="HTML"
-                )
+                # حذف الطلب من الطابور
+                delete_pending_request(request_id)
 
-                # يتم توليد الأزرار من الطابور الرئيسي بعد هذا return
-                return
+               # إعلام المستخدم
+               bot.send_message(
+                   user_id,
+                   f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح."
+               )
+
+               bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
+               queue_cooldown_start(bot)
+               return
 
                 
             elif typ == "ads":
