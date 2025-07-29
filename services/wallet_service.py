@@ -259,3 +259,15 @@ def get_wholesale_purchases(user_id: int):
         wholesale_items.append(f"جملة: {item['wholesale_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
     return wholesale_items if wholesale_items else ["لا توجد مشتريات جملة."]
 
+# التحقق من موافقة الادمن على عرض المشتريات الإضافية
+def user_has_admin_approval(user_id):
+    response = (
+        get_table("houssin363")
+        .select("admin_approved")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if response.data:
+        return response.data[0].get("admin_approved", False)
+    return False
