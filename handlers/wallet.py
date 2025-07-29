@@ -51,14 +51,6 @@ def show_purchases(bot, message, history=None):
     name = message.from_user.full_name
     register_user_if_not_exist(user_id, name)
     purchases = get_purchases(user_id)  # الآن يحذف القديم تلقائيًا
-    # التحقق من موافقة الادمن قبل عرض المشتريات الإضافية
-    if not user_has_admin_approval(user_id):
-        bot.send_message(
-            message.chat.id,
-            "⏳ مشترياتك قيد المراجعة من قبل الأدمن. سيتم إظهارها بعد الموافقة.",
-            reply_markup=keyboards.wallet_menu()
-        )
-        return
 
     # جلب المشتريات من الملفات الإضافية
     ads_purchases = get_ads_purchases(user_id)
