@@ -203,3 +203,59 @@ def get_product_by_id(product_id: int):
 def _select_single(table_name, field, value):
     response = get_table(table_name).select(field).eq(field, value).limit(1).execute()
     return response.data[0][field] if response.data else None
+# دالة لجلب مشتريات الإعلانات
+def get_ads_purchases(user_id: int):
+    response = get_table('ads_purchases').select("*").eq("user_id", user_id).execute()
+    ads_items = []
+    for item in response.data or []:
+        ads_items.append(f"إعلان: {item['ad_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return ads_items if ads_items else ["لا توجد مشتريات إعلانات."]
+
+# دالة لجلب مشتريات الفواتير والوحدات
+def get_bill_and_units_purchases(user_id: int):
+    response = get_table('bill_and_units_purchases').select("*").eq("user_id", user_id).execute()
+    bills_items = []
+    for item in response.data or []:
+        bills_items.append(f"فاتورة: {item['bill_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return bills_items if bills_items else ["لا توجد مشتريات فواتير ووحدات."]
+
+# دالة لجلب مشتريات التحويل النقدي
+def get_cash_transfer_purchases(user_id: int):
+    response = get_table('cash_transfer_purchases').select("*").eq("user_id", user_id).execute()
+    cash_items = []
+    for item in response.data or []:
+        cash_items.append(f"تحويل نقدي: {item['transfer_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return cash_items if cash_items else ["لا توجد مشتريات تحويل نقدي."]
+
+# دالة لجلب مشتريات تحويلات الشركات
+def get_companies_transfer_purchases(user_id: int):
+    response = get_table('companies_transfer_purchases').select("*").eq("user_id", user_id).execute()
+    company_items = []
+    for item in response.data or []:
+        company_items.append(f"تحويل شركة: {item['company_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return company_items if company_items else ["لا توجد مشتريات تحويلات شركات."]
+
+# دالة لجلب مشتريات مزودي الإنترنت
+def get_internet_providers_purchases(user_id: int):
+    response = get_table('internet_providers_purchases').select("*").eq("user_id", user_id).execute()
+    internet_items = []
+    for item in response.data or []:
+        internet_items.append(f"مزود إنترنت: {item['provider_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return internet_items if internet_items else ["لا توجد مشتريات مزودي إنترنت."]
+
+# دالة لجلب مشتريات رسوم الجامعات
+def get_university_fees_purchases(user_id: int):
+    response = get_table('university_fees_purchases').select("*").eq("user_id", user_id).execute()
+    uni_items = []
+    for item in response.data or []:
+        uni_items.append(f"رسوم جامعة: {item['university_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return uni_items if uni_items else ["لا توجد مشتريات رسوم جامعية."]
+
+# دالة لجلب مشتريات الجملة
+def get_wholesale_purchases(user_id: int):
+    response = get_table('wholesale_purchases').select("*").eq("user_id", user_id).execute()
+    wholesale_items = []
+    for item in response.data or []:
+        wholesale_items.append(f"جملة: {item['wholesale_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
+    return wholesale_items if wholesale_items else ["لا توجد مشتريات جملة."]
+
