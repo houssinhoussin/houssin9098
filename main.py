@@ -138,18 +138,19 @@ internet_providers.register(bot)
 CHANNEL_USERNAME = "@shop100sho"
 def notify_channel_on_start(bot):
     # تم تعطيل رسالة القناة مؤقتًا
-    #try:
-        #markup = types.InlineKeyboardMarkup()
-        #markup.add(types.InlineKeyboardButton("🤖 جرّب البوت الآن", url="https://t.me/my_fast_shop_bot"))
-        #bot.send_message(
-            #CHANNEL_USERNAME,
-            #"🚦 البوت اشتغل!\n"
-            #"يا متابعينا، المحفظة صارت جاهزة… والطلبات رح تشتغل 🛒😉\n"
-            #"لو تريد تبدأ تجربة الخدمة اضغط الزر أو تابعنا دائماً هنا.",
-            #reply_markup=markup
-        #)
-    #except Exception as e:
-        #logging.warning(f"❌ لم يمكن إرسال رسالة بدء التشغيل للقناة: {e}")
+    # try:
+    #     markup = types.InlineKeyboardMarkup()
+    #     markup.add(types.InlineKeyboardButton("🤖 جرّب البوت الآن", url="https://t.me/my_fast_shop_bot"))
+    #     bot.send_message(
+    #         CHANNEL_USERNAME,
+    #         "🚦 البوت اشتغل!\n"
+    #         "يا متابعينا، المحفظة صارت جاهزة… والطلبات رح تشتغل 🛒😉\n"
+    #         "لو تريد تبدأ تجربة الخدمة اضغط الزر أو تابعنا دائماً هنا.",
+    #         reply_markup=markup
+    #     )
+    # except Exception as e:
+    #     logging.warning(f"❌ لم يمكن إرسال رسالة بدء التشغيل للقناة: {e}")
+    pass
 
 notify_channel_on_start(bot)
 
