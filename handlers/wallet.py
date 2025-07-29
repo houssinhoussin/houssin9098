@@ -8,6 +8,17 @@ from services.wallet_service import (
     _select_single,  # لاستعماله في التحقق من العميل
     get_transfers,   # ✅ الاستيراد الصحيح الجديد
 )
+from services.wallet_service import (
+    get_ads_purchases,
+    get_bill_and_units_purchases,
+    get_cash_transfer_purchases,
+    get_companies_transfer_purchases,
+    get_internet_providers_purchases,
+    get_university_fees_purchases,
+    get_wholesale_purchases,
+    user_has_admin_approval  # إضافة جديدة للتحقق من موافقة الادمن
+)
+
 from services.queue_service import add_pending_request
 import logging
 
@@ -40,23 +51,53 @@ def show_purchases(bot, message, history=None):
     name = message.from_user.full_name
     register_user_if_not_exist(user_id, name)
     purchases = get_purchases(user_id)  # الآن يحذف القديم تلقائيًا
+    # التحقق من موافقة الادمن قبل عرض المشتريات الإضافية
+    if not user_has_admin_approval(user_id):
+        bot.send_message(
+            message.chat.id,
+            "⏳ مشترياتك قيد المراجعة من قبل الأدمن. سيتم إظهارها بعد الموافقة.",
+            reply_markup=keyboards.wallet_menu()
+        )
+        return
+
+    # جلب المشتريات من الملفات الإضافية
+    ads_purchases = get_ads_purchases(user_id)
+    bill_and_units_purchases = get_bill_and_units_purchases(user_id)
+    cash_transfer_purchases = get_cash_transfer_purchases(user_id)
+    companies_transfer_purchases = get_companies_transfer_purchases(user_id)
+    internet_providers_purchases = get_internet_providers_purchases(user_id)
+    university_fees_purchases = get_university_fees_purchases(user_id)
+    wholesale_purchases = get_wholesale_purchases(user_id)
+
+    # دمج جميع المشتريات في قائمة واحدة
+    all_purchases = (
+        purchases +
+        ads_purchases +
+        bill_and_units_purchases +
+        cash_transfer_purchases +
+        companies_transfer_purchases +
+        internet_providers_purchases +
+        university_fees_purchases +
+        wholesale_purchases
+    )
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
 
-    if not purchases:
+    if not all_purchases:
         bot.send_message(
             message.chat.id,
             "📦 لا يوجد مشتريات حتى الآن.",
             reply_markup=keyboards.wallet_menu()
         )
     else:
-        text = "🛍️ مشترياتك (متاحة آخر 36 ساعة فقط):\n" + "\n".join(purchases)
+        text = "🛍️ مشترياتك:\n" + "\n".join(all_purchases)
         bot.send_message(
             message.chat.id,
             text,
             reply_markup=keyboards.wallet_menu()
         )
+
 
 # ✅ عرض سجل التحويلات
 def show_transfers(bot, message, history=None):
