@@ -146,7 +146,7 @@ def queue_cooldown_start(bot=None):
     _queue_cooldown = True
     def release():
         global _queue_cooldown
-        time.sleep(120)
+        time.sleep(60)
         _queue_cooldown = False
         if bot is not None:
             process_queue(bot)
