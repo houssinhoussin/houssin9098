@@ -120,9 +120,9 @@ def transfer_balance(from_user_id: int, to_user_id: int, amount: int, fee: int =
 
 # المشتريات
 def get_purchases(user_id: int, limit: int = 10):
-    # حذف السجلات الأقدم من 36 ساعة عند الاستعلام
+    # حذف السجلات الأقدم من 12 ساعة عند الاستعلام
     now = datetime.utcnow()
-    expire_time = now - timedelta(hours=36)
+    expire_time = now - timedelta(hours=15)
     table = get_table(PURCHASES_TABLE)
     # حذف القديم
     table.delete().eq("user_id", user_id).lt("expire_at", now.isoformat()).execute()
@@ -142,7 +142,7 @@ def get_purchases(user_id: int, limit: int = 10):
     return items
 
 def add_purchase(user_id: int, product_id: int, product_name: str, price: int, player_id: str):
-    expire_at = datetime.utcnow() + timedelta(hours=36)
+    expire_at = datetime.utcnow() + timedelta(hours=15)
     data = {
         "user_id": user_id,
         "product_id": product_id,
@@ -259,15 +259,3 @@ def get_wholesale_purchases(user_id: int):
         wholesale_items.append(f"جملة: {item['wholesale_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
     return wholesale_items if wholesale_items else ["لا توجد مشتريات جملة."]
 
-# التحقق من موافقة الادمن على عرض المشتريات الإضافية
-def user_has_admin_approval(user_id):
-    response = (
-        get_table("houssin363")
-        .select("admin_approved")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    if response.data:
-        return response.data[0].get("admin_approved", False)
-    return False
