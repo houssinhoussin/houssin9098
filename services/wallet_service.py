@@ -258,4 +258,7 @@ def get_wholesale_purchases(user_id: int):
     for item in response.data or []:
         wholesale_items.append(f"جملة: {item['wholesale_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
     return wholesale_items if wholesale_items else ["لا توجد مشتريات جملة."]
+# دالة للتحقق من موافقة الأدمن (تعطيلها بإرجاع True دائماً)
+def user_has_admin_approval(user_id):
+    return True
 
