@@ -136,8 +136,8 @@ wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
 CHANNEL_USERNAME = "@shop100sho"
-def notify_channel_on_start(bot):
-    try:
+#def notify_channel_on_start(bot):
+    #try:
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🤖 جرّب البوت الآن", url="https://t.me/my_fast_shop_bot"))
         bot.send_message(
