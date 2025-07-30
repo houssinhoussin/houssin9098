@@ -23,7 +23,7 @@ def products_menu():
         types.KeyboardButton("🎓 دفع رسوم جامعية"),
         types.KeyboardButton("تحويلات كاش و حوالات"),  # الزر الجديد المدمج
         types.KeyboardButton("🖼️ خدمات إعلانية وتصميم"),
-         types.KeyboardButton("📦 طلب احتياجات منزلية او تجارية "),
+         types.KeyboardButton("📦 طلب احتياجات منزلية او تجارية"),
         types.KeyboardButton("⬅️ رجوع")
     )
     return markup
