@@ -23,7 +23,7 @@ WHOLESALE_DESCRIPTION = """
 
 def register(bot, user_state):
 
-    @bot.message_handler(func=lambda msg: msg.text == "📦 طلب احتياجات منزلية او تجارية ")
+    @bot.message_handler(func=lambda msg: msg.text == "📦 طلب احتياجات منزلية او تجارية")
     def start_wholesale(msg):
         user_id = msg.from_user.id
         user_wholesale_state[user_id] = {"step": "products"}
