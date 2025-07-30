@@ -66,7 +66,7 @@ def register(bot, user_state):
 📍 العنوان: {data['address']}
 📞 الهاتف: {data['phone']}
 """
-process_queue(bot)
+        process_queue(bot)
         add_pending_request(
             user_id=user_id,
             username=msg.from_user.username or "بدون اسم مستخدم",
