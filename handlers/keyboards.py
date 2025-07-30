@@ -134,3 +134,12 @@ def media_services_menu():
 
 def hide_keyboard():
     return types.ReplyKeyboardRemove()
+    
+# زر القائمة Menu الثابت
+def menu_button():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(
+        types.KeyboardButton("Menu")
+    )
+    return markup
+
