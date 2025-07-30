@@ -111,7 +111,7 @@ def register(bot, user_history):
                 message.chat.id,
                 WELCOME_MESSAGE,
                 parse_mode="Markdown",
-                reply_markup=_welcome_inline_kb()
+                reply_markup=keyboards.menu_button()
             )
         except Exception as e:
             logging.error(f"[start.py] send welcome msg: {e}")
@@ -139,7 +139,7 @@ def register(bot, user_history):
                 message_id=call.message.message_id,
                 text=WELCOME_MESSAGE,
                 parse_mode="Markdown",
-                reply_markup=_welcome_inline_kb()
+                reply_markup=keyboards.menu_button()
             )
         except Exception as e:
             logging.error(f"[start.py] edit_message_text cb_check_sub: {e}")
