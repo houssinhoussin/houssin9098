@@ -66,12 +66,12 @@ def register(bot, user_state):
 📍 العنوان: {data['address']}
 📞 الهاتف: {data['phone']}
 """
-        process_queue(bot)
         add_pending_request(
             user_id=user_id,
             username=msg.from_user.username or "بدون اسم مستخدم",
             request_text=text
         )
+        process_queue(bot)
         bot.send_message(ADMIN_MAIN_ID, text)
         bot.send_message(msg.chat.id, "✅ تم إرسال طلبك للإدارة، سيتم التواصل معك قريبًا.")
         user_wholesale_state.pop(user_id, None)
