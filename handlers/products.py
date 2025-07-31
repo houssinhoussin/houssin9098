@@ -83,8 +83,10 @@ def handle_player_id(message, bot):
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton("✅ تأكيد الطلب", callback_data="final_confirm_order"),
-        types.InlineKeyboardButton("❌ إلغاء",         callback_data="cancel_order")
+        types.InlineKeyboardButton("✏️ تعديل الآيدي", callback_data="edit_player_id"),
+        types.InlineKeyboardButton("❌ إلغاء", callback_data="cancel_order")
     )
+
 
     bot.send_message(
         user_id,
@@ -270,6 +272,14 @@ def setup_inline_handlers(bot, admin_ids):
             "✅ تم إرسال طلبك للإدارة. سيتم معالجته خلال مدة من 1 إلى 4 دقائق. لن تتمكن من تقديم طلب جديد حتى معالجة هذا الطلب."
         )
         process_queue(bot)   # ← هذا السطر مهم جداً!
+    # أضف الكولباك هنا
+    @bot.callback_query_handler(func=lambda c: c.data == "edit_player_id")
+    def edit_player_id(call):
+        user_id = call.from_user.id
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
+        msg = bot.send_message(user_id, "📋 يرجى إدخال آيدي اللاعب الجديد:", reply_markup=kb)
+        bot.register_next_step_handler(msg, handle_player_id, bot)
 
 def register(bot, history):
     # تسجيل الهاندلرات للرسائل (استدعاء دالة خاصة بذلك)
