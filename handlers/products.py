@@ -96,7 +96,7 @@ def handle_player_id(message, bot):
             f"• اسم الزر: {getattr(product, 'button_name', '---')}\n"
             f"• التصنيف: {product.category}\n"
             f"• السعر: {price_syp:,} ل.س\n"
-            f"• الآيدي: <code>{player_id}</code>\n"
+            f"• آيدي اللاعب: {player_id}\n"
             f"سيتم إرسال طلبك للإدارة وسَيُخصم المبلغ فقط عند موافقة الإدارة.\n"
             f"بعد التأكيد لن تتمكن من إرسال طلب آخر حتى إنهاء الطلب الحالي."
         ),
