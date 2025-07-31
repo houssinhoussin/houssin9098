@@ -143,18 +143,7 @@ def register_message_handlers(bot, history):
     def game_handler(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-        if has_pending_request(user_id):
-            bot.send_message(
-                msg.chat.id,
-                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
-            return
-        if has_pending_request(user_id):
-            bot.send_message(
-                msg.chat.id,
-                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
-            return
+       
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
@@ -169,12 +158,6 @@ def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data.startswith("select_"))
     def on_select_product(call):
         user_id = call.from_user.id
-        if has_pending_request(user_id):
-            bot.send_message(
-                call.message.chat.id,
-                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
-            return
 
         product_id = int(call.data.split("_", 1)[1])
         selected = None
@@ -214,12 +197,6 @@ def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
         user_id = call.from_user.id
-        if has_pending_request(user_id):
-            bot.send_message(
-                call.message.chat.id,
-                "⚠️ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
-            return
         order = user_orders.get(user_id)
         if not order or "product" not in order or "player_id" not in order:
             bot.answer_callback_query(call.id, "❌ لم يتم تجهيز الطلب بالكامل.")
