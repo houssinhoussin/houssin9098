@@ -287,15 +287,6 @@ def register_bill_and_units(bot, history):
     def syr_unit_final_confirm(call):
         user_id = call.from_user.id
 
-        existing = get_table("pending_requests") \
-            .select("id") \
-            .eq("user_id", user_id) \
-            .execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id,
-                "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
-
         state = user_states[user_id]
         price = state["unit"]["price"]
 
@@ -375,15 +366,6 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "mtn_unit_final_confirm")
     def mtn_unit_final_confirm(call):
         user_id = call.from_user.id
-
-        existing = get_table("pending_requests") \
-            .select("id") \
-            .eq("user_id", user_id) \
-            .execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id,
-                "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
 
         state = user_states[user_id]
         price = state["unit"]["price"]
@@ -506,15 +488,6 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "final_confirm_syr_bill")
     def final_confirm_syr_bill(call):
         user_id = call.from_user.id
-
-        existing = get_table("pending_requests") \
-            .select("id") \
-            .eq("user_id", user_id) \
-            .execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id,
-                "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
 
         total = user_states[user_id]["amount_with_fee"]
         balance = get_balance(user_id)
@@ -643,15 +616,6 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "final_confirm_mtn_bill")
     def final_confirm_mtn_bill(call):
         user_id = call.from_user.id
-
-        existing = get_table("pending_requests") \
-            .select("id") \
-            .eq("user_id", user_id) \
-            .execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id,
-                "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى تتم معالجته."
-            )
 
         total = user_states[user_id]["amount_with_fee"]
         balance = get_balance(user_id)
