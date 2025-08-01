@@ -128,7 +128,7 @@ admin.register(bot, user_state)
 ads.register(bot, user_state)
 recharge.register(bot, user_state)
 cash_transfer.register(bot, history)
-companies_transfer.register(bot, history)
+companies_transfer.register_companies_transfer(bot, history)
 bill_and_units.register_bill_and_units(bot, user_state)
 products.register(bot, user_state)
 media_services.register(bot, user_state)
@@ -205,8 +205,8 @@ def handle_cash_transfer(msg):
 
 @bot.message_handler(func=lambda msg: msg.text == "حوالة مالية عبر شركات")
 def handle_companies_transfer(msg):
-    from handlers import companies_transfer           # استيراد الموديول نفسه
-    companies_transfer.register(bot, history)         # ← الاسم الصحيح
+    from handlers.companies_transfer import register_companies_transfer
+    register_companies_transfer(bot, history)
 
 @bot.message_handler(func=lambda msg: msg.text == "💳 تحويل رصيد سوري")
 def handle_syrian_units(msg):
