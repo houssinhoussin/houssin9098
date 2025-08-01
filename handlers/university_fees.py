@@ -32,7 +32,7 @@ def university_fee_menu():
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
         types.InlineKeyboardButton("⬅️ رجوع", callback_data="back"),
-        types.InlineKeyboardButton("🔄 ابدأ من جديد", callback_data="restart")
+        types.InlineKeyboardButton("❌ إلغاء", callback_data="uni_cancel")
     )
     return kb
 
@@ -105,6 +105,30 @@ def register_university_fees(bot, history):
             ("❌ إلغاء", "uni_cancel")
         )
         bot.send_message(msg.chat.id, text, reply_markup=kb)
+        
+    @bot.callback_query_handler(func=lambda call: call.data == "back")
+    def go_back(call):
+        user_id = call.from_user.id
+        state = user_uni_state.get(user_id, {})
+        current_step = state.get("step")
+
+        # قم بعمل منطق حسب الخطوة الحالية
+        if current_step == "national_id":
+            state["step"] = "university_name"
+            bot.edit_message_text("🏫 اكتب اسم الجامعة وفي اي محافظة:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
+        elif current_step == "university_id":
+            state["step"] = "national_id"
+            bot.edit_message_text("🆔 أدخل الرقم الوطني:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
+        elif current_step == "amount":
+            state["step"] = "university_id"
+            bot.edit_message_text("🎓 أدخل الرقم الجامعي:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
+        elif current_step == "confirm_details":
+            state["step"] = "amount"
+            bot.edit_message_text("💰 أدخل المبلغ المطلوب دفعه:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
+        else:
+            # لو رجع للخطوة الأولى أو حالة غير معروفة، أعد تعيين الخطوة
+            user_uni_state.pop(user_id, None)
+            bot.edit_message_text("❌ تم العودة للقائمة الرئيسية.", call.message.chat.id, call.message.message_id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_university_fees")
     def edit_university_fees(call):
