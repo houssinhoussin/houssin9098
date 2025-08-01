@@ -228,12 +228,7 @@ def register(bot):
         user_id = call.from_user.id
         st = user_net_state.get(user_id)
         if not st or st.get("step") != "confirm":
-            return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)
-
-        # منع الطلبات المتزامنة
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if getattr(existing, 'data', None):
-            return bot.answer_callback_query(call.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.", show_alert=True)
+            return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)  
 
         price = st["price"]
         comm  = calculate_commission(price)
