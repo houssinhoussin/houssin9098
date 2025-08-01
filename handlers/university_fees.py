@@ -122,14 +122,7 @@ def register_university_fees(bot, history):
         user_id = call.from_user.id
         state = user_uni_state.get(user_id, {})
         total = state.get("total")
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.edit_message_text(
-                "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.",
-                call.message.chat.id,
-                call.message.message_id
-            )
-            return
+        
         balance = get_balance(user_id)
         if balance is None or balance < total:
             shortage = total - (balance or 0)
