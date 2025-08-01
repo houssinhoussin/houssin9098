@@ -254,15 +254,19 @@ def register_companies_transfer(bot, history):
             ("❌ رفض الحوالة", f"admin_company_reject_{user_id}")
         )
         msg = (
-            f"طلب حوالة مالية عبر الشركات\n"
-            f"المستخدم: {user_id}\n"
-            f"اسم المستفيد: {data.get('beneficiary_name')}\n"
-            f"رقم المستفيد: {data.get('beneficiary_number')}\n"
-            f"المبلغ: {amount:,} ل.س\n"
-            f"الشركة: {data.get('company')}\n"
-            f"العمولة: {commission:,} ل.س\n"
-            f"الإجمالي: {total:,} ل.س"
+            f"💸 طلب حوالة مالية عبر الشركات\n"
+            f"-----------------------------\n"
+            f"👤 المستخدم: <code>{user_id}</code>\n"
+            f"👤 اسم المستفيد: <b>{data.get('beneficiary_name')}</b>\n"
+            f"📱 رقم المستفيد: <code>{data.get('beneficiary_number')}</code>\n"
+            f"🏢 الشركة: <b>{data.get('company')}</b>\n"
+            f"-----------------------------\n"
+            f"💰 المبلغ: <b>{amount:,} ل.س</b>\n"
+            f"🧾 العمولة: <b>{commission:,} ل.س</b>\n"
+            f"✅ الإجمالي: <b>{total:,} ل.س</b>\n"
+            f"-----------------------------"
         )
+
 
         logging.info(f"[COMPANY][{user_id}] طلب حوالة جديد: {data}")
         bot.edit_message_text(
