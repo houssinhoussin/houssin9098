@@ -31,7 +31,7 @@ _accept_pending = {}
 def register(bot, history):
     # تسجيل الهاندلرات للتحويلات
     cash_transfer.register(bot, history)
-    companies_transfer.register(bot, history)
+    companies_transfer.register_companies_transfer(bot, history)
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text))
     def handle_done(msg):
