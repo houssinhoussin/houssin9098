@@ -300,7 +300,7 @@ def register(bot, history):
                 f"🧾 العمولة: {commission:,} ل.س\n"
                 f"✅ الإجمالي: {total:,} ل.س\n"
                 f"──────────────────"
-            ),
+            )
             payload={
                 "type": "cash_transfer",
                 "number": data.get('number'),
