@@ -27,6 +27,7 @@ from services.ads_service import add_channel_ad
 
 _cancel_pending = {}
 _accept_pending = {}
+_msg_pending = {}
 
 def register(bot, history):
     # تسجيل الهاندلرات للتحويلات
@@ -331,3 +332,41 @@ def register(bot, history):
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم.")
         _accept_pending.pop(msg.from_user.id, None)
 
+    # ────────────────────────────────────────────────
+    #  أزرار ✉️ رسالة للعميل / 🖼️ صورة للعميل
+    # ────────────────────────────────────────────────
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admin_queue_message_"))
+    def cb_queue_message(c: types.CallbackQuery):
+        request_id = int(c.data.split("_")[3])
+        res = get_table("pending_requests").select("user_id").eq("id", request_id).execute()
+        if not res.data:
+            return bot.answer_callback_query(c.id, "❌ الطلب غير موجود.")
+        _msg_pending[c.from_user.id] = {"user_id": res.data[0]["user_id"], "mode": "text"}
+        bot.answer_callback_query(c.id)
+        bot.send_message(c.from_user.id, "📝 اكتب الرسالة الآن (أو /cancel لإلغاء).")
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("admin_queue_photo_"))
+    def cb_queue_photo(c: types.CallbackQuery):
+        request_id = int(c.data.split("_")[3])
+        res = get_table("pending_requests").select("user_id").eq("id", request_id).execute()
+        if not res.data:
+            return bot.answer_callback_query(c.id, "❌ الطلب غير موجود.")
+        _msg_pending[c.from_user.id] = {"user_id": res.data[0]["user_id"], "mode": "photo"}
+        bot.answer_callback_query(c.id)
+        bot.send_message(c.from_user.id, "📷 أرسل الصورة الآن (أو /cancel لإلغاء).")
+
+    @bot.message_handler(func=lambda m: m.from_user.id in _msg_pending,
+                         content_types=["text", "photo"])
+    def forward_to_client(m: types.Message):
+        data = _msg_pending.pop(m.from_user.id)            # نحصل ثم نحذف الجلسة
+        uid  = data["user_id"]
+        if data["mode"] == "text":
+            if m.content_type != "text":
+                return bot.reply_to(m, "❌ المطلوب نص فقط.")
+            bot.send_message(uid, m.text)
+        else:  # mode == photo
+            if m.content_type != "photo":
+                return bot.reply_to(m, "❌ المطلوب صورة فقط.")
+            bot.send_photo(uid, m.photo[-1].file_id, caption=m.caption or "")
+        bot.reply_to(m, "✅ أُرسلت للعميل. يمكنك الآن الضغط «تأكيد» أو «إلغاء».")
