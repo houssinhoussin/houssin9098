@@ -98,12 +98,6 @@ def register(bot, history):
         cash_type = CASH_TYPES[idx]
         user_id = call.from_user.id
 
-        # تحقق طلب معلق مسبق
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.answer_callback_query(call.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.", show_alert=True)
-            return
-
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
         if not isinstance(history.get(user_id), list):
             history[user_id] = []
@@ -133,12 +127,6 @@ def register(bot, history):
     @bot.message_handler(func=lambda msg: msg.text in CASH_TYPES)
     def handle_cash_type(msg):
         user_id = msg.from_user.id
-
-        # تحقق طلب معلق مسبق
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.send_message(msg.chat.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.")
-            return
 
         cash_type = msg.text
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
@@ -223,12 +211,6 @@ def register(bot, history):
         state["amount"] = amount
         state["commission"] = commission
         state["total"] = total
-
-        # تحقق طلب معلق مسبق عند تأكيد المبلغ
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.send_message(msg.chat.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.")
-            return
 
         state["step"] = "confirming"
         logging.info(f"[CASH][{user_id}] أدخل مبلغ التحويل: {amount}, عمولة: {commission}, الإجمالي: {total}")
