@@ -65,12 +65,6 @@ def register_companies_transfer(bot, history):
     def select_company(call):
         user_id = call.from_user.id
 
-        # تحقق طلب معلق مسبق
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.answer_callback_query(call.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.", show_alert=True)
-            return
-
         company_map = {
             "company_alharam": "شركة الهرم",
             "company_alfouad": "شركة الفؤاد",
@@ -203,12 +197,6 @@ def register_companies_transfer(bot, history):
         user_states[user_id]["commission"] = commission
         user_states[user_id]["total"] = total
 
-        # تحقق طلب معلق مسبق قبل تأكيد المبلغ
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.send_message(msg.chat.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.")
-            return
-
         user_states[user_id]["step"] = "confirming_transfer"
         kb = make_inline_buttons(
             ("❌ إلغاء", "company_commission_cancel"),
@@ -266,16 +254,16 @@ def register_companies_transfer(bot, history):
             ("❌ رفض الحوالة", f"admin_company_reject_{user_id}")
         )
         msg = (
-            f"📤 طلب حوالة مالية عبر شركات:\n"
-            f"👤 المستخدم: {user_id}\n"
-            f"👤 المستفيد: {data.get('beneficiary_name')}\n"
-            f"📱 رقم المستفيد: {data.get('beneficiary_number')}\n"
-            f"💰 المبلغ: {amount:,} ل.س\n"
-            f"🏢 الشركة: {data.get('company')}\n"
-            f"🧾 العمولة: {commission:,} ل.س\n"
-            f"✅ الإجمالي: {total:,} ل.س\n\n"
-            f"يمكنك الرد برسالة أو صورة ليصل للعميل."
+            f"طلب حوالة مالية عبر الشركات\n"
+            f"المستخدم: {user_id}\n"
+            f"اسم المستفيد: {data.get('beneficiary_name')}\n"
+            f"رقم المستفيد: {data.get('beneficiary_number')}\n"
+            f"المبلغ: {amount:,} ل.س\n"
+            f"الشركة: {data.get('company')}\n"
+            f"العمولة: {commission:,} ل.س\n"
+            f"الإجمالي: {total:,} ل.س"
         )
+
         logging.info(f"[COMPANY][{user_id}] طلب حوالة جديد: {data}")
         bot.edit_message_text(
             "✅ تم إرسال الطلب، بانتظار موافقة الإدارة.",
