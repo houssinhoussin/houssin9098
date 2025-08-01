@@ -126,7 +126,7 @@ def register(bot, history):
         )
         bot.answer_callback_query(call.id)
 
-    @bot.message_handler(func=lambda msg: msg.text == "🧧 تحويل كاش من محفظتك")
+    @bot.message_handler(func=lambda msg: msg.text == "💵 تحويل الى رصيد كاش")
     def open_cash_menu(msg):
         start_cash_transfer(bot, msg, history)
 
