@@ -128,17 +128,22 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "🧧 تحويل كاش من محفظتك")
     def open_cash_menu(msg):
+        bot.send_message(
+            msg.chat.id,
+            "🔔 *تنويه هام*\n"
+            "يمكنك من خلال هذه الخدمة تحويل رصيد محفظتك إلى شركات مثل الهرم ليستلمها من تشاء، "
+            "أو تحويلها إلى أرصدة كاش سيرياتيل أو MTN كاش.\n"
+            "اختر الطريقة المناسبة ثم تابع الخطوات.",
+            parse_mode="Markdown"
+        )
         start_cash_transfer(bot, msg, history)
+
 
     @bot.message_handler(func=lambda msg: msg.text in CASH_TYPES)
     def handle_cash_type(msg):
         user_id = msg.from_user.id
 
         # تحقق طلب معلق مسبق
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.send_message(msg.chat.id, "❌ لديك طلب قيد الانتظار، الرجاء الانتظار حتى الانتهاء.")
-            return
 
         cash_type = msg.text
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
