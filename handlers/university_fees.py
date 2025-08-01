@@ -45,7 +45,7 @@ def register_university_fees(bot, history):
         user_uni_state[user_id] = {"step": "university_name"}
         history.setdefault(user_id, []).append("university_fees_menu")
         kb = university_fee_menu()
-        bot.send_message(msg.chat.id, "🏫 اكتب اسم الجامعة أو اسم المحافظة:", reply_markup=kb)
+        bot.send_message(msg.chat.id, "🏫 اكتب اسم الجامعة وفي اي محافظة:", reply_markup=kb)
 
     @bot.message_handler(func=lambda msg: user_uni_state.get(msg.from_user.id, {}).get("step") == "university_name")
     def enter_university(msg):
