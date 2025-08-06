@@ -1,6 +1,7 @@
 from telebot import types
 from services.wallet_service import get_balance, deduct_balance
 from services.queue_service import add_pending_request, process_queue
+from handlers.keyboards import main_menu 
 
 # ----------------------------------
 # خيارات الإعلان
@@ -81,15 +82,14 @@ def register(bot, _history):
     def proceed_to_ads(call):
         bot.answer_callback_query(call.id)
         send_ads_menu(call.message.chat.id)
-        
+
     @bot.callback_query_handler(func=lambda call: call.data == "ads_back")
     def ads_back(call):
         bot.answer_callback_query(call.id)
-        # هنا يمكنك إعادة المستخدم للقائمة الرئيسية أو إغلاق الكيبورد
         bot.send_message(
             call.message.chat.id,
             "عدنا إلى القائمة الرئيسية.",
-            reply_markup=types.ReplyKeyboardRemove()
+            reply_markup=main_menu()
         )
 
 
