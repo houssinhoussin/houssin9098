@@ -264,17 +264,7 @@ def register(bot, user_state):
         if not success:
             bot.send_message(msg.chat.id, "❌ فشل التحويل. تحقق من الرصيد والمحفظة.")
             return
-        # رسالة للمحول
-        add_pending_request(
-            user_id=user_id,
-            username=msg.from_user.username or "بدون اسم مستخدم",
-            request_text=(
-                f"📤 تحويل رصيد من محفظة إلى محفظة:\n"
-                f"👤 من: {user_id}\n"
-                f"👤 إلى: {target_id}\n"
-                f"💵 المبلغ: {amount:,} ل.س"
-            )
-        )
+            
         bot.send_message(
             msg.chat.id,
             "✅ تم تحويل المبلغ بنجاح.",
