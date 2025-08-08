@@ -1,44 +1,56 @@
+# config.py
 import os
 import logging
+from dotenv import load_dotenv
 
-# إعداد تسجيل الأخطاء Logging (يُنصح أن يكون في أعلى الملف دائماً)
+# حمّل متغيرات البيئة من ملف .env (إن وجد)
+load_dotenv()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
 )
 
-# ✅ إعدادات البوت الأساسية
-API_TOKEN = "7936418161:AAGNZEMIGZEmPfYlCGQbO_vM9oQbQUVSiT4"
-BOT_USERNAME = "@my_fast_shop_bot"
-BOT_NAME = "المتجر العالمي"
-BOT_ID = 7936418161
+def _get(name, default=None, cast=None, required=False):
+    val = os.getenv(name)
+    if (val is None or val == "") and required and default is None:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    if val is None or val == "":
+        val = default
+    if cast and val is not None:
+        try:
+            val = cast(val)
+        except Exception:
+            raise RuntimeError(f"Invalid value for {name}: expected {cast.__name__}")
+    return val
 
-# ✅ معلومات الأدمن الرئيسي (حسين)
-ADMIN_MAIN_ID = 6935846121
-ADMIN_MAIN_USERNAME = "@Houssin363"
+# --- Telegram ---
+API_TOKEN    = _get("API_TOKEN", required=True)
+BOT_USERNAME = _get("BOT_USERNAME", required=True)
+BOT_NAME     = _get("BOT_NAME", "Bot")
+BOT_ID       = _get("BOT_ID", cast=int, required=True)
 
-# ✅ قناة الاشتراك الإجباري
-FORCE_SUB_CHANNEL_ID = -1002852510917
-FORCE_SUB_CHANNEL_USERNAME = "@shop100sho"
-CHANNEL_USERNAME = FORCE_SUB_CHANNEL_USERNAME
+# --- Admin ---
+ADMIN_MAIN_ID        = _get("ADMIN_MAIN_ID", cast=int)
+ADMIN_MAIN_USERNAME  = _get("ADMIN_MAIN_USERNAME")
 
-# ✅ رابط Webhook الخاص بـ Render
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-shop-bot-lo4t.onrender.com/")
+# --- Force Sub / Channel ---
+FORCE_SUB_CHANNEL_ID       = _get("FORCE_SUB_CHANNEL_ID")  # خليه نصيًا، تيليغرام يقبل -100… كنص
+FORCE_SUB_CHANNEL_USERNAME = _get("FORCE_SUB_CHANNEL_USERNAME")
+CHANNEL_USERNAME           = _get("CHANNEL_USERNAME")
 
-# ✅ إعدادات إضافية
-ADMINS = [
-    {"id": 6935846121, "name": "حسين", "username": "@Houssin363", "shift": "أساسي"},
-    # أضف الأدمن الثاني والثالث هنا لاحقاً حسب التوقيت
-]
+# --- Webhook (اختياري) ---
+WEBHOOK_URL = _get("WEBHOOK_URL")
 
-# ✅ إعدادات عامة
-LANG = "ar"
-ENCODING = "utf-8"
+# --- General ---
+LANG        = _get("LANG", "ar")
+ENCODING    = _get("ENCODING", "utf-8")
+PAYEER_RATE = _get("PAYEER_RATE", 0, cast=int)
 
-# ⚖️ سعر صرف PAYEER
-PAYEER_RATE = 9000  # كل 1 بايير = 9000 ل.س
+# --- Supabase ---
+SUPABASE_URL        = _get("SUPABASE_URL", required=True)
+SUPABASE_KEY        = _get("SUPABASE_KEY") or _get("SUPABASE_API_KEY")
+SUPABASE_TABLE_NAME = _get("SUPABASE_TABLE_NAME", "houssin363")
 
-# ✅ إعدادات Supabase
-SUPABASE_URL = "https://azortroeejjomqweintc.supabase.co"
-SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF6b3J0cm9lZWpqb21xd2VpbnRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxOTIzNjUsImV4cCI6MjA2Nzc2ODM2NX0.x3Pwq8OyRmlr7JQuEU2xRxYJtSoz67eIVzDx8Nh4muk"
-SUPABASE_TABLE_NAME = "houssin363"
+if not SUPABASE_KEY:
+    raise RuntimeError("Missing SUPABASE_KEY (or SUPABASE_API_KEY) in environment")
