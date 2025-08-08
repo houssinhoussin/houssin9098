@@ -31,11 +31,30 @@ BOT_NAME     = _get("BOT_NAME", "Bot")
 BOT_ID       = _get("BOT_ID", cast=int, required=True)
 
 # --- Admin ---
-ADMIN_MAIN_ID        = _get("ADMIN_MAIN_ID", cast=int)
-ADMIN_MAIN_USERNAME  = _get("ADMIN_MAIN_USERNAME")
+ADMIN_MAIN_ID       = _get("ADMIN_MAIN_ID", cast=int, required=True)
+ADMIN_MAIN_USERNAME = _get("ADMIN_MAIN_USERNAME")
+
+def _parse_admin_ids(s: str | None, fallback: int):
+    ids = []
+    if s:
+        for part in s.split(","):
+            p = part.strip()
+            if not p:
+                continue
+            try:
+                ids.append(int(p))
+            except ValueError:
+                raise RuntimeError(f"Invalid admin id in ADMINS: {p}")
+    if not ids and fallback is not None:
+        ids = [int(fallback)]
+    return ids
+
+# من .env: ADMINS=6935846121,123456...
+ADMINS = _parse_admin_ids(os.getenv("ADMINS"), ADMIN_MAIN_ID)
 
 # --- Force Sub / Channel ---
-FORCE_SUB_CHANNEL_ID       = _get("FORCE_SUB_CHANNEL_ID")  # خليه نصيًا، تيليغرام يقبل -100… كنص
+# نحتفظ بها كنص لأن قنوات تيليغرام IDs تكون بصيغة -100xxxx وتعمل كنص
+FORCE_SUB_CHANNEL_ID       = _get("FORCE_SUB_CHANNEL_ID")
 FORCE_SUB_CHANNEL_USERNAME = _get("FORCE_SUB_CHANNEL_USERNAME")
 CHANNEL_USERNAME           = _get("CHANNEL_USERNAME")
 
