@@ -55,24 +55,28 @@ def clear_pending_request(user_id):
     recharge_requests.pop(user_id, None)
 
 def start_recharge_menu(bot, message, history=None):
+    uid = message.from_user.id
+
+    # ✅ تطبيع history[uid] ليكون دائمًا قائمة قبل أي append
     if history is not None:
-        # تصحيح نوع history ليكون دائماً قائمة (list)
-        if not isinstance(history.get(message.from_user.id), list):
-            history[message.from_user.id] = []
-        uid = message.from_user.id
-        if not isinstance(history.get(uid), list):
+        current = history.get(uid)
+        if isinstance(current, list):
+            pass  # جاهزة
+        elif current is None:
             history[uid] = []
-        if not isinstance(history.get(uid), list):
-            history[uid] = [] if history.get(uid) is None else [history[uid]] if isinstance(history.get(uid), str) else []
+        elif isinstance(current, str):
+            history[uid] = [current]
+        else:
+            history[uid] = []
         history[uid].append("recharge_menu")
 
-
-    logging.info(f"[RECHARGE][{message.from_user.id}] فتح قائمة الشحن")
+    logging.info(f"[RECHARGE][{uid}] فتح قائمة الشحن")
     bot.send_message(
         message.chat.id,
         "💳 اختر طريقة شحن محفظتك:",
         reply_markup=keyboards.recharge_menu()
     )
+
 
 def register(bot, history):
 
