@@ -12,8 +12,7 @@ class UserStateDictLike:
         return val
 
     def __setitem__(self, user_id: int, value: str):
-        # TTL افتراضي ساعتين
-        set_state(user_id, value, ttl_minutes=120)
+        set_state(user_id, value, ttl_minutes=120)  # الحالة تنتهي تلقائيًا بعد ساعتين
 
     def pop(self, user_id: int, default=None):
         try:
