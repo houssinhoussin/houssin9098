@@ -17,9 +17,6 @@ from config import (
     WEBHOOK_URL,
 )
 
-# ---------------------------------------------------------
-# لوج عام
-# ---------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -30,9 +27,6 @@ def _unhandled_exception_hook(exc_type, exc_value, exc_tb):
     logging.critical("❌ Unhandled exception:", exc_info=(exc_type, exc_value, exc_tb))
 sys.excepthook = _unhandled_exception_hook
 
-# ---------------------------------------------------------
-# إنشاء البوت + فحص التوكن
-# ---------------------------------------------------------
 def check_api_token(token: str) -> None:
     try:
         test_bot = telebot.TeleBot(token)
@@ -46,21 +40,14 @@ check_api_token(API_TOKEN)
 
 bot = telebot.TeleBot(API_TOKEN, parse_mode=TELEGRAM_PARSE_MODE)
 
-# نحذف أي ويبهوك سابق حتى لا يحدث 409 عند الـ polling
 try:
     bot.delete_webhook(drop_pending_updates=True)
 except Exception as e:
     logging.warning(f"⚠️ لم يتم حذف Webhook بنجاح: {e}")
 
 if IS_WEBHOOK:
-    logging.warning(
-        "⚠️ تم ضبط WEBHOOK_URL في .env، لكن هذا التطبيق يعمل بنمط Polling. "
-        "سيتم تجاهل الويبهوك واستخدام polling."
-    )
+    logging.warning("⚠️ تم ضبط WEBHOOK_URL في .env، لكن هذا التطبيق يعمل بنمط Polling. سيتم تجاهل الويبهوك.")
 
-# ---------------------------------------------------------
-# استيراد الهاندلرز والخدمات (مرّة واحدة)
-# ---------------------------------------------------------
 from handlers import (
     start,
     wallet,
@@ -91,18 +78,14 @@ from handlers.keyboards import (
     media_services_menu,
     transfers_menu,
 )
-from services.queue_service import process_queue
-from services.scheduled_tasks import post_ads_task
 
-# ---------------------------------------------------------
-# حالة/تاريخ (لبعض الهاندلرز التي ما زالت تحتاجهما)
-# ---------------------------------------------------------
+# ✅ مهم: استيراد وتشغيل الثريدات الخلفية
+from services.queue_service import process_queue
+from services.scheduled_tasks import post_ads_task, start_daily_maintenance
+
 user_state: dict[int, str] = {}
 history: dict[int, list] = {}
 
-# ---------------------------------------------------------
-# تسجيل جميع الهاندلرز (بدون تكرار)
-# ---------------------------------------------------------
 start.register(bot, user_state)
 wallet.register(bot, history)
 support.register(bot, user_state)
@@ -118,45 +101,29 @@ wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
 
-# ربط نظام أزرار المنتجات (حسب كودك)
 ADMIN_IDS = [int(os.getenv("ADMIN_MAIN_ID", "0"))] if os.getenv("ADMIN_MAIN_ID") else []
 try:
     products.setup_inline_handlers(bot, ADMIN_IDS)
 except Exception as e:
     logging.warning(f"⚠️ setup_inline_handlers(products) فشل: {e}")
 
-# ---------------------------------------------------------
-# إشعار قناة (اختياري/مُعطّل مثل كودك)
-# ---------------------------------------------------------
 def notify_channel_on_start(_bot):
-    # مُعطّل بحسب كودك الأصلي
     pass
-
 notify_channel_on_start(bot)
 
-# ---------------------------------------------------------
-# خادم صحي بسيط (حتى تبقى الخدمة حيّة على Render)
-# يستخدم المنفذ من البيئة (Render يمرر PORT) وإلا 8081
-# ---------------------------------------------------------
 PORT = int(os.getenv("PORT", "8081"))
-
 def run_dummy_server():
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), handler) as httpd:
         logging.info(f"🔌 Health server listening on port {PORT}")
         httpd.serve_forever()
-
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-# ---------------------------------------------------------
-# ثريدات خلفية: الطابور + مجدول الإعلانات
-# ---------------------------------------------------------
+# ✅ تشغيل الطابور + مجدول الإعلانات + صيانة يومية
 threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
 threading.Thread(target=post_ads_task, args=(bot,), daemon=True).start()
+start_daily_maintenance(bot)  # يشغّل ثريد داخلي يومي
 
-# ---------------------------------------------------------
-# زر الرجوع الذكي (بدون تعديل على أوامرك)
-# ---------------------------------------------------------
 @bot.message_handler(func=lambda msg: msg.text == "⬅️ رجوع")
 def handle_back(msg):
     user_id = msg.from_user.id
@@ -180,9 +147,6 @@ def handle_back(msg):
         bot.send_message(msg.chat.id, "⬅️ عدت إلى البداية.", reply_markup=main_menu())
         user_state[user_id] = "main_menu"
 
-# ---------------------------------------------------------
-# ربط أزرار رئيسية بخدماتها (كما في كودك)
-# ---------------------------------------------------------
 @bot.message_handler(func=lambda msg: msg.text == "تحويلات كاش و حوالات")
 def handle_transfers(msg):
     bot.send_message(
@@ -228,7 +192,6 @@ def handle_media(msg):
     from handlers.media_services import show_media_services
     show_media_services(bot, msg, user_state)
 
-# شركات الحوالات (حسب نصوصك)
 @bot.message_handler(func=lambda msg: msg.text == "شركة الهرم")
 def handle_al_haram(msg):
     kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
@@ -271,9 +234,6 @@ def handle_shakhashir(msg):
     )
     user_state[msg.from_user.id] = "shakhashir_start"
 
-# ---------------------------------------------------------
-# بدء البولّينغ مع إعادة محاولة
-# ---------------------------------------------------------
 def start_polling():
     logging.info("🤖 البوت يعمل الآن… (Long Polling)")
     while True:
