@@ -108,7 +108,7 @@ history: dict[int, list] = {}
 # ---------------------------------------------------------
 # تسجيل جميع الهاندلرز (تمرير user_state أو history حسب الحاجة)
 # ---------------------------------------------------------
-start.register(bot, user_state)
+start.register(bot, history)
 wallet.register(bot, history)
 support.register(bot, user_state)
 admin.register(bot, user_state)
