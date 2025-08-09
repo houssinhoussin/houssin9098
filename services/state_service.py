@@ -1,20 +1,40 @@
 # services/state_service.py
 from __future__ import annotations
 import datetime as dt
-from typing import Any, Optional, Dict
-from database.db import get_table
 import logging
+from typing import Any, Optional, Dict
 
-STATE_TABLE = "user_state"
+import httpx
+from database.db import get_table
+from config import TABLE_USER_STATE as _TABLE_USER_STATE  # إن لم يوجد ستقع للبديل أدناه
+from utils.retry import retry
+
+# اسم الجدول من config أو الافتراضي
+STATE_TABLE = _TABLE_USER_STATE or "user_state"
 
 def _now_utc() -> dt.datetime:
-    return dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
+    # نُعيد datetime واعٍ بالمنطقة (UTC)
+    return dt.datetime.now(tz=dt.timezone.utc)
+
+def _parse_iso(s: str) -> Optional[dt.datetime]:
+    if not s:
+        return None
+    try:
+        # يدعم "YYYY-MM-DDTHH:MM:SS[.fff][±offset]" أو بدون offset
+        d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        # لو نايف (بدون tzinfo) اعتبره UTC
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=dt.timezone.utc)
+        return d.astimezone(dt.timezone.utc)
+    except Exception:
+        return None
 
 def _to_ts(secs: Optional[int]) -> Optional[str]:
     if not secs:
         return None
     return (_now_utc() + dt.timedelta(seconds=secs)).isoformat()
 
+@retry((httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError, Exception), what="upsert user state")
 def set_state(user_id: int, key: str, value: Dict[str, Any], ttl_seconds: Optional[int] = None):
     """
     يحفظ/يحدث حالة مستخدم (UPSERT) لقيمة JSON، مع خيار مدة صلاحية (TTL).
@@ -36,6 +56,7 @@ def set_state(user_id: int, key: str, value: Dict[str, Any], ttl_seconds: Option
         .execute()
     )
 
+@retry((httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError, Exception), what="select user state")
 def get_state(user_id: int, key: str) -> Dict[str, Any]:
     """
     يرجع JSON الحالة (أو {} لو غير موجود، أو منتهي صلاحية)
@@ -52,18 +73,24 @@ def get_state(user_id: int, key: str) -> Dict[str, Any]:
     if not rows:
         return {}
     row = rows[0]
+
     # تحقق من الانقضاء
-    exp = row.get("expires_at")
-    if exp:
-        try:
-            if dt.datetime.fromisoformat(exp) < _now_utc():
-                # منتهي → احذفه وارجع {}
-                delete_state(user_id, key)
+    exp_raw = row.get("expires_at")
+    if exp_raw:
+        exp_dt = _parse_iso(exp_raw)
+        if exp_dt:
+            if exp_dt < _now_utc():
+                try:
+                    delete_state(user_id, key)
+                except Exception:
+                    logging.warning("Failed to delete expired state row; ignoring.")
                 return {}
-        except Exception:
+        else:
             logging.warning("Invalid expires_at on state row; ignoring.")
+
     return row.get("state") or {}
 
+@retry((httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError, Exception), what="delete user state")
 def delete_state(user_id: int, key: str):
     """
     حذف حالة مفتاح واحد للمستخدم.
@@ -76,12 +103,14 @@ def delete_state(user_id: int, key: str):
         .execute()
     )
 
+@retry((httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError, Exception), what="clear user states")
 def clear_user(user_id: int):
     """
     حذف جميع حالات المستخدم (تنظيف بعد إنهاء العميل).
     """
     return get_table(STATE_TABLE).delete().eq("user_id", user_id).execute()
 
+@retry((httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError, Exception), what="cleanup expired states")
 def cleanup_expired_states():
     """
     تنظيف عام: حذف الحالات المنتهية الصلاحية.
