@@ -1,9 +1,11 @@
+# services/queue_service.py
 import time
 import logging
 from datetime import datetime
 import httpx
 import threading
-from database.db import client
+# استورد get_table بدل استعمال client.table(...)
+from database.db import get_table
 from config import ADMIN_MAIN_ID
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
@@ -22,7 +24,7 @@ def add_pending_request(user_id: int, username: str, request_text: str, payload=
             }
             if payload is not None:
                 data["payload"] = payload
-            client.table(QUEUE_TABLE).insert(data).execute()
+            get_table(QUEUE_TABLE).insert(data).execute()
             return
         except httpx.ReadError as e:
             logging.warning(f"Attempt {attempt}: ReadError in add_pending_request: {e}")
@@ -31,14 +33,14 @@ def add_pending_request(user_id: int, username: str, request_text: str, payload=
     
 def delete_pending_request(request_id: int):
     try:
-        client.table(QUEUE_TABLE).delete().eq("id", request_id).execute()
+        get_table(QUEUE_TABLE).delete().eq("id", request_id).execute()
     except Exception:
         logging.exception(f"Error deleting pending request {request_id}")
 
 def get_next_request():
     try:
         res = (
-            client.table(QUEUE_TABLE)
+            get_table(QUEUE_TABLE)
             .select("*")
             .order("created_at")
             .limit(1)
@@ -59,7 +61,7 @@ def update_request_admin_message_id(request_id: int, message_id: int):
 def postpone_request(request_id: int):
     try:
         now = datetime.utcnow().isoformat()
-        client.table(QUEUE_TABLE) \
+        get_table(QUEUE_TABLE) \
             .update({"created_at": now}) \
             .eq("id", request_id) \
             .execute()
