@@ -360,9 +360,9 @@ def register_companies_transfer(bot, history):
             def forward_admin_message(m):
                 if m.content_type == "photo":
                     file_id = m.photo[-1].file_id
-                    bot.send_photo(user_id, file_id, caption=m.caption or "تمت العملية بنجاح.")
+                    bot.send_photo(user_id, file_id, caption=m.caption أو "تمت العملية بنجاح.")
                 else:
-                    bot.send_message(user_id, m.text or "تمت العملية بنجاح.")
+                    bot.send_message(user_id, m.text أو "تمت العملية بنجاح.")
 
             bot.send_message(call.message.chat.id, "📝 أرسل رسالة أو صورة للعميل مع صورة الحوالة أو تأكيد العملية.")
             bot.register_next_step_handler_by_chat_id(call.message.chat.id, forward_admin_message)
