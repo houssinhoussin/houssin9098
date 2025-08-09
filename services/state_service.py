@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from database.db import table
+from database.db import table  # نفس الدالة table التي تستخدمها باقي الخدمات
 
 TABLE = "user_state"
 
@@ -15,7 +15,6 @@ def _iso(dt: datetime) -> str:
 def set_state(user_id: int, state_key: str,
               ttl_minutes: Optional[int] = 120,
               extra: Optional[Dict[str, Any]] = None):
-    """حفظ حالة المستخدم (سجل واحد لكل user_id). Upsert على user_id."""
     payload = {
         "user_id": user_id,
         "state_key": state_key,
@@ -24,11 +23,9 @@ def set_state(user_id: int, state_key: str,
     }
     if ttl_minutes:
         payload["expires_at"] = _iso(_now_utc() + timedelta(minutes=ttl_minutes))
-    # unique على user_id → on_conflict="user_id"
     table(TABLE).upsert(payload, on_conflict="user_id").execute()
 
 def get_state_key(user_id: int, default: Optional[str] = None) -> Optional[str]:
-    """إرجاع اسم الحالة الحالية أو default إن لم توجد/انتهت."""
     res = table(TABLE).select("state_key, expires_at").eq("user_id", user_id).limit(1).execute()
     rows = res.data or []
     if not rows:
@@ -37,11 +34,11 @@ def get_state_key(user_id: int, default: Optional[str] = None) -> Optional[str]:
     exp = row.get("expires_at")
     try:
         if exp:
-            # من ISO إلى datetime مع دعم Z
             if isinstance(exp, str):
-                exp_dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+                from datetime import datetime as _dt
+                exp_dt = _dt.fromisoformat(exp.replace("Z", "+00:00"))
             else:
-                exp_dt = exp  # أحيانًا supabase يعيدها datetime جاهز
+                exp_dt = exp
             if exp_dt < _now_utc():
                 return default
     except Exception:
