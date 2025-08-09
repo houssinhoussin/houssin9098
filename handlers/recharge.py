@@ -59,7 +59,11 @@ def start_recharge_menu(bot, message, history=None):
         # تصحيح نوع history ليكون دائماً قائمة (list)
         if not isinstance(history.get(message.from_user.id), list):
             history[message.from_user.id] = []
-        history[message.from_user.id].append("recharge_menu")
+        uid = message.from_user.id
+        if not isinstance(history.get(uid), list):
+            history[uid] = []
+        history[uid].append("recharge_menu")
+
     logging.info(f"[RECHARGE][{message.from_user.id}] فتح قائمة الشحن")
     bot.send_message(
         message.chat.id,
