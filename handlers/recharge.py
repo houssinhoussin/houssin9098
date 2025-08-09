@@ -62,7 +62,10 @@ def start_recharge_menu(bot, message, history=None):
         uid = message.from_user.id
         if not isinstance(history.get(uid), list):
             history[uid] = []
+        if not isinstance(history.get(uid), list):
+            history[uid] = [] if history.get(uid) is None else [history[uid]] if isinstance(history.get(uid), str) else []
         history[uid].append("recharge_menu")
+
 
     logging.info(f"[RECHARGE][{message.from_user.id}] فتح قائمة الشحن")
     bot.send_message(
