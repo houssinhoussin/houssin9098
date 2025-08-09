@@ -8,24 +8,11 @@ import threading
 import http.server
 import socketserver
 
-bot = telebot.TeleBot(API_TOKEN, parse_mode="HTML")
-
 # ----------- الاستيرادات الصحيحة: -----------
 from handlers import admin, bill_and_units, products, wallet, ads
 from services import wallet_service, queue_service
 from services.scheduled_tasks import post_ads_task
-
-post_ads_task(bot)
-
-
-# ----------- تسجيل الهاندلرز (حسب الحاجة): -----------
-user_state = {}
-history = {}
-
-admin.register(bot, user_state)
-bill_and_units.register_bill_and_units(bot, user_state)
-products.register(bot, user_state)
-wallet.register(bot, user_state)
+from services.state_adapter import UserStateDictLike
 
 PORT = 8081
 
@@ -72,7 +59,7 @@ if not check_api_token(API_TOKEN):
 # ---------------------------------------------------------
 # إنشاء كائن البوت وحذف أي Webhook سابق لتجنب خطأ 409
 # ---------------------------------------------------------
-bot = telebot.TeleBot(API_TOKEN)
+bot = telebot.TeleBot(API_TOKEN, parse_mode="HTML")
 try:
     bot.delete_webhook(drop_pending_updates=True)
 except Exception as e:
@@ -113,9 +100,9 @@ from handlers.keyboards import (
 )
 
 # ---------------------------------------------------------
-# تسجيل حالة المستخدم
+# تسجيل حالة المستخدم (تخزين في Supabase عبر الـ adapter)
 # ---------------------------------------------------------
-user_state: dict[int, str] = {}
+user_state = UserStateDictLike()
 history: dict[int, list] = {}
 
 # ---------------------------------------------------------
@@ -135,6 +122,7 @@ media_services.register(bot, user_state)
 wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
+
 CHANNEL_USERNAME = "@shop100sho"
 def notify_channel_on_start(bot):
     # تم تعطيل رسالة القناة مؤقتًا
@@ -159,6 +147,9 @@ notify_channel_on_start(bot)
 # ---------------------------------------------------------
 ADMIN_IDS = [6935846121]
 products.setup_inline_handlers(bot, ADMIN_IDS)
+
+# بعد اكتمال التسجيل وتشغيل البوت، شغّل مهمة الإعلانات المجدولة
+post_ads_task(bot)
 
 # ---------------------------------------------------------
 # زر الرجوع الذكي (بدون تعديل)
@@ -313,5 +304,3 @@ def start_polling():
             break
 
 start_polling()
-
-import scheduled_tasks  # لإطلاق المهام الدورية تلقائيًا عند تشغيل البوت
