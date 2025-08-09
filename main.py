@@ -1,45 +1,24 @@
+# main.py
 import os
 import sys
+import time
 import logging
-import telebot
-from config import API_TOKEN
-from telebot import types
 import threading
 import http.server
 import socketserver
+import telebot
+from telebot import types
 
-bot = telebot.TeleBot(API_TOKEN, parse_mode="HTML")
-
-# ----------- الاستيرادات الصحيحة: -----------
-from handlers import admin, bill_and_units, products, wallet, ads
-from services import wallet_service, queue_service
-from services.scheduled_tasks import post_ads_task
-
-post_ads_task(bot)
-
-
-# ----------- تسجيل الهاندلرز (حسب الحاجة): -----------
-user_state = {}
-history = {}
-
-admin.register(bot, user_state)
-bill_and_units.register_bill_and_units(bot, user_state)
-products.register(bot, user_state)
-wallet.register(bot, user_state)
-
-PORT = 8081
-
-def run_dummy_server():
-    handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), handler) as httpd:
-        print(f"🔌 Dummy server listening on port {PORT}")
-        httpd.serve_forever()
-
-# تشغيل الخادم في ثريد منفصل حتى لا يوقف البوت الأساسي
-threading.Thread(target=run_dummy_server, daemon=True).start()
+from config import (
+    API_TOKEN,
+    TELEGRAM_PARSE_MODE,
+    LONG_POLLING_TIMEOUT,
+    IS_WEBHOOK,
+    WEBHOOK_URL,
+)
 
 # ---------------------------------------------------------
-# تسجيل الأخطاء لظهورها في سجلّ Render
+# لوج عام
 # ---------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -48,38 +27,39 @@ logging.basicConfig(
 )
 
 def _unhandled_exception_hook(exc_type, exc_value, exc_tb):
-    """طباعة أي استثناء غير مُعالج بالكامل في اللوجز."""
     logging.critical("❌ Unhandled exception:", exc_info=(exc_type, exc_value, exc_tb))
-
 sys.excepthook = _unhandled_exception_hook
 
 # ---------------------------------------------------------
-# التحقق من صحة التوكن وجلب هوية البوت قبل التشغيل
+# إنشاء البوت + فحص التوكن
 # ---------------------------------------------------------
-def check_api_token(token):
+def check_api_token(token: str) -> None:
     try:
         test_bot = telebot.TeleBot(token)
         me = test_bot.get_me()
-        print(f"✅ التوكن سليم. هوية البوت: @{me.username} (ID: {me.id})")
-        return True
+        logging.info(f"✅ التوكن سليم. هوية البوت: @{me.username} (ID: {me.id})")
     except Exception as e:
         logging.critical(f"❌ التوكن غير صالح أو لا يمكن الاتصال بـ Telegram API: {e}")
         sys.exit(1)
 
-if not check_api_token(API_TOKEN):
-    sys.exit(1)
+check_api_token(API_TOKEN)
 
-# ---------------------------------------------------------
-# إنشاء كائن البوت وحذف أي Webhook سابق لتجنب خطأ 409
-# ---------------------------------------------------------
-bot = telebot.TeleBot(API_TOKEN)
+bot = telebot.TeleBot(API_TOKEN, parse_mode=TELEGRAM_PARSE_MODE)
+
+# نحذف أي ويبهوك سابق حتى لا يحدث 409 عند الـ polling
 try:
     bot.delete_webhook(drop_pending_updates=True)
 except Exception as e:
     logging.warning(f"⚠️ لم يتم حذف Webhook بنجاح: {e}")
 
+if IS_WEBHOOK:
+    logging.warning(
+        "⚠️ تم ضبط WEBHOOK_URL في .env، لكن هذا التطبيق يعمل بنمط Polling. "
+        "سيتم تجاهل الويبهوك واستخدام polling."
+    )
+
 # ---------------------------------------------------------
-# استيراد جميع الهاندلرز بعد تهيئة البوت
+# استيراد الهاندلرز والخدمات (مرّة واحدة)
 # ---------------------------------------------------------
 from handlers import (
     start,
@@ -95,7 +75,7 @@ from handlers import (
     wholesale,
     university_fees,
     internet_providers,
-    bill_and_units,  
+    bill_and_units,
 )
 from handlers.keyboards import (
     main_menu,
@@ -111,15 +91,17 @@ from handlers.keyboards import (
     media_services_menu,
     transfers_menu,
 )
+from services.queue_service import process_queue
+from services.scheduled_tasks import post_ads_task
 
 # ---------------------------------------------------------
-# تسجيل حالة المستخدم
+# حالة/تاريخ (لبعض الهاندلرز التي ما زالت تحتاجهما)
 # ---------------------------------------------------------
 user_state: dict[int, str] = {}
 history: dict[int, list] = {}
 
 # ---------------------------------------------------------
-# تسجيل جميع الهاندلرز (تمرير user_state أو history حسب الحاجة)
+# تسجيل جميع الهاندلرز (بدون تكرار)
 # ---------------------------------------------------------
 start.register(bot, user_state)
 wallet.register(bot, history)
@@ -135,33 +117,45 @@ media_services.register(bot, user_state)
 wholesale.register(bot, user_state)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
-CHANNEL_USERNAME = "@shop100sho"
-def notify_channel_on_start(bot):
-    # تم تعطيل رسالة القناة مؤقتًا
-    # try:
-    #     markup = types.InlineKeyboardMarkup()
-    #     markup.add(types.InlineKeyboardButton("🤖 جرّب البوت الآن", url="https://t.me/my_fast_shop_bot"))
-    #     bot.send_message(
-    #         CHANNEL_USERNAME,
-    #         "🚦 البوت اشتغل!\n"
-    #         "يا متابعينا، المحفظة صارت جاهزة… والطلبات رح تشتغل 🛒😉\n"
-    #         "لو تريد تبدأ تجربة الخدمة اضغط الزر أو تابعنا دائماً هنا.",
-    #         reply_markup=markup
-    #     )
-    # except Exception as e:
-    #     logging.warning(f"❌ لم يمكن إرسال رسالة بدء التشغيل للقناة: {e}")
+
+# ربط نظام أزرار المنتجات (حسب كودك)
+ADMIN_IDS = [int(os.getenv("ADMIN_MAIN_ID", "0"))] if os.getenv("ADMIN_MAIN_ID") else []
+try:
+    products.setup_inline_handlers(bot, ADMIN_IDS)
+except Exception as e:
+    logging.warning(f"⚠️ setup_inline_handlers(products) فشل: {e}")
+
+# ---------------------------------------------------------
+# إشعار قناة (اختياري/مُعطّل مثل كودك)
+# ---------------------------------------------------------
+def notify_channel_on_start(_bot):
+    # مُعطّل بحسب كودك الأصلي
     pass
 
 notify_channel_on_start(bot)
 
 # ---------------------------------------------------------
-# ربط نظام أزرار المنتجات (مهم)
+# خادم صحي بسيط (حتى تبقى الخدمة حيّة على Render)
+# يستخدم المنفذ من البيئة (Render يمرر PORT) وإلا 8081
 # ---------------------------------------------------------
-ADMIN_IDS = [6935846121]
-products.setup_inline_handlers(bot, ADMIN_IDS)
+PORT = int(os.getenv("PORT", "8081"))
+
+def run_dummy_server():
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), handler) as httpd:
+        logging.info(f"🔌 Health server listening on port {PORT}")
+        httpd.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
 
 # ---------------------------------------------------------
-# زر الرجوع الذكي (بدون تعديل)
+# ثريدات خلفية: الطابور + مجدول الإعلانات
+# ---------------------------------------------------------
+threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
+threading.Thread(target=post_ads_task, args=(bot,), daemon=True).start()
+
+# ---------------------------------------------------------
+# زر الرجوع الذكي (بدون تعديل على أوامرك)
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda msg: msg.text == "⬅️ رجوع")
 def handle_back(msg):
@@ -187,7 +181,7 @@ def handle_back(msg):
         user_state[user_id] = "main_menu"
 
 # ---------------------------------------------------------
-# ربط أزرار المنتجات بالخدمات الخاصة بها
+# ربط أزرار رئيسية بخدماتها (كما في كودك)
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda msg: msg.text == "تحويلات كاش و حوالات")
 def handle_transfers(msg):
@@ -234,84 +228,70 @@ def handle_media(msg):
     from handlers.media_services import show_media_services
     show_media_services(bot, msg, user_state)
 
-# أزرار الشركات الجديدة (حسب النصوص الموجودة)
+# شركات الحوالات (حسب نصوصك)
 @bot.message_handler(func=lambda msg: msg.text == "شركة الهرم")
 def handle_al_haram(msg):
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
+        "✔️ تأكيد حوالة الهرم", "❌ إلغاء"
+    )
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة الهرم**.\n"
         "يتم إضافة مبلغ 1500 ل.س على كل 50000 ل.س.\n\n"
         "تابع العملية أو ألغِ الطلب.",
-        reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-            "✔️ تأكيد حوالة الهرم", "❌ إلغاء"
-        )
+        reply_markup=kb
     )
     user_state[msg.from_user.id] = "alharam_start"
 
 @bot.message_handler(func=lambda msg: msg.text == "شركة الفؤاد")
 def handle_alfouad(msg):
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
+        "✔️ تأكيد حوالة الفؤاد", "❌ إلغاء"
+    )
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة الفؤاد**.\n"
         "يتم إضافة مبلغ 1500 ل.س على كل 50000 ل.س.\n\n"
         "تابع العملية أو ألغِ الطلب.",
-        reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-            "✔️ تأكيد حوالة الفؤاد", "❌ إلغاء"
-        )
+        reply_markup=kb
     )
     user_state[msg.from_user.id] = "alfouad_start"
 
 @bot.message_handler(func=lambda msg: msg.text == "شركة شخاشير")
 def handle_shakhashir(msg):
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
+        "✔️ تأكيد حوالة شخاشير", "❌ إلغاء"
+    )
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة شخاشير**.\n"
         "يتم إضافة مبلغ 1500 ل.س على كل 50000 ل.س.\n\n"
         "تابع العملية أو ألغِ الطلب.",
-        reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
-            "✔️ تأكيد حوالة شخاشير", "❌ إلغاء"
-        )
+        reply_markup=kb
     )
     user_state[msg.from_user.id] = "shakhashir_start"
 
 # ---------------------------------------------------------
-# تشغيل نظام الطابور (QUEUE)
+# بدء البولّينغ مع إعادة محاولة
 # ---------------------------------------------------------
-from services.queue_service import process_queue
-threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
-
-# ---------------------------------------------------------
-# تشغيل البوت مع نظام إعادة المحاولة والتنبيه في حال الخطأ
-# ---------------------------------------------------------
-import time
-
-def restart_bot():
-    logging.warning("🔄 إعادة تشغيل البوت بعد 10 ثوانٍ…")
-    time.sleep(10)
-    os.execv(sys.executable, [sys.executable] + sys.argv)
-
 def start_polling():
-    print("🤖 البوت يعمل الآن…")
+    logging.info("🤖 البوت يعمل الآن… (Long Polling)")
     while True:
         try:
             bot.infinity_polling(
                 none_stop=True,
                 skip_pending=True,
-                long_polling_timeout=40,
+                long_polling_timeout=LONG_POLLING_TIMEOUT,
             )
         except telebot.apihelper.ApiTelegramException as e:
             if getattr(e, "error_code", None) == 409:
                 logging.critical("❌ تم إيقاف هذه النسخة لأن نسخة أخرى من البوت متصلة بالفعل.")
                 break
-            else:
-                logging.error(f"🚨 خطأ في Telegram API: {e}")
-                time.sleep(5)
-                continue
+            logging.error(f"🚨 خطأ في Telegram API: {e}")
+            time.sleep(5)
         except Exception as e:
-            logging.critical(f"❌ خطأ غير متوقع، سيُعاد تشغيل البوت: {e}")
-            restart_bot()
-            break
+            logging.critical(f"❌ خطأ غير متوقع، سيُعاد التشغيل: {e}", exc_info=True)
+            time.sleep(10)
 
-start_polling()
-
-import scheduled_tasks  # لإطلاق المهام الدورية تلقائيًا عند تشغيل البوت
+if __name__ == "__main__":
+    start_polling()
