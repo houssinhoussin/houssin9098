@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import telebot
-from config import API_TOKEN
+from config import API_TOKEN, ADMINS
 from telebot import types
 import threading
 import http.server
@@ -12,7 +12,9 @@ import socketserver
 from handlers import admin, bill_and_units, products, wallet, ads
 from services import wallet_service, queue_service
 from services.scheduled_tasks import post_ads_task
+from services.error_log_setup import install_global_error_logging
 from services.state_adapter import UserStateDictLike
+from services.commands_setup import setup_bot_commands
 
 PORT = 8081
 
@@ -126,21 +128,16 @@ internet_providers.register(bot)
 CHANNEL_USERNAME = "@shop100sho"
 def notify_channel_on_start(bot):
     # تم تعطيل رسالة القناة مؤقتًا
-    # try:
-    #     markup = types.InlineKeyboardMarkup()
-    #     markup.add(types.InlineKeyboardButton("🤖 جرّب البوت الآن", url="https://t.me/my_fast_shop_bot"))
-    #     bot.send_message(
-    #         CHANNEL_USERNAME,
-    #         "🚦 البوت اشتغل!\n"
-    #         "يا متابعينا، المحفظة صارت جاهزة… والطلبات رح تشتغل 🛒😉\n"
-    #         "لو تريد تبدأ تجربة الخدمة اضغط الزر أو تابعنا دائماً هنا.",
-    #         reply_markup=markup
-    #     )
-    # except Exception as e:
-    #     logging.warning(f"❌ لم يمكن إرسال رسالة بدء التشغيل للقناة: {e}")
     pass
 
 notify_channel_on_start(bot)
+# تفعيل سجل الأخطاء + قائمة الأوامر الثابتة
+install_global_error_logging()
+setup_bot_commands(bot, list(ADMINS))
+setup_bot_commands(bot, list(ADMINS))
+# تفعيل سجل الأخطاء + قائمة الأوامر الثابتة
+install_global_error_logging()
+setup_bot_commands(bot, list(ADMINS))
 
 # ---------------------------------------------------------
 # ربط نظام أزرار المنتجات (مهم)
@@ -304,3 +301,16 @@ def start_polling():
             break
 
 start_polling()
+
+@bot.message_handler(func=lambda msg: msg.text in ["❌ إلغاء", "/cancel"])
+def global_cancel(msg):
+    try:
+        from services.state_service import clear_state
+        clear_state(msg.from_user.id)
+    except Exception:
+        pass
+    try:
+        from handlers import keyboards
+        bot.send_message(msg.chat.id, "تم إلغاء كل العمليات والعودة للبداية.", reply_markup=keyboards.main_menu())
+    except Exception:
+        bot.send_message(msg.chat.id, "تم إلغاء كل العمليات.")
