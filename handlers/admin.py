@@ -44,9 +44,6 @@ import httpx
 # مفتاح حالة جلسة مراسلة العميل من الأدمن
 ADMIN_MSG_KEY = "admin_msg_session"
 
-# (أزلنا القواميس المؤقتة: _cancel_pending / _accept_pending / _msg_pending)
-# احتفظت بالدوال نفسها، لكن الحالة ستُخزّن في Supabase
-
 def register(bot, history):
     # تسجيل الهاندلرات للتحويلات
     cash_transfer.register(bot, history)
@@ -98,11 +95,14 @@ def register(bot, history):
         bot.answer_callback_query(c.id)
         bot.send_message(c.from_user.id, "📷 أرسل الصورة الآن (أو /cancel لإلغاء).")
 
-    @bot.message_handler(func=lambda m: True, content_types=["text", "photo"])
+    # ✅ تعديل الفلتر: للأدمن فقط (كي لا ينافس هاندلرات المستخدمين مثل زر المنتجات)
+    @bot.message_handler(
+        func=lambda m: (hasattr(m, "from_user") and m.from_user and m.from_user.id in ADMINS),
+        content_types=["text", "photo"]
+    )
     def forward_to_client(m: types.Message):
         """
-        يستقبل أي رسالة/صورة من الأدمن، ويتحقق هل عنده جلسة مراسلة فعّالة محفوظة.
-        لو ما عنده جلسة → يتجاهل بهدوء (أو أعدّل الرسالة بنص إرشادي بسيط).
+        يستقبل رسالة/صورة من الأدمن فقط، ويتحقق إن عنده جلسة مراسلة فعّالة محفوظة.
         """
         # اقرأ حالة جلسة الأدمن
         sess = get_state(m.from_user.id, ADMIN_MSG_KEY)
@@ -183,7 +183,6 @@ def register(bot, history):
 
         # === قبول الطلب ===
         if action == "accept":
-            # (هنا أبقيت منطقك كما هو قدر الإمكان)
             amount = payload.get("reserved", payload.get("price", 0))
             if amount:
                 add_balance(user_id, amount)
@@ -359,6 +358,3 @@ def register(bot, history):
 
         # أيّ أكشن آخر
         bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
-
-    # ——— ملاحظة: الدوال handle_cancel_reason / handle_accept_message غير مستخدمة هنا —
-    # لو كانت مربوطة بفلترات/هاندلرات في ملف آخر، قلّي أضيف لها تخزين حالة مشابه.
