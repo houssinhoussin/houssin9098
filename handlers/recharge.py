@@ -78,6 +78,7 @@ def start_recharge_menu(bot, message, history=None):
     )
 
 
+
 def register(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "💳 شحن محفظتي")
