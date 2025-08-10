@@ -302,6 +302,7 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
 
     # بقية الجداول (قراءة فقط للعرض)
     tables = [
+        ("game_purchases", "product_name"),
         ("ads_purchases", "ad_name"),
         ("bill_and_units_purchases", "bill_name"),
         ("cash_transfer_purchases", "transfer_name"),
@@ -409,6 +410,20 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
     return out
 
 # ===== تسجيلات إضافية في الجداول المتخصصة (Write-through) =====
+
+def add_game_purchase(user_id, product_id, product_name, price, player_id, created_at=None):
+    data = {
+        "user_id": user_id,
+        "product_id": product_id,
+        "product_name": product_name,
+        "price": price,
+        "player_id": player_id,
+        "created_at": (created_at or datetime.utcnow().isoformat())
+    }
+    try:
+        get_table("game_purchases").insert(data).execute()
+    except Exception:
+        pass
 
 def add_bill_or_units_purchase(user_id: int, bill_name: str, price: int, number: str, created_at: str = None):
     data = {
