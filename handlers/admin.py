@@ -7,6 +7,10 @@ from telebot import types
 from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
+from services.products_admin import set_product_active
+from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
+from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
+from services.activity_logger import log_action
 from services.authz import allowed
 from services.queue_service import (
     add_pending_request,
@@ -382,3 +386,94 @@ def register(bot, history):
         _accept_pending.pop(msg.from_user.id, None)
 
    
+
+
+@bot.message_handler(commands=['admin'])
+def admin_menu(msg):
+    if msg.from_user.id not in ADMINS:
+        return bot.reply_to(msg, "صلاحية الأدمن فقط.")
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("🛒 إدارة المنتجات", "📊 تقارير سريعة", "⏳ طابور الانتظار")
+    kb.row("⚙️ النظام", "⬅️ رجوع")
+    bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and m.from_user.id in ADMINS)
+def admin_products_menu(m):
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("🚫 إيقاف منتج", "✅ تشغيل منتج")
+    kb.row("⬅️ رجوع")
+    bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and m.from_user.id in ADMINS)
+def toggle_product_prompt(m):
+    bot.send_message(m.chat.id, "أدخل رقم معرف المنتج (ID):")
+    bot.register_next_step_handler(m, lambda msg: toggle_product_apply(msg, enable=(m.text=="✅ تشغيل منتج")))
+
+def toggle_product_apply(msg, enable: bool):
+    try:
+        pid = int(msg.text.strip())
+    except Exception:
+        return bot.reply_to(msg, "رقم غير صحيح.")
+    ok = set_product_active(pid, active=enable)
+    if ok:
+        log_action(msg.from_user.id, f"{'enable' if enable else 'disable'}_product", f"id={pid}")
+        bot.reply_to(msg, ("✅ تم تشغيل المنتج" if enable else "🚫 تم إيقاف المنتج"))
+    else:
+        bot.reply_to(msg, "لم يتم العثور على المنتج.")
+
+@bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
+def quick_reports(m):
+    dep, pur, top = totals_deposits_and_purchases_syp()
+    lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
+    if top:
+        lines.append("🏆 الأكثر شراءً:")
+        for name, cnt in top:
+            lines.append(f"  • {name} — {cnt} عملية")
+    bot.send_message(m.chat.id, "\n".join(lines))
+
+@bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
+def pending_count(m):
+    c = pending_queue_count()
+    bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
+
+@bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
+def system_menu(m):
+    state = "تشغيل" if not is_maintenance() else "إيقاف (صيانة)"
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("🛑 تفعيل وضع الصيانة", "▶️ إلغاء وضع الصيانة")
+    kb.row("🔁 إعادة التحقق من الاشتراك الآن")
+    kb.row("👥 صلاحيات الأدمن", "📜 Snapshot السجلات")
+    kb.row("⬅️ رجوع")
+    bot.send_message(m.chat.id, f"حالة النظام: {state}", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: m.text == "🛑 تفعيل وضع الصيانة" and m.from_user.id in ADMINS)
+def enable_maint(m):
+    set_maintenance(True, "🛠️ نعمل على صيانة سريعة الآن. جرّب لاحقًا.")
+    log_action(m.from_user.id, "maintenance_on", "")
+    bot.reply_to(m, "تم تفعيل وضع الصيانة.")
+
+@bot.message_handler(func=lambda m: m.text == "▶️ إلغاء وضع الصيانة" and m.from_user.id in ADMINS)
+def disable_maint(m):
+    set_maintenance(False)
+    log_action(m.from_user.id, "maintenance_off", "")
+    bot.reply_to(m, "تم إلغاء وضع الصيانة.")
+
+@bot.message_handler(func=lambda m: m.text == "🔁 إعادة التحقق من الاشتراك الآن" and m.from_user.id in ADMINS)
+def force_sub(m):
+    epoch = force_sub_recheck()
+    log_action(m.from_user.id, "force_sub_recheck", str(epoch))
+    bot.reply_to(m, "تم مسح الكاش، سيُعاد التحقق للمستخدمين الجدد.")
+
+@bot.message_handler(func=lambda m: m.text == "📜 Snapshot السجلات" and m.from_user.id in ADMINS)
+def show_logs_snapshot(m):
+    tail = get_logs_tail(30)
+    if len(tail) > 3500:
+        tail = tail[-3500:]
+    bot.send_message(m.chat.id, "آخر السجلات:\n" + "```\n" + tail + "\n```", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
+def admins_roles(m):
+    # عرض فقط (بدون تعديل بيئي). للإضافة/الإزالة اليدوية لاحقًا.
+    from config import ADMINS, ADMIN_MAIN_ID
+    ids = ", ".join(str(x) for x in ADMINS)
+    bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
