@@ -7,6 +7,7 @@ from services.wallet_service import ( get_all_purchases_structured,
     register_user_if_not_exist,  # ✅ الاستيراد الصحيح
     _select_single,  # لاستعماله في التحقق من العميل
     get_transfers,   # ✅ الاستيراد الصحيح الجديد
+    get_wallet_transfers_only,
 )
 from services.wallet_service import ( get_all_purchases_structured,
     get_ads_purchases,
