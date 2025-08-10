@@ -106,18 +106,15 @@ def show_transfers(bot, message, history=None):
         amt  = int(r.get("amount") or 0)
         ts   = (r.get("timestamp") or "")[:19].replace("T", " ")
 
-        # نعرض فقط:
-        # 1) الإيداعات/الشحنات: مبلغ موجب + وصف يبدأ بـ "إيداع" أو "شحن"
+        # 1) الشحنات الحقيقية
         if amt > 0 and (desc.startswith("إيداع") or desc.startswith("شحن")):
             lines.append(f"شحن محفظة | {amt:,} ل.س | {ts}")
             continue
 
-        # 2) التحويلات الصادرة: مبلغ سالب + وصف يبدأ بـ "تحويل إلى"
+        # 2) التحويلات الصادرة
         if amt < 0 and desc.startswith("تحويل إلى"):
             lines.append(f"تحويل صادر | {abs(amt):,} ل.س | {ts}")
             continue
-
-        # ما عدا ذلك يتم تجاهله (تحويل وارد، مشتريات، ...)
 
     if not lines:
         bot.send_message(
@@ -270,34 +267,36 @@ def register(bot, history=None):
         if not step or step.get("step") != "awaiting_confirm":
             return
 
-        amount    = int(step["amount"])
-        target_id = int(step["target_id"])
+        amount    = step["amount"]
+        target_id = step["target_id"]
 
         # تأكيد وجود المرسل
         register_user_if_not_exist(user_id, msg.from_user.full_name)
 
-        # 1) إنشاء طلب معلق للتحويل بين المحافظ
-        try:
-            ins = get_table("pending_requests").insert({
-                "user_id": user_id,
-                "username": msg.from_user.username or "",
-                "request_text": f"تحويل إلى {target_id}",
-                "payload": {"type": "wallet_transfer", "to_user_id": target_id, "amount": amount, "reserved": amount}
-            }).execute()
-            req_id = ins.data[0]["id"]
-        except Exception:
-            req_id = None
+        # ✅ تنفيذ التحويل مباشرة بين العملاء (بدون أدمن وبدون حجز)
+        success = transfer_balance(user_id, target_id, amount)
+        if not success:
+            bot.send_message(msg.chat.id, "❌ فشل التحويل. تحقق من الرصيد والمحفظة.")
+            return
 
-        # 2) حجز المبلغ على المرسِل (خصم فوري بدون إضافة للمستلم الآن)
-        hold_desc = f"حجز تحويل إلى {target_id}" + (f" (طلب #{req_id})" if req_id else "")
-        deduct_balance(user_id, amount, hold_desc)
-
+        # رسالة للمرسِل بتفاصيل واضحة
         bot.send_message(
             msg.chat.id,
-            "⏳ تم حجز المبلغ، وسيُنفَّذ التحويل لاحقًا.",
+            f"✅ تم تحويل `{amount:,} ل.س` إلى الحساب `{target_id}` بنجاح.",
+            parse_mode="Markdown",
             reply_markup=keyboards.wallet_menu()
         )
 
-        # تنظيف جلسة التحويل وإظهار المحفظة
+        # إشعار المستلم بالتعبئة ومن أي حساب
+        try:
+            sender_name = msg.from_user.full_name
+            bot.send_message(
+                target_id,
+                f"💰 تم شحن محفظتك من محفظة {sender_name} ({user_id}) بمبلغ قدره {amount:,} ل.س.",
+                reply_markup=keyboards.wallet_menu()
+            )
+        except Exception:
+            pass
+
         transfer_steps.pop(user_id, None)
         show_wallet(bot, msg, history)
