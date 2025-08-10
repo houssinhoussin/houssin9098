@@ -298,7 +298,7 @@ def setup_inline_handlers(bot, admin_ids):
 
 # ================= نقطة التسجيل من main.py =================
 
-def register(bot, history):
+def register(bot, history, admin_ids=None):
     # إن كان وضع الصيانة مفعلاً، سنعرض رسالة منع الطلبات الجديدة ضمن القوائم (المنطق العام محفوظ)
     global _MAINTENANCE_NOTICE
     _MAINTENANCE_NOTICE = True
@@ -306,4 +306,4 @@ def register(bot, history):
     # تسجيل هاندلرات الرسائل
     register_message_handlers(bot, history)
     # تسجيل هاندلرات الكولباك
-    setup_inline_handlers(bot, admin_ids=[])
+    setup_inline_handlers(bot, admin_ids=admin_ids or [])
