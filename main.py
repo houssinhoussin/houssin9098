@@ -8,9 +8,6 @@ import threading
 import http.server
 import socketserver
 
-# ----------- الاستيرادات الصحيحة: -----------
-from handlers import admin, bill_and_units, products, wallet, ads
-from services import wallet_service, queue_service
 from services.scheduled_tasks import post_ads_task
 from services.error_log_setup import install_global_error_logging
 from services.state_adapter import UserStateDictLike
@@ -84,7 +81,7 @@ from handlers import (
     wholesale,
     university_fees,
     internet_providers,
-    bill_and_units,  
+    bill_and_units,
 )
 from handlers.keyboards import (
     main_menu,
@@ -119,7 +116,10 @@ recharge.register(bot, history)
 cash_transfer.register(bot, history)
 companies_transfer.register_companies_transfer(bot, history)
 bill_and_units.register_bill_and_units(bot, history)
-products.register(bot, history)
+
+# ✅ تسجيل المنتجات مرة واحدة وتمرير admin_ids هنا
+products.register(bot, history, admin_ids=[6935846121])
+
 media_services.register(bot, history)
 wholesale.register(bot, history)
 university_fees.register_university_fees(bot, history)
@@ -134,12 +134,6 @@ notify_channel_on_start(bot)
 # تفعيل سجل الأخطاء + قائمة الأوامر الثابتة
 install_global_error_logging()
 setup_bot_commands(bot, list(ADMINS))
-
-# ---------------------------------------------------------
-# ربط نظام أزرار المنتجات (مهم)
-# ---------------------------------------------------------
-ADMIN_IDS = [6935846121]
-products.setup_inline_handlers(bot, ADMIN_IDS)
 
 # بعد اكتمال التسجيل وتشغيل البوت، شغّل مهمة الإعلانات المجدولة
 post_ads_task(bot)
