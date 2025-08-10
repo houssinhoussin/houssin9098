@@ -272,5 +272,9 @@ def show_transfers(bot, message, history=None):
             pass  # العميل ربما حظر البوت أو لم يبدأه بعد
         transfer_steps.pop(user_id, None)
         show_wallet(bot, msg, user_state)
+        def register(bot, history=None):
+            # لا شيء—كل الهاندلرات مسجّلة عبر الديكوريترز عند الاستيراد
+            return
+
 
 # === نهاية الملف ===
