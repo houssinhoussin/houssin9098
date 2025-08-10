@@ -1,14 +1,14 @@
 from telebot import types
 from config import BOT_NAME
 from handlers import keyboards
-from services.wallet_service import (
+from services.wallet_service import ( get_all_purchases_structured,
     get_balance, add_balance, deduct_balance, get_purchases, get_deposit_transfers,
     has_sufficient_balance, transfer_balance, get_table,
     register_user_if_not_exist,  # ✅ الاستيراد الصحيح
     _select_single,  # لاستعماله في التحقق من العميل
     get_transfers,   # ✅ الاستيراد الصحيح الجديد
 )
-from services.wallet_service import (
+from services.wallet_service import ( get_all_purchases_structured,
     get_ads_purchases,
     get_bill_and_units_purchases,
     get_cash_transfer_purchases,
@@ -50,73 +50,51 @@ def show_purchases(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
     register_user_if_not_exist(user_id, name)
-    purchases = get_purchases(user_id)  # الآن يحذف القديم تلقائيًا
 
-    # جلب المشتريات من الملفات الإضافية
-    ads_purchases = get_ads_purchases(user_id)
-    bill_and_units_purchases = get_bill_and_units_purchases(user_id)
-    cash_transfer_purchases = get_cash_transfer_purchases(user_id)
-    companies_transfer_purchases = get_companies_transfer_purchases(user_id)
-    internet_providers_purchases = get_internet_providers_purchases(user_id)
-    university_fees_purchases = get_university_fees_purchases(user_id)
-    wholesale_purchases = get_wholesale_purchases(user_id)
-
-    # دمج جميع المشتريات في قائمة واحدة
-    all_purchases = (
-        purchases +
-        ads_purchases +
-        bill_and_units_purchases +
-        cash_transfer_purchases +
-        companies_transfer_purchases +
-        internet_providers_purchases +
-        university_fees_purchases +
-        wholesale_purchases
-    )
+    items = get_all_purchases_structured(user_id, limit=50)
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
 
-    if not all_purchases:
+    if not items:
         bot.send_message(
             message.chat.id,
             "📦 لا يوجد مشتريات حتى الآن.",
             reply_markup=keyboards.wallet_menu()
         )
     else:
-        text = "🛍️ مشترياتك:\n" + "\n".join(all_purchases)
-        bot.send_message(
-            message.chat.id,
-            text,
-            reply_markup=keyboards.wallet_menu()
-        )
-
-
-# ✅ عرض سجل التحويلات
+        # تنسيق بسيط: «العنوان — السعر — التاريخ»
+        lines = []
+        for it in items:
+            title = it.get("title") or "منتج"
+            price = it.get("price") or 0
+            ts    = (it.get("created_at") or "")[:16].replace("T", " ")
+            lines.append(f"• {title} — {price:,} ل.س — {ts}" + (f" — ID/رقم: {it.get('id_or_phone')}" if it.get("id_or_phone") else ""))
+        text = "🛍️ مشترياتك:\n" + "\n".join(lines)
+        bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
+    
 def show_transfers(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
     register_user_if_not_exist(user_id, name)
-    transfers = get_transfers(user_id)
+
+    rows = get_wallet_transfers_only(user_id, limit=50)
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
 
-    if not transfers:
+    if not rows:
         bot.send_message(
             message.chat.id,
-            "📄 لا يوجد عمليات تحويل بعد.",
+            "📄 لا يوجد عمليات شحن/تحويل محفظة بعد.",
             reply_markup=keyboards.wallet_menu()
         )
     else:
-        text = "📑 سجل التحويلات:\n" + "\n".join(transfers)
-        bot.send_message(
-            message.chat.id,
-            text,
-            reply_markup=keyboards.wallet_menu()
-        )
-
-# ✅ تسجيل الأوامر
-def register(bot, user_state):
+        lines = []
+        for r in rows:
+            lines.append(f"{r['description']} ({r['amount']:+,} ل.س) في {r['timestamp']}")
+        text = "📑 سجل التحويلات:\n" + "\n".join(lines)
+        bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
 
     @bot.message_handler(func=lambda msg: msg.text == "💰 محفظتي")
     def handle_wallet(msg):
