@@ -81,7 +81,7 @@ def show_purchases(bot, message, history=None):
     text = "🛍️ مشترياتك:\n" + "\n".join(lines[:50])
     bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
 
-# ✅ سجل التحويلات (إيداعات + تحويلات فقط)
+# ✅ سجل التحويلات (شحن محفظة + تحويل صادر فقط)
 def show_transfers(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
@@ -95,17 +95,39 @@ def show_transfers(bot, message, history=None):
     if not rows:
         bot.send_message(
             message.chat.id,
-            "📄 لا توجد عمليات إيداع/تحويل حتى الآن.",
+            "📄 لا توجد عمليات بعد.",
             reply_markup=keyboards.wallet_menu()
         )
         return
 
     lines = []
     for r in rows:
-        ts = (r.get("timestamp") or "")[:19].replace("T", " ")
-        lines.append(f"{r['description']} ({r['amount']:+,} ل.س) في {ts}")
+        desc = (r.get("description") or "").strip()
+        amt  = int(r.get("amount") or 0)
+        ts   = (r.get("timestamp") or "")[:19].replace("T", " ")
 
-    text = "📑 سجل التحويلات:\n" + "\n".join(lines)
+        # نعرض فقط:
+        # 1) الإيداعات/الشحنات: مبلغ موجب + وصف يبدأ بـ "إيداع" أو "شحن"
+        if amt > 0 and (desc.startswith("إيداع") or desc.startswith("شحن")):
+            lines.append(f"شحن محفظة | {amt:,} ل.س | {ts}")
+            continue
+
+        # 2) التحويلات الصادرة: مبلغ سالب + وصف يبدأ بـ "تحويل إلى"
+        if amt < 0 and desc.startswith("تحويل إلى"):
+            lines.append(f"تحويل صادر | {abs(amt):,} ل.س | {ts}")
+            continue
+
+        # ما عدا ذلك يتم تجاهله (تحويل وارد، مشتريات، ...)
+
+    if not lines:
+        bot.send_message(
+            message.chat.id,
+            "📄 لا توجد عمليات بعد.",
+            reply_markup=keyboards.wallet_menu()
+        )
+        return
+
+    text = "📑 السجل: شحن المحفظة + تحويلاتك الصادرة\n" + "\n".join(lines)
     bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
 
 # --- تسجيل هاندلرات الأزرار داخل register ---
