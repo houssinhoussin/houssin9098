@@ -177,20 +177,32 @@ def get_transfers(user_id: int, limit: int = 10):
     return transfers
 
 def get_deposit_transfers(user_id: int, limit: int = 10):
-    response = (
+    """
+    إرجاع سجل شحن المحفظة فقط.
+    يعتبر أي عملية بمبلغ موجب ووصف يبدأ بـ 'إيداع' أو 'شحن' شحناً للمحفظة،
+    بما في ذلك 'إيداع يدوي'.
+    """
+    resp = (
         get_table(TRANSACTION_TABLE)
         .select("description,amount,timestamp")
         .eq("user_id", user_id)
-        .eq("description", "إيداع")
         .order("timestamp", desc=True)
-        .limit(limit)
+        .limit(200)
         .execute()
     )
-    transfers = []
-    for row in response.data or []:
+    out = []
+    for row in (resp.data or []):
+        desc = (row.get("description") or "").strip()
+        amt  = int(row.get("amount") or 0)
+        if amt <= 0:
+            continue
+        if not (desc.startswith("إيداع") or desc.startswith("شحن")):
+            continue
         ts = (row.get("timestamp") or "")[:19].replace("T", " ")
-        transfers.append(f"{row.get('description')} ({row.get('amount')} ل.س) في {ts}")
-    return transfers
+        out.append({"description": desc, "amount": amt, "timestamp": ts})
+        if len(out) >= limit:
+            break
+    return out
 
 # ================= المنتجات =================
 
