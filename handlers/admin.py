@@ -25,6 +25,13 @@ from services.wallet_service import (
     add_purchase,
     add_balance,
     get_balance,
+    # ✅ إضافات write-through للجداول المتخصصة
+    add_bill_or_units_purchase,
+    add_internet_purchase,
+    add_cash_transfer_purchase,
+    add_companies_transfer_purchase,
+    add_university_fees_purchase,
+    add_ads_purchase,
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
@@ -146,6 +153,7 @@ def register(bot, history):
             if amount:
                 add_balance(user_id, amount)
             typ = payload.get("type")
+
             # ——— طلبات المنتجات الرقمية ———
             if typ == "order":
                 reserved   = payload.get("reserved", 0)
@@ -160,6 +168,7 @@ def register(bot, history):
 
                 # ثمّ تسجّل الشراء
                 add_purchase(user_id, reserved, name, reserved, player_id)
+                # (لا يوجد جدول متخصص هنا)
 
                 delete_pending_request(request_id)
                 bot.send_message(
@@ -176,6 +185,12 @@ def register(bot, history):
                 num   = payload.get("number")
                 name  = payload.get("unit_name")
                 add_purchase(user_id, price, name, price, num)
+                # ✅ كتابة إضافية في جدول bill_and_units_purchases
+                try:
+                    add_bill_or_units_purchase(user_id, bill_name=name, price=price, number=str(num))
+                except Exception:
+                    pass
+
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
@@ -194,6 +209,12 @@ def register(bot, history):
                 num       = payload.get("number")
                 label     = payload.get("unit_name", f"فاتورة")  # أو اسم خاص لو كان موجودًا
                 add_purchase(user_id, reserved, label, reserved, num)
+                # ✅ كتابة إضافية في جدول bill_and_units_purchases
+                try:
+                    add_bill_or_units_purchase(user_id, bill_name=label, price=reserved, number=str(num))
+                except Exception:
+                    pass
+
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
@@ -214,6 +235,11 @@ def register(bot, history):
 
                 # خصم نهائي (add_purchase يخصم داخلياً)
                 add_purchase(user_id, reserved, f"إنترنت {provider} {speed}", reserved, phone)
+                # ✅ كتابة إضافية في جدول internet_providers_purchases
+                try:
+                    add_internet_purchase(user_id, provider_name=provider, price=reserved, phone=str(phone), speed=speed)
+                except Exception:
+                    pass
 
                 # حذف الطلب من الطابور
                 delete_pending_request(request_id)
@@ -235,6 +261,12 @@ def register(bot, history):
                 number    = payload.get("number")
                 cash_type = payload.get("cash_type")
                 add_purchase(user_id, reserved, f"تحويل كاش {cash_type}", reserved, number)
+                # ✅ كتابة إضافية في جدول cash_transfer_purchases
+                try:
+                    add_cash_transfer_purchase(user_id, transfer_name=f"تحويل كاش {cash_type}", price=reserved, number=str(number))
+                except Exception:
+                    pass
+                # (باقي المنطق كما هو لديك)
 
             elif typ == "companies_transfer":
                 reserved           = payload.get("reserved", 0)
@@ -248,6 +280,11 @@ def register(bot, history):
                     reserved,
                     beneficiary_number,
                 )
+                # ✅ كتابة إضافية في جدول companies_transfer_purchases
+                try:
+                    add_companies_transfer_purchase(user_id, company_name=company, price=reserved, beneficiary_number=str(beneficiary_number))
+                except Exception:
+                    pass
 
                 delete_pending_request(request_id)
                 amount = payload.get("reserved", payload.get("price", 0))
@@ -276,6 +313,11 @@ def register(bot, history):
                     reserved,
                     university_id
                 )
+                # ✅ كتابة إضافية في جدول university_fees_purchases
+                try:
+                    add_university_fees_purchase(user_id, university_name=university, price=reserved, university_id=str(university_id))
+                except Exception:
+                    pass
 
                 delete_pending_request(request_id)
                 bot.send_message(
@@ -320,6 +362,11 @@ def register(bot, history):
 
                 # إدراج الإعلان في جدول القناة
                 add_channel_ad(user_id, count, reserved, contact, ad_text, images)
+                # ✅ كتابة إضافية في جدول ads_purchases
+                try:
+                    add_ads_purchase(user_id, ad_name="إعلان مدفوع", price=reserved)
+                except Exception:
+                    pass
 
                 # حذف الطلب من الطابور
                 delete_pending_request(request_id)
