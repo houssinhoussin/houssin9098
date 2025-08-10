@@ -171,27 +171,29 @@ def register(bot, history):
                 add_balance(user_id, reserved, "استرجاع حجز")
 
             # ——— طلبات المنتجات الرقمية ———
+          
             if typ == "order":
-                product_id = payload.get("product_id") or 0
-                player_id  = payload.get("player_id")
-
-                # جرّب جلب اسم المنتج الحقيقي من الكتالوج
-                try:
-                    from services.wallet_service import get_product_by_id
-                    prod = get_product_by_id(int(product_id)) if product_id else None
-                    name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id}"
-                except Exception:
-                    name = f"طلب منتج #{product_id}"
-
+                product_id_raw = payload.get("product_id")
+                player_id = payload.get("player_id")
                 amt = _amount_from_payload(payload)
 
-                # الشراء القياسي (purchases + خصم الرصيد)
-                add_purchase(user_id, int(product_id) if product_id else None, name, amt, player_id)
+                # جرّب تجيب المنتج؛ وإذا مو موجود، خلّي pid None لتفادي FK
+                try:
+                    from services.wallet_service import get_product_by_id
+                    prod = get_product_by_id(int(product_id_raw)) if product_id_raw else None
+                except Exception:
+                    prod = None
 
-                # كتابة إضافية في جدول مشتريات الألعاب
+                pid_for_db = int(product_id_raw) if (product_id_raw and prod) else None
+                name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id_raw}"
+
+                # يسجل في purchases ويخصم الرصيد
+                add_purchase(user_id, pid_for_db, name, amt, player_id)
+
+                # يسجل نسخة في game_purchases بدون خرق FK
                 try:
                     from services.wallet_service import add_game_purchase
-                    add_game_purchase(user_id, int(product_id) if product_id else None, name, int(amt), str(player_id or ""))
+                    add_game_purchase(user_id, pid_for_db, name, int(amt), str(player_id or ""))
                 except Exception:
                     pass
 
