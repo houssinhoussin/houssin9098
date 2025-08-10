@@ -46,6 +46,7 @@ def show_wallet(bot, message, history=None):
     )
 
 # ✅ عرض المشتريات
+
 def show_purchases(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
@@ -63,16 +64,27 @@ def show_purchases(bot, message, history=None):
             reply_markup=keyboards.wallet_menu()
         )
     else:
-        # تنسيق بسيط: «العنوان — السعر — التاريخ»
         lines = []
         for it in items:
             title = it.get("title") or "منتج"
             price = it.get("price") or 0
             ts    = (it.get("created_at") or "")[:16].replace("T", " ")
-            lines.append(f"• {title} — {price:,} ل.س — {ts}" + (f" — ID/رقم: {it.get('id_or_phone')}" if it.get("id_or_phone") else ""))
-        text = "🛍️ مشترياتك:\n" + "\n".join(lines)
-        bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
-    
+            suffix = f" — ID/رقم: {it.get('id_or_phone')}" if it.get("id_or_phone") else ""
+            lines.append(f"• {title} — {price:,} ل.س — {ts}{suffix}")
+
+        # إزالة أي سطور ثابتة من النوع 'لا توجد ...'
+        lines = [ln for ln in lines if not ln.strip().startswith("لا توجد")]
+
+        if not lines:
+            bot.send_message(
+                message.chat.id,
+                "📦 لا يوجد مشتريات حتى الآن.",
+                reply_markup=keyboards.wallet_menu()
+            )
+        else:
+            text = "🛍️ مشترياتك:\n" + "\n".join(lines)
+            bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
+
 def show_transfers(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
