@@ -352,23 +352,30 @@ def register(bot, history):
                 return
 
             # ——— شحن محفظة ———
-            elif typ == "recharge":
-                amount = int(payload.get("amount", 0) or 0)
-                desc   = f"شحن محفظة (طلب #{request_id})"
+            elif typ in ("recharge", "wallet_recharge", "deposit"):
+                # استخرج المبلغ بمرونة
+                amount = _amount_from_payload(payload) or payload.get("amount") or 0
+                amount = int(amount) if amount else 0
+                if amount <= 0:
+                    bot.answer_callback_query(call.id, "❌ مبلغ الشحن غير صالح.")
+                    return
 
-                # idempotency: منع الإضافة مرتين لو تم الضغط بالخطأ
-                exists = (
-                    get_table("transactions")
-                    .select("id")
-                    .eq("user_id", user_id)
-                    .eq("amount", amount)
-                    .eq("description", desc)
-                    .limit(1).execute()
-                )
-                if not exists.data:
-                    add_balance(user_id, amount, desc)
+                # لوج للمراقبة
+                try:
+                    logging.info(f"[ADMIN][RECHARGE][{user_id}] approve amount={amount} req_id={request_id}")
+                except Exception:
+                    pass
 
-                delete_pending_request(request_id)
+                # أضف رصيدًا بوصف واضح يمرّ عبر الفلتر في شاشة السجل
+                add_balance(user_id, amount, "شحن محفظة — من الإدارة")
+
+                # احذف الطلب صراحةً (لكي نرى DELETE في اللوج)
+                try:
+                    get_table("pending_requests").delete().eq("id", request_id).execute()
+                except Exception as e:
+                    logging.error(f"[ADMIN][RECHARGE] failed to delete req {request_id}: {e}")
+
+                # أبلغ العميل
                 bot.send_message(user_id, f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح.")
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
