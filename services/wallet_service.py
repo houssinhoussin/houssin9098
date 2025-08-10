@@ -411,19 +411,29 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
 
 # ===== تسجيلات إضافية في الجداول المتخصصة (Write-through) =====
 
-def add_game_purchase(user_id, product_id, product_name, price, player_id, created_at=None):
+def add_game_purchase(user_id: int, product_id, product_name: str, price: int, player_id: str, created_at: str = None):
+    """
+    إدراج آمن في game_purchases:
+    - لو product_id مش موجود فعليًا في products، نخليه None لتفادي FK 409.
+    """
+    pid = int(product_id) if product_id else None
+    if pid:
+        try:
+            chk = get_table(PRODUCTS_TABLE).select("id").eq("id", pid).limit(1).execute()
+            if not (getattr(chk, "data", None) and chk.data):
+                pid = None
+        except Exception:
+            pid = None
+
     data = {
         "user_id": user_id,
-        "product_id": product_id,
+        "product_id": pid,  # قد تكون None
         "product_name": product_name,
-        "price": price,
-        "player_id": player_id,
-        "created_at": (created_at or datetime.utcnow().isoformat())
+        "price": int(price),
+        "player_id": str(player_id or ""),
+        "created_at": (created_at or datetime.utcnow().isoformat()),
     }
-    try:
-        get_table("game_purchases").insert(data).execute()
-    except Exception:
-        pass
+    get_table("game_purchases").insert(data).execute()
 
 def add_bill_or_units_purchase(user_id: int, bill_name: str, price: int, number: str, created_at: str = None):
     data = {
