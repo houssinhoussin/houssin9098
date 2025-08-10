@@ -262,3 +262,76 @@ def get_wholesale_purchases(user_id: int):
 def user_has_admin_approval(user_id):
     return True
 
+# --- إضافة: إرجاع مشتريات موحدة الشكل + سجل تحويلات محفظة فقط ---
+
+
+# --- عرض مشتريات موحّد الشكل + سجل تحويلات محفظة فقط ---
+def get_all_purchases_structured(user_id: int, limit: int = 50):
+    items = []
+
+    # جدول المشتريات العام
+    try:
+        resp = get_table(PURCHASES_TABLE).select("product_name, price, created_at, player_id").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+        for r in (resp.data or []):
+            items.append({
+                "title": r.get("product_name") or "منتج",
+                "price": int(r.get("price") or 0),
+                "created_at": r.get("created_at"),
+                "id_or_phone": r.get("player_id"),
+            })
+    except Exception:
+        pass
+
+    # بقية الجداول حسب الحقول الشائعة (name/price/created_at + محاولة التقاط رقم/معرّف)
+    tables = [
+        ("ads_purchases", "ad_name"),
+        ("bill_and_units_purchases", "bill_name"),
+        ("cash_transfer_purchases", "transfer_name"),
+        ("companies_transfer_purchases", "company_name"),
+        ("internet_providers_purchases", "provider_name"),
+        ("university_fees_purchases", "university_name"),
+        ("wholesale_purchases", "wholesale_name"),
+    ]
+    probe_keys = ["player_id","phone","number","msisdn","account","account_number","student_id","student_number","target_id","target","user_id","line","game_id"]
+    for tname, title_field in tables:
+        try:
+            resp = get_table(tname).select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+            for r in (resp.data or []):
+                idp = None
+                for k in probe_keys:
+                    if k in r and r.get(k):
+                        idp = r.get(k)
+                        break
+                items.append({
+                    "title": r.get(title_field) or tname,
+                    "price": int(r.get("price") or 0),
+                    "created_at": r.get("created_at"),
+                    "id_or_phone": idp,
+                })
+        except Exception:
+            continue
+
+    # ترتيب بحسب التاريخ تنازليًا
+    items.sort(key=lambda x: (x.get("created_at") or ""), reverse=True)
+    return items[:limit]
+
+
+def get_wallet_transfers_only(user_id: int, limit: int = 20):
+    """يعيد فقط عمليات الإيداع والتحويل بين المحافظ. يستبعد الخصومات الخاصة بالمشتريات."""
+    resp = (
+        get_table(TRANSACTION_TABLE)
+        .select("description, amount, timestamp")
+        .eq("user_id", user_id)
+        .order("timestamp", desc=True)
+        .limit(200)  # نوسع ثم نفلتر
+        .execute()
+    )
+    out = []
+    for row in (resp.data or []):
+        desc = (row.get("description") or "").strip()
+        if not (desc.startswith("إيداع") or desc.startswith("تحويل")):
+            continue  # استبعاد خصومات/غيرها
+        ts = (row.get("timestamp") or "")[:19].replace("T", " ")
+        amount = int(row.get("amount") or 0)
+        out.append({"description": desc, "amount": amount, "timestamp": ts})
+    return out[:limit]
