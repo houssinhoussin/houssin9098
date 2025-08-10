@@ -1,6 +1,8 @@
+from services.products_admin import is_product_active
 import logging
 from database.db import get_table
 from telebot import types
+from services.system_service import is_maintenance, maintenance_message
 from services.wallet_service import register_user_if_not_exist, get_balance, deduct_balance
 from config import BOT_NAME
 from handlers import keyboards
@@ -260,6 +262,9 @@ def setup_inline_handlers(bot, admin_ids):
         bot.register_next_step_handler(msg, handle_player_id, bot)
 
 def register(bot, history):
+    # إن كان وضع الصيانة مفعلاً، سنعرض رسالة منع الطلبات الجديدة ضمن القوائم
+    global _MAINTENANCE_NOTICE
+    _MAINTENANCE_NOTICE = True
     # تسجيل الهاندلرات للرسائل (استدعاء دالة خاصة بذلك)
     register_message_handlers(bot, history)
     # تسجيل الهاندلرات للكولباك
