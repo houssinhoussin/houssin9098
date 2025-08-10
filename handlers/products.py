@@ -1,3 +1,5 @@
+# handlers/products.py
+
 from services.products_admin import is_product_active
 import logging
 from database.db import get_table
@@ -8,7 +10,10 @@ from config import BOT_NAME
 from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
 from database.models.product import Product
+
+# حالة الطلبات لكل مستخدم
 user_orders = {}
+
 def has_pending_request(user_id: int) -> bool:
     """ترجع True إذا كان لدى المستخدم طلب قيد الانتظار."""
     res = (
@@ -55,6 +60,8 @@ def convert_price_usd_to_syp(usd):
         return int(usd * 11300)
     return int(usd * 11000)
 
+# ================= واجهات العرض =================
+
 def show_products_menu(bot, message):
     bot.send_message(message.chat.id, "📍 اختر نوع المنتج:", reply_markup=keyboards.products_menu())
 
@@ -68,6 +75,8 @@ def show_product_options(bot, message, category):
         keyboard.add(types.InlineKeyboardButton(f"{p.name} ({p.price}$)", callback_data=f"select_{p.product_id}"))
     keyboard.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
     bot.send_message(message.chat.id, f"📦 اختر الكمية لـ {category}:", reply_markup=keyboard)
+
+# ================= خطوات إدخال آيدي اللاعب =================
 
 def handle_player_id(message, bot):
     user_id = message.from_user.id
@@ -89,7 +98,6 @@ def handle_player_id(message, bot):
         types.InlineKeyboardButton("❌ إلغاء", callback_data="cancel_order")
     )
 
-
     bot.send_message(
         user_id,
         (
@@ -104,6 +112,8 @@ def handle_player_id(message, bot):
         ),
         reply_markup=keyboard
     )
+
+# ================= تسجيل هاندلرات الرسائل =================
 
 def register_message_handlers(bot, history):
     @bot.message_handler(func=lambda msg: msg.text in ["🛒 المنتجات", "💼 المنتجات"])
@@ -145,7 +155,14 @@ def register_message_handlers(bot, history):
     def game_handler(msg):
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
-       
+
+        # صيانة عامة؟ (المنطق العام محفوظ—فقط عرض رسالته إن لزم)
+        if is_maintenance():
+            try:
+                bot.send_message(msg.chat.id, maintenance_message())
+            finally:
+                return
+
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
@@ -156,12 +173,15 @@ def register_message_handlers(bot, history):
         user_orders[user_id] = {"category": category}
         show_product_options(bot, msg, category)
 
+# ================= تسجيل هاندلرات الكولباك =================
+
 def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data.startswith("select_"))
     def on_select_product(call):
         user_id = call.from_user.id
-
         product_id = int(call.data.split("_", 1)[1])
+
+        # ابحث عن المنتج
         selected = None
         for items in PRODUCTS.values():
             for p in items:
@@ -171,8 +191,12 @@ def setup_inline_handlers(bot, admin_ids):
             if selected:
                 break
         if not selected:
-            bot.answer_callback_query(call.id, "❌ المنتج غير موجود.")
-            return
+            return bot.answer_callback_query(call.id, "❌ المنتج غير موجود.")
+
+        # ✅ منع اختيار منتج موقوف
+        if not is_product_active(product_id):
+            return bot.answer_callback_query(call.id, "⛔ هذا المنتج متوقف حالياً.")
+
         user_orders[user_id] = {"category": selected.category, "product": selected}
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
@@ -196,18 +220,34 @@ def setup_inline_handlers(bot, admin_ids):
         user_orders.pop(user_id, None)
         bot.send_message(user_id, "❌ تم إلغاء الطلب.", reply_markup=keyboards.products_menu())
 
+    @bot.callback_query_handler(func=lambda c: c.data == "edit_player_id")
+    def edit_player_id(call):
+        user_id = call.from_user.id
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
+        msg = bot.send_message(user_id, "📋 يرجى إدخال آيدي اللاعب الجديد:", reply_markup=kb)
+        bot.register_next_step_handler(msg, handle_player_id, bot)
+
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
         user_id = call.from_user.id
         order = user_orders.get(user_id)
         if not order or "product" not in order or "player_id" not in order:
-            bot.answer_callback_query(call.id, "❌ لم يتم تجهيز الطلب بالكامل.")
-            return
-        product = order["product"]
+            return bot.answer_callback_query(call.id, "❌ لم يتم تجهيز الطلب بالكامل.")
+
+        # ✅ منع ازدواج الطلب
+        if has_pending_request(user_id):
+            return bot.answer_callback_query(call.id, "⏳ لديك طلب قيد الانتظار حالياً.")
+
+        product   = order["product"]
         player_id = order["player_id"]
         price_syp = convert_price_usd_to_syp(product.price)
 
-        # **تحقق من الرصيد قبل إرسال الطلب للإدمن والطابور**
+        # المنتج ما زال فعّال؟
+        if not is_product_active(product.product_id):
+            return bot.answer_callback_query(call.id, "⛔ هذا المنتج متوقف حالياً.")
+
+        # تحقق الرصيد
         balance = get_balance(user_id)
         if balance < price_syp:
             bot.send_message(
@@ -215,14 +255,15 @@ def setup_inline_handlers(bot, admin_ids):
                 f"❌ لا يوجد رصيد كافٍ لإرسال الطلب.\nرصيدك الحالي: {balance:,} ل.س\nالسعر المطلوب: {price_syp:,} ل.س\nيرجى شحن المحفظة أولاً."
             )
             return
-        # حجز المبلغ فور إرسال الطلب للطابور
-        deduct_balance(user_id, price_syp)
-        # تحديث الرصيد اللحظي بعد الحجز
+
+        # ✅ حجز المبلغ عند الإرسال إلى الطابور (وصف واضح للحجز)
+        deduct_balance(user_id, price_syp, f"حجز منتج - {product.name}")
+
+        # (اختياري) تحديث الرصيد للعرض في رسالة الأدمن
         balance = get_balance(user_id)
 
         admin_msg = (
             f"💰 رصيد المستخدم: {balance:,} ل.س\n"
-
             f"🆕 طلب جديد\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
             f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
@@ -234,6 +275,8 @@ def setup_inline_handlers(bot, admin_ids):
             f"💵 السعر: {price_syp:,} ل.س\n"
             f"(select_{product.product_id})"
         )
+
+        # تمرير reserved للإدارة (ليتم الاسترجاع أو الخصم النهائي عند القبول)
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
@@ -245,27 +288,22 @@ def setup_inline_handlers(bot, admin_ids):
                 "price": price_syp,
                 "reserved": price_syp
             }
-        )  # ← هنا نغلق القوسين
+        )
 
         bot.send_message(
             user_id,
             "✅ تم إرسال طلبك للإدارة. سيتم معالجته خلال مدة من 1 إلى 4 دقائق. لن تتمكن من تقديم طلب جديد حتى معالجة هذا الطلب."
         )
-        process_queue(bot)   # ← هذا السطر مهم جداً!
-    # أضف الكولباك هنا
-    @bot.callback_query_handler(func=lambda c: c.data == "edit_player_id")
-    def edit_player_id(call):
-        user_id = call.from_user.id
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
-        msg = bot.send_message(user_id, "📋 يرجى إدخال آيدي اللاعب الجديد:", reply_markup=kb)
-        bot.register_next_step_handler(msg, handle_player_id, bot)
+        process_queue(bot)  # توحيداً مع باقي الملفات
+
+# ================= نقطة التسجيل من main.py =================
 
 def register(bot, history):
-    # إن كان وضع الصيانة مفعلاً، سنعرض رسالة منع الطلبات الجديدة ضمن القوائم
+    # إن كان وضع الصيانة مفعلاً، سنعرض رسالة منع الطلبات الجديدة ضمن القوائم (المنطق العام محفوظ)
     global _MAINTENANCE_NOTICE
     _MAINTENANCE_NOTICE = True
-    # تسجيل الهاندلرات للرسائل (استدعاء دالة خاصة بذلك)
+
+    # تسجيل هاندلرات الرسائل
     register_message_handlers(bot, history)
-    # تسجيل الهاندلرات للكولباك
+    # تسجيل هاندلرات الكولباك
     setup_inline_handlers(bot, admin_ids=[])
