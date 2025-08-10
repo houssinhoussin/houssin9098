@@ -134,10 +134,6 @@ notify_channel_on_start(bot)
 # تفعيل سجل الأخطاء + قائمة الأوامر الثابتة
 install_global_error_logging()
 setup_bot_commands(bot, list(ADMINS))
-setup_bot_commands(bot, list(ADMINS))
-# تفعيل سجل الأخطاء + قائمة الأوامر الثابتة
-install_global_error_logging()
-setup_bot_commands(bot, list(ADMINS))
 
 # ---------------------------------------------------------
 # ربط نظام أزرار المنتجات (مهم)
