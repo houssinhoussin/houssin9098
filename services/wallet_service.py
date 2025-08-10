@@ -178,9 +178,8 @@ def get_transfers(user_id: int, limit: int = 10):
 
 def get_deposit_transfers(user_id: int, limit: int = 10):
     """
-    إرجاع سجل شحن المحفظة فقط.
-    يعتبر أي عملية بمبلغ موجب ووصف يبدأ بـ 'إيداع' أو 'شحن' شحناً للمحفظة،
-    بما في ذلك 'إيداع يدوي'.
+    إرجاع سجل شحن المحفظة الحقيقي فقط:
+    مبلغ موجب + وصف يبدأ بـ "شحن محفظة".
     """
     resp = (
         get_table(TRANSACTION_TABLE)
@@ -194,14 +193,11 @@ def get_deposit_transfers(user_id: int, limit: int = 10):
     for row in (resp.data or []):
         desc = (row.get("description") or "").strip()
         amt  = int(row.get("amount") or 0)
-        if amt <= 0:
-            continue
-        if not (desc.startswith("إيداع") or desc.startswith("شحن")):
-            continue
-        ts = (row.get("timestamp") or "")[:19].replace("T", " ")
-        out.append({"description": desc, "amount": amt, "timestamp": ts})
-        if len(out) >= limit:
-            break
+        if amt > 0 and desc.startswith("شحن محفظة"):
+            ts = (row.get("timestamp") or "")[:19].replace("T", " ")
+            out.append({"description": desc, "amount": amt, "timestamp": ts})
+            if len(out) >= limit:
+                break
     return out
 
 # ================= المنتجات =================
@@ -370,9 +366,10 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
 
 def get_wallet_transfers_only(user_id: int, limit: int = 50):
     """
-    يُرجع فقط عمليات الإيداع والتحويل بين المحافظ،
-    ويُسقط التكرارات المتجاورة لو كانت متطابقة بفارق ≤ 3 ثوانٍ.
-    لا يُظهر خصومات الشراء/الخصم التلقائي.
+    يُرجع فقط:
+      • شحن المحفظة (موجب + يبدأ بـ "شحن محفظة")
+      • تحويلاتك الصادرة (سالب + يبدأ بـ "تحويل إلى")
+    ويسقط التكرارات المتجاورة لو كانت متطابقة بفارق ≤ 3 ثوانٍ.
     """
     resp = (
         get_table(TRANSACTION_TABLE)
@@ -386,20 +383,26 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
     last = {}  # (desc, amount) -> آخر توقيت بالثواني
     for row in (resp.data or []):
         desc = (row.get("description") or "").strip()
-        if not (desc.startswith("إيداع") or desc.startswith("تحويل")):
-            continue  # استبعاد خصومات/شراء
+        amount = int(row.get("amount") or 0)
+
+        # نسمح فقط بالشرطين المحددين
+        if not ((amount > 0 and desc.startswith("شحن محفظة")) or
+                (amount < 0 and desc.startswith("تحويل إلى"))):
+            continue
+
         ts_raw = (row.get("timestamp") or "")[:19].replace("T", " ")
         try:
             dt = datetime.fromisoformat(ts_raw)
             ts_sec = int(dt.timestamp())
         except Exception:
             ts_sec = None
-        amount = int(row.get("amount") or 0)
+
         k = (desc, amount)
         if ts_sec is not None and k in last and abs(ts_sec - last[k]) <= 3:
             continue  # إسقاط تكرارات متجاورة
         if ts_sec is not None:
             last[k] = ts_sec
+
         out.append({"description": desc, "amount": amount, "timestamp": ts_raw})
         if len(out) >= limit:
             break
