@@ -169,25 +169,40 @@ def register(bot, history):
             reserved = int(payload.get("reserved") or 0)
             if typ in RESERVED_TYPES and reserved > 0:
                 add_balance(user_id, reserved, "استرجاع حجز")
+        # ——— طلبات المنتجات الرقمية ———
+        if typ == "order":
+            product_id = payload.get("product_id") or 0
+            player_id  = payload.get("player_id")
 
-            # ——— طلبات المنتجات الرقمية ———
-            if typ == "order":
-                product_id = payload.get("product_id") or None
-                player_id  = payload.get("player_id")
-                name       = f"طلب منتج #{product_id}"
-                amt        = _amount_from_payload(payload)
-                # تسجيل الشراء (سيقوم add_purchase بالخصم وتسجيل الحركة)
-                add_purchase(user_id, product_id, name, amt, player_id)
+            # جرّب جلب اسم المنتج الحقيقي من الكتالوج
+            try:
+                from services.wallet_service import get_product_by_id
+                prod = get_product_by_id(int(product_id)) if product_id else None
+                name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id}"
+            except Exception:
+                name = f"طلب منتج #{product_id}"
 
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amt:,} ل.س من محفظتك.",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                return
+            amt = _amount_from_payload(payload)
+
+            # الشراء القياسي (purchases + خصم الرصيد)
+            add_purchase(user_id, int(product_id) if product_id else None, name, amt, player_id)
+
+            # كتابة إضافية في جدول مشتريات الألعاب
+            try:
+                from services.wallet_service import add_game_purchase
+                add_game_purchase(user_id, int(product_id) if product_id else None, name, int(amt), str(player_id or ""))
+            except Exception:
+                pass
+
+            delete_pending_request(request_id)
+            bot.send_message(
+                user_id,
+                f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amt:,} ل.س من محفظتك.",
+                parse_mode="HTML"
+            )
+            bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+            queue_cooldown_start(bot)
+            return
 
             # ——— وحدات (سيرياتيل/MTN) ———
             if typ in ("syr_unit", "mtn_unit"):
