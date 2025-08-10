@@ -169,50 +169,51 @@ def register(bot, history):
             reserved = int(payload.get("reserved") or 0)
             if typ in RESERVED_TYPES and reserved > 0:
                 add_balance(user_id, reserved, "استرجاع حجز")
-        # ——— طلبات المنتجات الرقمية ———
-        if typ == "order":
-            product_id = payload.get("product_id") or 0
-            player_id  = payload.get("player_id")
 
-            # جرّب جلب اسم المنتج الحقيقي من الكتالوج
-            try:
-                from services.wallet_service import get_product_by_id
-                prod = get_product_by_id(int(product_id)) if product_id else None
-                name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id}"
-            except Exception:
-                name = f"طلب منتج #{product_id}"
+            # ——— طلبات المنتجات الرقمية ———
+            if typ == "order":
+                product_id = payload.get("product_id") or 0
+                player_id  = payload.get("player_id")
 
-            amt = _amount_from_payload(payload)
+                # جرّب جلب اسم المنتج الحقيقي من الكتالوج
+                try:
+                    from services.wallet_service import get_product_by_id
+                    prod = get_product_by_id(int(product_id)) if product_id else None
+                    name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id}"
+                except Exception:
+                    name = f"طلب منتج #{product_id}"
 
-            # الشراء القياسي (purchases + خصم الرصيد)
-            add_purchase(user_id, int(product_id) if product_id else None, name, amt, player_id)
+                amt = _amount_from_payload(payload)
 
-            # كتابة إضافية في جدول مشتريات الألعاب
-            try:
-                from services.wallet_service import add_game_purchase
-                add_game_purchase(user_id, int(product_id) if product_id else None, name, int(amt), str(player_id or ""))
-            except Exception:
-                pass
+                # الشراء القياسي (purchases + خصم الرصيد)
+                add_purchase(user_id, int(product_id) if product_id else None, name, amt, player_id)
 
-            delete_pending_request(request_id)
-            bot.send_message(
-                user_id,
-                f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amt:,} ل.س من محفظتك.",
-                parse_mode="HTML"
-            )
-            bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-            queue_cooldown_start(bot)
-            return
+                # كتابة إضافية في جدول مشتريات الألعاب
+                try:
+                    from services.wallet_service import add_game_purchase
+                    add_game_purchase(user_id, int(product_id) if product_id else None, name, int(amt), str(player_id or ""))
+                except Exception:
+                    pass
+
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amt:,} ل.س من محفظتك.",
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                return
 
             # ——— وحدات (سيرياتيل/MTN) ———
-            if typ in ("syr_unit", "mtn_unit"):
-                price = payload.get("price", 0)
+            elif typ in ("syr_unit", "mtn_unit"):
+                price = int(payload.get("price", 0) or 0)
                 num   = payload.get("number")
                 name  = payload.get("unit_name") or "وحدات"
-                add_purchase(user_id, None, name, int(price), str(num))
+                add_purchase(user_id, None, name, price, str(num))
                 # ✅ كتابة إضافية في جدول bill_and_units_purchases
                 try:
-                    add_bill_or_units_purchase(user_id, bill_name=name, price=int(price), number=str(num))
+                    add_bill_or_units_purchase(user_id, bill_name=name, price=price, number=str(num))
                 except Exception:
                     pass
 
@@ -222,7 +223,7 @@ def register(bot, history):
                     f"✅ تم تنفيذ عملية تحويل الوحدات بنجاح!\n"
                     f"• الرقم: <code>{num}</code>\n"
                     f"• الكمية: {name}\n"
-                    f"• السعر: {int(price):,} ل.س",
+                    f"• السعر: {price:,} ل.س",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -284,7 +285,6 @@ def register(bot, history):
                 amt       = _amount_from_payload(payload)
                 number    = payload.get("number")
                 cash_type = payload.get("cash_type")
-                # تعديل: name كما هو
                 name      = f"تحويل كاش {cash_type}"
 
                 add_purchase(user_id, None, name, amt, str(number))
@@ -345,7 +345,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم دفع رسومك الجامعية ({university}) بمبلغ {amt:,} ل.س بنجاح."
+                    f"✅ تم دفع رسومك الجامعية ({wwwuniversity}) بمبلغ {amt:,} ل.س بنجاح."
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
@@ -369,11 +369,8 @@ def register(bot, history):
                 # أضف رصيدًا بوصف واضح يمرّ عبر الفلتر في شاشة السجل
                 add_balance(user_id, amount, "شحن محفظة — من الإدارة")
 
-                # احذف الطلب صراحةً (لكي نرى DELETE في اللوج)
-                try:
-                    get_table("pending_requests").delete().eq("id", request_id).execute()
-                except Exception as e:
-                    logging.error(f"[ADMIN][RECHARGE] failed to delete req {request_id}: {e}")
+                # احذف الطلب
+                delete_pending_request(request_id)
 
                 # أبلغ العميل
                 bot.send_message(user_id, f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح.")
