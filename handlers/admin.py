@@ -160,8 +160,6 @@ def register(bot, history):
 
                 # ثمّ تسجّل الشراء
                 add_purchase(user_id, reserved, name, reserved, player_id)
-                # سجّل الشراء (الخصم تمّ فعليّاً عند الإرسال)
-                add_purchase(user_id, reserved, name, reserved, player_id)
 
                 delete_pending_request(request_id)
                 bot.send_message(
