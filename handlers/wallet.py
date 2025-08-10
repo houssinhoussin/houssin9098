@@ -47,7 +47,6 @@ def show_wallet(bot, message, history=None):
     )
 
 # ✅ عرض المشتريات
-
 def show_purchases(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
@@ -109,24 +108,31 @@ def show_transfers(bot, message, history=None):
         text = "📑 سجل التحويلات:\n" + "\n".join(lines)
         bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
 
+# --- تسجيل الهاندلرات ضمن register حتى يعمل زر "محفظتي" وباقي الأزرار ---
+def register(bot, history=None):
+    # محفظتي
     @bot.message_handler(func=lambda msg: msg.text == "💰 محفظتي")
     def handle_wallet(msg):
-        show_wallet(bot, msg, user_state)
+        show_wallet(bot, msg, history)
 
+    # مشترياتي
     @bot.message_handler(func=lambda msg: msg.text == "🛍️ مشترياتي")
     def handle_purchases(msg):
-        show_purchases(bot, msg, user_state)
+        show_purchases(bot, msg, history)
 
+    # سجل التحويلات
     @bot.message_handler(func=lambda msg: msg.text == "📑 سجل التحويلات")
     def handle_transfers(msg):
-        show_transfers(bot, msg, user_state)
+        show_transfers(bot, msg, history)
 
+    # تحويل من محفظتك إلى محفظة عميل آخر — تنويه أولي
     @bot.message_handler(func=lambda msg: msg.text == "🔁 تحويل من محفظتك إلى محفظة عميل آخر")
     def handle_transfer_notice(msg):
         user_id = msg.from_user.id
         name = msg.from_user.full_name
         register_user_if_not_exist(user_id, name)
-        user_state.setdefault(user_id, []).append("wallet")
+        if history is not None:
+            history.setdefault(user_id, []).append("wallet")
         warning = (
             "⚠️ تنويه:\n"
             "هذه العملية خاصة بين المستخدمين فقط.\n"
@@ -272,10 +278,4 @@ def show_transfers(bot, message, history=None):
         except Exception as e:
             pass  # العميل ربما حظر البوت أو لم يبدأه بعد
         transfer_steps.pop(user_id, None)
-        show_wallet(bot, msg, user_state)
-def register(bot, history=None):
-     # لا شيء—كل الهاندلرات مسجّلة عبر الديكوريترز عند الاستيراد
-     return
-
-
-# === نهاية الملف ===
+        show_wallet(bot, msg, history)
