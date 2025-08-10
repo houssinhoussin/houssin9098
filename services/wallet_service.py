@@ -69,10 +69,7 @@ CHANNEL_ADS_TABLE = "channel_ads"
 # عمليات المستخدم
 def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None:
     get_table(USER_TABLE).upsert(
-        {
-            "user_id": user_id,
-            "name": name,
-        },
+        {"user_id": user_id, "name": name},
         on_conflict="user_id",
     ).execute()
 
@@ -118,15 +115,13 @@ def transfer_balance(from_user_id: int, to_user_id: int, amount: int, fee: int =
     add_balance(to_user_id, amount, f"تحويل من {from_user_id}")
     return True
 
-# المشتريات
+# المشتريات (الأساسي)
 def get_purchases(user_id: int, limit: int = 10):
-    # حذف السجلات الأقدم من 12 ساعة عند الاستعلام
     now = datetime.utcnow()
-    expire_time = now - timedelta(hours=15)
     table = get_table(PURCHASES_TABLE)
-    # حذف القديم
+    # تنظيف القديمة
     table.delete().eq("user_id", user_id).lt("expire_at", now.isoformat()).execute()
-    # جلب المشتريات الفعالة فقط
+    # جلب الفعّالة فقط
     response = (
         table.select("product_name", "price", "created_at", "player_id", "expire_at")
         .eq("user_id", user_id)
@@ -155,7 +150,7 @@ def add_purchase(user_id: int, product_id: int, product_name: str, price: int, p
     get_table(PURCHASES_TABLE).insert(data).execute()
     deduct_balance(user_id, price, f"شراء {product_name}")
 
-# سجل التحويلات المالية (كل العمليات المالية)
+# سجل التحويلات المالية (عام)
 def get_transfers(user_id: int, limit: int = 10):
     response = (
         get_table(TRANSACTION_TABLE)
@@ -173,7 +168,7 @@ def get_transfers(user_id: int, limit: int = 10):
         transfers.append(f"{desc} ({amount:+,} ل.س) في {ts}")
     return transfers
 
-# سجل الإيداعات فقط (في حال استخدمته في مكان آخر)
+# سجل الإيداعات فقط (اختياري قديم)
 def get_deposit_transfers(user_id: int, limit: int = 10):
     response = (
         get_table(TRANSACTION_TABLE)
@@ -199,12 +194,12 @@ def get_product_by_id(product_id: int):
     response = get_table(PRODUCTS_TABLE).select("*").eq("id", product_id).limit(1).execute()
     return response.data[0] if response.data else None
 
-# الدالة المطلوبة لتصحيح الاستيراد
+# مساعد انتقائي
 def _select_single(table_name, field, value):
     response = get_table(table_name).select(field).eq(field, value).limit(1).execute()
     return response.data[0][field] if response.data else None
 
-# دوال جلب المشتريات حسب الفئة (تبقى كما هي)
+# جداول مشتريات متخصصة (للعرض التجميعي فقط)
 def get_ads_purchases(user_id: int):
     response = get_table('ads_purchases').select("*").eq("user_id", user_id).execute()
     ads_items = []
@@ -259,22 +254,28 @@ def user_has_admin_approval(user_id):
     return True
 
 # ------------------------------------------------------------------
-# إضافات للعرض فقط (بدون تغيير منطق الشراء/الخصم)
+# إضافات للعرض فقط (بدون تغيير المنطق)
 # ------------------------------------------------------------------
 
 def get_all_purchases_structured(user_id: int, limit: int = 50):
     """
     تُرجع المشتريات بشكل موحّد من عدة جداول مع إزالة التكرارات عند العرض فقط.
-    لا تغيّر أي بيانات في قاعدة البيانات.
+    نُهمِل الـid في مفتاح التمييز حتى لا يظهر نفس الحدث مرتين بفارق ثوانٍ.
     """
     items = []
 
-    # جدول المشتريات العام
+    # purchases الأساسي
     try:
-        resp = get_table(PURCHASES_TABLE).select("id, product_name, price, created_at, player_id").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+        resp = (
+            get_table(PURCHASES_TABLE)
+            .select("id, product_name, price, created_at, player_id")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit * 2)
+            .execute()
+        )
         for r in (resp.data or []):
             items.append({
-                "id": r.get("id"),
                 "title": r.get("product_name") or "منتج",
                 "price": int(r.get("price") or 0),
                 "created_at": r.get("created_at"),
@@ -283,7 +284,7 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
     except Exception:
         pass
 
-    # بقية الجداول حسب الحقول الشائعة
+    # بقية الجداول (قراءة فقط للعرض)
     tables = [
         ("ads_purchases", "ad_name"),
         ("bill_and_units_purchases", "bill_name"),
@@ -296,7 +297,14 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
     probe = ["player_id","phone","number","msisdn","account","account_number","student_id","student_number","target_id","target","line","game_id"]
     for tname, title_field in tables:
         try:
-            resp = get_table(tname).select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+            resp = (
+                get_table(tname)
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(limit * 2)
+                .execute()
+            )
             for r in (resp.data or []):
                 idp = None
                 for k in probe:
@@ -304,7 +312,6 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
                         idp = r.get(k)
                         break
                 items.append({
-                    "id": r.get("id"),
                     "title": r.get(title_field) or tname,
                     "price": int(r.get("price") or 0),
                     "created_at": r.get("created_at"),
@@ -313,13 +320,14 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
         except Exception:
             continue
 
-    # ترتيب وتصفية التكرارات (نعتبر التطابق حسب: id|العنوان|السعر|الدقائق|ID/الهاتف)
-    def _ts_min(v):  # حتى مستوى الدقائق
-        return (v or "")[:16]
+    def _ts_sec(v):  # حتى الثواني
+        return (v or "")[:19]
+
+    # إزالة التكرارات (عرض فقط)
     seen = set()
     uniq = []
     for it in sorted(items, key=lambda x: x.get("created_at") or "", reverse=True):
-        key = (it.get("id") or None, it.get("title"), it.get("price"), _ts_min(it.get("created_at")), it.get("id_or_phone"))
+        key = (it.get("title"), it.get("price"), _ts_sec(it.get("created_at")), it.get("id_or_phone"))
         if key in seen:
             continue
         seen.add(key)
@@ -331,8 +339,8 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
 def get_wallet_transfers_only(user_id: int, limit: int = 50):
     """
     يُرجع فقط عمليات الإيداع والتحويل بين المحافظ،
-    ويُسقط التكرارات المتجاورة لو كانت متطابقة بفارق ≤ 3 ثوان.
-    لا يُظهر خصومات الشراء.
+    ويُسقط التكرارات المتجاورة لو كانت متطابقة بفارق ≤ 3 ثوانٍ.
+    لا يُظهر خصومات الشراء/الخصم التلقائي.
     """
     resp = (
         get_table(TRANSACTION_TABLE)
@@ -347,26 +355,20 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
     for row in (resp.data or []):
         desc = (row.get("description") or "").strip()
         if not (desc.startswith("إيداع") or desc.startswith("تحويل")):
-            continue  # استبعاد خصومات/غيرها
-
+            continue  # استبعاد خصومات/شراء
         ts_raw = (row.get("timestamp") or "")[:19].replace("T", " ")
         try:
             dt = datetime.fromisoformat(ts_raw)
             ts_sec = int(dt.timestamp())
         except Exception:
             ts_sec = None
-
         amount = int(row.get("amount") or 0)
         k = (desc, amount)
         if ts_sec is not None and k in last and abs(ts_sec - last[k]) <= 3:
-            # إسقاط التكرارات المتجاورة خلال 3 ثواني (عرض فقط)
-            continue
-
+            continue  # إسقاط تكرارات متجاورة
         if ts_sec is not None:
             last[k] = ts_sec
-
         out.append({"description": desc, "amount": amount, "timestamp": ts_raw})
         if len(out) >= limit:
             break
-
     return out
