@@ -167,7 +167,7 @@ def register(bot, history):
 
             # ——— طلبات المنتجات الرقمية ———
             if typ == "order":
-                product_id = payload.get("product_id") or 0
+                product_id = payload.get("product_id") or None
                 player_id  = payload.get("player_id")
                 name       = f"طلب منتج #{product_id}"
                 # تسجيل الشراء (سيقوم add_purchase بالخصم وتسجيل الحركة)
@@ -188,7 +188,7 @@ def register(bot, history):
                 price = payload.get("price", 0)
                 num   = payload.get("number")
                 name  = payload.get("unit_name") or "وحدات"
-                add_purchase(user_id, 0, name, int(price), str(num))
+                add_purchase(user_id, None, name, int(price), str(num))
                 # ✅ كتابة إضافية في جدول bill_and_units_purchases
                 try:
                     add_bill_or_units_purchase(user_id, bill_name=name, price=int(price), number=str(num))
@@ -213,7 +213,7 @@ def register(bot, history):
                 amt   = _amount_from_payload(payload)
                 num   = payload.get("number")
                 label = payload.get("unit_name", "فاتورة")
-                add_purchase(user_id, 0, label, amt, str(num))
+                add_purchase(user_id, None, label, amt, str(num))
                 # ✅ كتابة إضافية في جدول bill_and_units_purchases
                 try:
                     add_bill_or_units_purchase(user_id, bill_name=label, price=amt, number=str(num))
@@ -240,7 +240,7 @@ def register(bot, history):
                 phone    = payload.get("phone")
                 name     = f"إنترنت {provider} {speed}"
 
-                add_purchase(user_id, 0, name, amt, str(phone))
+                add_purchase(user_id, None, name, amt, str(phone))
                 # ✅ كتابة إضافية في جدول internet_providers_purchases
                 try:
                     add_internet_purchase(user_id, provider_name=provider, price=amt, phone=str(phone), speed=speed)
@@ -263,9 +263,10 @@ def register(bot, history):
                 amt       = _amount_from_payload(payload)
                 number    = payload.get("number")
                 cash_type = payload.get("cash_type")
+            # تعديل: name كما هو
                 name      = f"تحويل كاش {cash_type}"
 
-                add_purchase(user_id, 0, name, amt, str(number))
+                add_purchase(user_id, None, name, amt, str(number))
                 # ✅ كتابة إضافية في جدول cash_transfer_purchases
                 try:
                     add_cash_transfer_purchase(user_id, transfer_name=name, price=amt, number=str(number))
@@ -289,7 +290,7 @@ def register(bot, history):
                 beneficiary_number = payload.get("beneficiary_number")
                 name               = f"حوالة مالية عبر {company}"
 
-                add_purchase(user_id, 0, name, amt, str(beneficiary_number))
+                add_purchase(user_id, None, name, amt, str(beneficiary_number))
                 # ✅ كتابة إضافية في جدول companies_transfer_purchases
                 try:
                     add_companies_transfer_purchase(user_id, company_name=company, price=amt, beneficiary_number=str(beneficiary_number))
@@ -313,7 +314,7 @@ def register(bot, history):
                 university_id = payload.get("university_id")
                 name          = f"دفع رسوم جامعية ({university})"
 
-                add_purchase(user_id, 0, name, amt, str(university_id))
+                add_purchase(user_id, None, name, amt, str(university_id))
                 # ✅ كتابة إضافية في جدول university_fees_purchases
                 try:
                     add_university_fees_purchase(user_id, university_name=university, price=amt, university_id=str(university_id))
