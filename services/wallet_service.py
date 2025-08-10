@@ -372,3 +372,84 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
         if len(out) >= limit:
             break
     return out
+  
+# ===== تسجيلات إضافية في الجداول المتخصصة (Write-through) =====
+
+def add_bill_or_units_purchase(user_id: int, bill_name: str, price: int, number: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "bill_name": bill_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "number": number
+    }
+    try:
+        get_table("bill_and_units_purchases").insert(data).execute()
+    except Exception:
+        pass  # لا نغيّر المنطق حتى لو فشل الإدراج الإضافي
+
+def add_internet_purchase(user_id: int, provider_name: str, price: int, phone: str, speed: str = None, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "provider_name": provider_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "phone": phone,
+        "speed": speed
+    }
+    try:
+        get_table("internet_providers_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_cash_transfer_purchase(user_id: int, transfer_name: str, price: int, number: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "transfer_name": transfer_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "number": number
+    }
+    try:
+        get_table("cash_transfer_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_companies_transfer_purchase(user_id: int, company_name: str, price: int, beneficiary_number: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "company_name": company_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "beneficiary_number": beneficiary_number
+    }
+    try:
+        get_table("companies_transfer_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_university_fees_purchase(user_id: int, university_name: str, price: int, university_id: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "university_name": university_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "university_id": university_id
+    }
+    try:
+        get_table("university_fees_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_ads_purchase(user_id: int, ad_name: str, price: int, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "ad_name": ad_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat())
+    }
+    try:
+        get_table("ads_purchases").insert(data).execute()
+    except Exception:
+        pass
+
