@@ -148,9 +148,9 @@ def register(bot, history):
             if not allowed(call.from_user.id, "queue:cancel"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             delete_pending_request(request_id)
-            reserved = payload.get("reserved", 0)
+            reserved = int(payload.get("reserved", 0) or 0)
             if reserved:
-                add_balance(user_id, reserved)
+                add_balance(user_id, reserved, "إلغاء حجز")
                 bot.send_message(user_id, f"🚫 تم استرجاع {reserved:,} ل.س إلى محفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
@@ -158,25 +158,31 @@ def register(bot, history):
 
         # === قبول الطلب ===
         if action == "accept":
-            # ==== إعادة مبلغ الحجز مرة واحدة فقط قبل تسجيل الشراء ====
-            amount = _amount_from_payload(payload)
-            if amount:
-                add_balance(user_id, amount)  # إلغاء الحجز السابق
-
             typ = payload.get("type")
+
+            # إرجاع الحجز فقط للأنواع التي تستخدم الحجز وبوصف واضح
+            RESERVED_TYPES = {
+                "order","syr_unit","mtn_unit","syr_bill","mtn_bill",
+                "internet","cash_transfer","companies_transfer",
+                "university_fees","ads"
+            }
+            reserved = int(payload.get("reserved") or 0)
+            if typ in RESERVED_TYPES and reserved > 0:
+                add_balance(user_id, reserved, "استرجاع حجز")
 
             # ——— طلبات المنتجات الرقمية ———
             if typ == "order":
                 product_id = payload.get("product_id") or None
                 player_id  = payload.get("player_id")
                 name       = f"طلب منتج #{product_id}"
+                amt        = _amount_from_payload(payload)
                 # تسجيل الشراء (سيقوم add_purchase بالخصم وتسجيل الحركة)
-                add_purchase(user_id, product_id, name, amount, player_id)
+                add_purchase(user_id, product_id, name, amt, player_id)
 
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amount:,} ل.س من محفظتك.",
+                    f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amt:,} ل.س من محفظتك.",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -263,7 +269,7 @@ def register(bot, history):
                 amt       = _amount_from_payload(payload)
                 number    = payload.get("number")
                 cash_type = payload.get("cash_type")
-            # تعديل: name كما هو
+                # تعديل: name كما هو
                 name      = f"تحويل كاش {cash_type}"
 
                 add_purchase(user_id, None, name, amt, str(number))
@@ -332,10 +338,23 @@ def register(bot, history):
 
             # ——— شحن محفظة ———
             elif typ == "recharge":
-                amount = payload.get("amount", 0)
-                add_balance(user_id, int(amount))
+                amount = int(payload.get("amount", 0) or 0)
+                desc   = f"شحن محفظة (طلب #{request_id})"
+
+                # idempotency: منع الإضافة مرتين لو تم الضغط بالخطأ
+                exists = (
+                    get_table("transactions")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .eq("amount", amount)
+                    .eq("description", desc)
+                    .limit(1).execute()
+                )
+                if not exists.data:
+                    add_balance(user_id, amount, desc)
+
                 delete_pending_request(request_id)
-                bot.send_message(user_id, f"✅ تم شحن محفظتك بمبلغ {int(amount):,} ل.س بنجاح.")
+                bot.send_message(user_id, f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح.")
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
                 return
