@@ -1,15 +1,14 @@
 from telebot import types
 from config import BOT_NAME
 from handlers import keyboards
-from services.wallet_service import ( get_all_purchases_structured,
+from services.wallet_service import (
     get_balance, add_balance, deduct_balance, get_purchases, get_deposit_transfers,
     has_sufficient_balance, transfer_balance, get_table,
     register_user_if_not_exist,  # ✅ الاستيراد الصحيح
     _select_single,  # لاستعماله في التحقق من العميل
     get_transfers,   # ✅ الاستيراد الصحيح الجديد
-    get_wallet_transfers_only,
 )
-from services.wallet_service import ( get_all_purchases_structured,
+from services.wallet_service import (
     get_ads_purchases,
     get_bill_and_units_purchases,
     get_cash_transfer_purchases,
@@ -22,6 +21,7 @@ from services.wallet_service import ( get_all_purchases_structured,
 
 from services.queue_service import add_pending_request
 import logging
+from services import state_service as state
 
 transfer_steps = {}
 
@@ -34,6 +34,10 @@ def show_wallet(bot, message, history=None):
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
+    try:
+        state.append_history(user_id, "wallet")
+    except Exception:
+        pass
 
     text = (
         f"🧾 رقم حسابك: `{user_id}`\n"
@@ -51,88 +55,100 @@ def show_purchases(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
     register_user_if_not_exist(user_id, name)
+    purchases = get_purchases(user_id)  # الآن يحذف القديم تلقائيًا
 
-    items = get_all_purchases_structured(user_id, limit=50)
+    # جلب المشتريات من الملفات الإضافية
+    ads_purchases = get_ads_purchases(user_id)
+    bill_and_units_purchases = get_bill_and_units_purchases(user_id)
+    cash_transfer_purchases = get_cash_transfer_purchases(user_id)
+    companies_transfer_purchases = get_companies_transfer_purchases(user_id)
+    internet_providers_purchases = get_internet_providers_purchases(user_id)
+    university_fees_purchases = get_university_fees_purchases(user_id)
+    wholesale_purchases = get_wholesale_purchases(user_id)
+
+    # دمج جميع المشتريات في قائمة واحدة
+    all_purchases = (
+        purchases +
+        ads_purchases +
+        bill_and_units_purchases +
+        cash_transfer_purchases +
+        companies_transfer_purchases +
+        internet_providers_purchases +
+        university_fees_purchases +
+        wholesale_purchases
+    )
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
+    try:
+        state.append_history(user_id, "wallet")
+    except Exception:
+        pass
 
-    if not items:
+    if not all_purchases:
         bot.send_message(
             message.chat.id,
             "📦 لا يوجد مشتريات حتى الآن.",
             reply_markup=keyboards.wallet_menu()
         )
     else:
-        lines = []
-        for it in items:
-            title = it.get("title") or "منتج"
-            price = it.get("price") or 0
-            ts    = (it.get("created_at") or "")[:16].replace("T", " ")
-            suffix = f" — ID/رقم: {it.get('id_or_phone')}" if it.get("id_or_phone") else ""
-            lines.append(f"• {title} — {price:,} ل.س — {ts}{suffix}")
+        text = "🛍️ مشترياتك:\n" + "\n".join(all_purchases)
+        bot.send_message(
+            message.chat.id,
+            text,
+            reply_markup=keyboards.wallet_menu()
+        )
 
-        # إزالة أي سطور ثابتة من النوع 'لا توجد ...'
-        lines = [ln for ln in lines if not ln.strip().startswith("لا توجد")]
 
-        if not lines:
-            bot.send_message(
-                message.chat.id,
-                "📦 لا يوجد مشتريات حتى الآن.",
-                reply_markup=keyboards.wallet_menu()
-            )
-        else:
-            text = "🛍️ مشترياتك:\n" + "\n".join(lines)
-            bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
-
+# ✅ عرض سجل التحويلات
 def show_transfers(bot, message, history=None):
     user_id = message.from_user.id
     name = message.from_user.full_name
     register_user_if_not_exist(user_id, name)
-
-    rows = get_wallet_transfers_only(user_id, limit=50)
+    transfers = get_transfers(user_id)
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
+    try:
+        state.append_history(user_id, "wallet")
+    except Exception:
+        pass
 
-    if not rows:
+    if not transfers:
         bot.send_message(
             message.chat.id,
-            "📄 لا يوجد عمليات شحن/تحويل محفظة بعد.",
+            "📄 لا يوجد عمليات تحويل بعد.",
             reply_markup=keyboards.wallet_menu()
         )
     else:
-        lines = []
-        for r in rows:
-            lines.append(f"{r['description']} ({r['amount']:+,} ل.س) في {r['timestamp']}")
-        text = "📑 سجل التحويلات:\n" + "\n".join(lines)
-        bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
+        text = "📑 سجل التحويلات:\n" + "\n".join(transfers)
+        bot.send_message(
+            message.chat.id,
+            text,
+            reply_markup=keyboards.wallet_menu()
+        )
 
-# --- تسجيل الهاندلرات ضمن register حتى يعمل زر "محفظتي" وباقي الأزرار ---
-def register(bot, history=None):
-    # محفظتي
+# ✅ تسجيل الأوامر
+def register(bot, user_state):
+
     @bot.message_handler(func=lambda msg: msg.text == "💰 محفظتي")
     def handle_wallet(msg):
-        show_wallet(bot, msg, history)
+        show_wallet(bot, msg, user_state)
 
-    # مشترياتي
     @bot.message_handler(func=lambda msg: msg.text == "🛍️ مشترياتي")
     def handle_purchases(msg):
-        show_purchases(bot, msg, history)
+        show_purchases(bot, msg, user_state)
 
-    # سجل التحويلات
     @bot.message_handler(func=lambda msg: msg.text == "📑 سجل التحويلات")
     def handle_transfers(msg):
-        show_transfers(bot, msg, history)
+        show_transfers(bot, msg, user_state)
 
-    # تحويل من محفظتك إلى محفظة عميل آخر — تنويه أولي
     @bot.message_handler(func=lambda msg: msg.text == "🔁 تحويل من محفظتك إلى محفظة عميل آخر")
     def handle_transfer_notice(msg):
         user_id = msg.from_user.id
         name = msg.from_user.full_name
         register_user_if_not_exist(user_id, name)
-        if history is not None:
-            history.setdefault(user_id, []).append("wallet")
+        user_state.setdefault(user_id, []).append("wallet")
         warning = (
             "⚠️ تنويه:\n"
             "هذه العملية خاصة بين المستخدمين فقط.\n"
@@ -152,8 +168,12 @@ def register(bot, history=None):
             reply_markup=keyboards.hide_keyboard()
         )
         transfer_steps[msg.from_user.id] = {"step": "awaiting_id"}
+        try:
+            state.set_step(msg.from_user.id, "wallet_transfer", "awaiting_id", {})
+        except Exception:
+            pass
 
-    @bot.message_handler(func=lambda msg: transfer_steps.get(msg.from_user.id, {}).get("step") == "awaiting_id")
+    @bot.message_handler(func=lambda msg: transfer_steps.get(msg.from_user.id, {}).get("step") == "awaiting_id" or (state.get_step(msg.from_user.id, "wallet_transfer").get("step") == "awaiting_id"))
     def receive_target_id(msg):
         try:
             target_id = int(msg.text.strip())
@@ -173,9 +193,13 @@ def register(bot, history=None):
             transfer_steps.pop(msg.from_user.id, None)
             return
         transfer_steps[msg.from_user.id].update({"step": "awaiting_amount", "target_id": target_id})
+        try:
+            state.set_step(msg.from_user.id, "wallet_transfer", "awaiting_amount", {"target_id": target_id})
+        except Exception:
+            pass
         bot.send_message(msg.chat.id, "💵 أدخل المبلغ الذي تريد تحويله:")
 
-    @bot.message_handler(func=lambda msg: transfer_steps.get(msg.from_user.id, {}).get("step") == "awaiting_amount")
+    @bot.message_handler(func=lambda msg: transfer_steps.get(msg.from_user.id, {}).get("step") == "awaiting_amount" or (state.get_step(msg.from_user.id, "wallet_transfer").get("step") == "awaiting_amount"))
     def receive_amount(msg):
         user_id = msg.from_user.id
         try:
@@ -208,6 +232,10 @@ def register(bot, history=None):
         target_id = transfer_steps[user_id]["target_id"]
         # أكمل التحويل
         transfer_steps[user_id].update({"step": "awaiting_confirm", "amount": amount})
+        try:
+            state.set_step(user_id, "wallet_transfer", "awaiting_confirm", {"target_id": transfer_steps[user_id]["target_id"], "amount": amount})
+        except Exception:
+            pass
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add("✅ تأكيد التحويل", "⬅️ رجوع", "🔄 ابدأ من جديد")
         bot.send_message(
@@ -234,6 +262,10 @@ def register(bot, history=None):
                 reply_markup=keyboards.wallet_menu()
             )
             transfer_steps.pop(user_id, None)
+        try:
+            state.clear_step(user_id, "wallet_transfer")
+        except Exception:
+            pass
 
     # زر إلغاء العملية
     @bot.message_handler(func=lambda msg: msg.text == "❌ إلغاء")
@@ -245,6 +277,10 @@ def register(bot, history=None):
             reply_markup=keyboards.wallet_menu()
         )
         transfer_steps.pop(user_id, None)
+        try:
+            state.clear_step(user_id, "wallet_transfer")
+        except Exception:
+            pass
 
     @bot.message_handler(func=lambda msg: msg.text == "✅ تأكيد التحويل")
     def confirm_transfer(msg):
@@ -278,4 +314,10 @@ def register(bot, history=None):
         except Exception as e:
             pass  # العميل ربما حظر البوت أو لم يبدأه بعد
         transfer_steps.pop(user_id, None)
-        show_wallet(bot, msg, history)
+        try:
+            state.clear_step(user_id, "wallet_transfer")
+        except Exception:
+            pass
+        show_wallet(bot, msg, user_state)
+
+# === نهاية الملف ===
