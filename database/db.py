@@ -82,9 +82,9 @@ def increment_balance(user_id: int, amount: int):
     يضيف/يخصم مبلغ من الرصيد (amount يمكن أن يكون سالبًا).
     """
     res = get_user_by_id(user_id)
-    if res.error:
+    if getattr(res, "error", None):
         return res
-    if not res.data:
+    if not getattr(res, "data", None):
         # المستخدم غير موجود
         raise ValueError("User not found")
     current_balance = int(res.data[0].get("balance") or 0)
@@ -96,7 +96,7 @@ def ensure_user(user_id: int, name: str, default_balance: int = 0, extra: Option
     يتأكد من وجود المستخدم؛ إذا غير موجود ينشئه ويرجعه.
     """
     res = get_user_by_id(user_id)
-    if res.error:
+    if getattr(res, "error", None):
         return res
     if res.data:
         return res  # موجود
@@ -109,9 +109,85 @@ def get_balance(user_id: int) -> int:
     يرجّع الرصيد كعدد صحيح (0 إذا لا يوجد سجل).
     """
     res = get_user_by_id(user_id)
-    if res.error:
+    if getattr(res, "error", None):
         # في حال الخطأ نرفع استثناء حتى تتعامل معه الطبقة الأعلى (أو بدّل للسلوك المناسب لك)
         raise RuntimeError(f"Supabase error: {res.error}")
     if not res.data:
         return 0
     return int(res.data[0].get("balance") or 0)
+
+
+# ---------- إضافات آمنة للمحفظة (RPC ذرّية عبر Postgres) ----------
+# ملاحظات:
+# - هذه الدوال تلتزم تمامًا بما اتفقنا عليه: لا تغيير على الدوال القديمة،
+#   فقط واجهات تستدعي الدوال SQL الموجودة: create_hold, capture_hold, release_hold,
+#   transfer_amount, try_deduct. كما أضفنا مُلحقًا بسيطًا لقراءة held والمتاح.
+
+def get_wallet(user_id: int):
+    """
+    يرجع حقول المحفظة الأساسية للمستخدم (balance, held).
+    """
+    return table(DEFAULT_TABLE).select("balance, held").eq("user_id", user_id).limit(1).execute()
+
+
+def get_available_balance(user_id: int) -> int:
+    """
+    المتاح = balance - held
+    (يرجع 0 إذا لا يوجد سجل)
+    """
+    res = get_wallet(user_id)
+    if getattr(res, "error", None):
+        raise RuntimeError(f"Supabase error: {res.error}")
+    if not res.data:
+        return 0
+    balance = int(res.data[0].get("balance") or 0)
+    held = int(res.data[0].get("held") or 0)
+    return balance - held
+
+
+def create_hold_rpc(user_id: int, amount: int, order_id: Optional[str] = None, ttl_seconds: Optional[int] = 900):
+    """
+    ينشئ حجزًا (hold) يجمّد المبلغ داخل held بشرط أن المتاح يكفي.
+    يرجع: Response من supabase-py؛ .data تحوي UUID للحجز عند النجاح.
+    """
+    params: Dict[str, Any] = {
+        "p_user_id": user_id,
+        "p_amount": amount,
+        "p_order_id": order_id,
+        "p_ttl_seconds": ttl_seconds,
+    }
+    return _supabase.rpc("create_hold", params).execute()
+
+
+def capture_hold_rpc(hold_id: str):
+    """
+    يصفّي الحجز (خصم فعلي من balance وفك من held).
+    يرجع: Response؛ .data تكون True/False.
+    """
+    return _supabase.rpc("capture_hold", {"p_hold_id": hold_id}).execute()
+
+
+def release_hold_rpc(hold_id: str):
+    """
+    يلغي الحجز (يُنقص held فقط دون خصم).
+    يرجع: Response؛ .data تكون True/False.
+    """
+    return _supabase.rpc("release_hold", {"p_hold_id": hold_id}).execute()
+
+
+def transfer_amount_rpc(from_user: int, to_user: int, amount: int):
+    """
+    تحويل رصيد آمن يحترم المتاح فقط (balance - held).
+    يرجع: Response؛ .data تكون True/False.
+    """
+    params = {"p_from_user": from_user, "p_to_user": to_user, "p_amount": amount}
+    return _supabase.rpc("transfer_amount", params).execute()
+
+
+def try_deduct_rpc(user_id: int, amount: int):
+    """
+    خصم مباشر آمن يحترم المتاح فقط (بدون حجز).
+    يرجع: Response؛ .data تكون True/False.
+    """
+    params = {"p_user_id": user_id, "p_amount": amount}
+    return _supabase.rpc("try_deduct", params).execute()
