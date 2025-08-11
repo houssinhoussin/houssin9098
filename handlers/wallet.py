@@ -37,6 +37,43 @@ def _fmt_syp(n: int) -> str:
     except Exception:
         return f"{n} ل.س"
 
+def _fmt_syp_signed(n: int) -> str:
+    try:
+        n = int(n)
+    except Exception:
+        return str(n)
+    sign = "+" if n >= 0 else "−"
+    return f"{sign}{abs(n):,} ل.س"
+
+def _infer_type(title: str) -> str:
+    t = (title or "").strip()
+    if "فاتورة" in t:
+        return "فاتورة"
+    if "وحدة" in t or "وحدات" in t:
+        return "وحدات"
+    if "شدة" in t or "جوهرة" in t or "توكنز" in t:
+        return "منتج ألعاب"
+    if "إعلان" in t:
+        return "إعلان"
+    return "شراء"
+
+def _mk_table(headers, rows):
+    """يبني جدول نصي بمحاذاة بسيطة داخل <pre>."""
+    # حول الكل لنص
+    str_rows = [[str(c) for c in r] for r in rows]
+    widths = [len(h) for h in headers]
+    for r in str_rows:
+        for i, c in enumerate(r):
+            widths[i] = max(widths[i], len(c))
+    def fmt_row(cells):
+        return "  ".join(cells[i].ljust(widths[i]) for i in range(len(headers)))
+    line_len = sum(widths) + 2 * (len(headers) - 1)
+    sep = "─" * max(20, line_len)
+    out = [fmt_row(headers), sep]
+    for r in str_rows:
+        out.append(fmt_row(r))
+    return "<pre>" + "\n".join(out) + "</pre>"
+
 # ✅ عرض المحفظة
 def show_wallet(bot, message, history=None):
     user_id = message.from_user.id
@@ -59,7 +96,7 @@ def show_wallet(bot, message, history=None):
         reply_markup=keyboards.wallet_menu()
     )
 
-# ✅ عرض المشتريات (منسّق + بلا تكرار)
+# ✅ عرض المشتريات (منسّق + بلا تكرار) — مع أعمدة: الزر | السعر | التاريخ | المبلغ | النوع
 def show_purchases(bot, message, history=None):
     user_id = message.from_user.id
     name = _name_from_msg(message)
@@ -78,29 +115,64 @@ def show_purchases(bot, message, history=None):
         )
         return
 
-    lines = []
+    headers = ["الزر", "السعر", "التاريخ", "المبلغ", "النوع"]
+    rows = []
+    total = 0
     for it in items:
-        title = it.get("title") or "منتج"
+        title = (it.get("button") or it.get("title") or "—").strip()
         price = int(it.get("price") or 0)
         ts    = (it.get("created_at") or "")[:19].replace("T", " ")
-        suffix = f" — آيدي/رقم: {it.get('id_or_phone')}" if it.get("id_or_phone") else ""
-        lines.append(f"• {title} ({price:,} ل.س) — بتاريخ {ts}{suffix}")
+        typ   = (it.get("type") or _infer_type(title))
+        rows.append([title, _fmt_syp(price), ts, _fmt_syp(price), typ])
+        total += price
 
-    lines = [ln for ln in lines if "لا توجد" not in ln]
+    table = _mk_table(headers, rows[:50])
+    footer = f"\n<b>الإجمالي (آخر {min(len(rows),50)}):</b> {_fmt_syp(total)}"
+    bot.send_message(message.chat.id, f"🛍️ مشترياتك\n{table}{footer}", parse_mode="HTML", reply_markup=keyboards.wallet_menu())
 
-    text = "🛍️ مشترياتك:\n" + "\n".join(lines[:50])
-    bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
-
-# ✅ سجل التحويلات (شحن محفظة + تحويل صادر فقط)
+# ✅ سجل التحويلات (شحن محفظة + تحويل صادر فقط) — مع أعمدة: الزر | السعر | التاريخ | المبلغ | النوع
 def show_transfers(bot, message, history=None):
     user_id = message.from_user.id
     name = _name_from_msg(message)
     register_user_if_not_exist(user_id, name)
 
-    rows = get_wallet_transfers_only(user_id, limit=50)
+    rows_src = get_wallet_transfers_only(user_id, limit=50)
 
     if history is not None:
         history.setdefault(user_id, []).append("wallet")
+
+    if not rows_src:
+        bot.send_message(
+            message.chat.id,
+            f"📄 يا {name}، ما فيش عمليات لسه.",
+            reply_markup=keyboards.wallet_menu()
+        )
+        return
+
+    headers = ["الزر", "السعر", "التاريخ", "المبلغ", "النوع"]
+    rows = []
+    net = 0
+    for r in rows_src:
+        desc = (r.get("description") or "").strip()
+        amt  = int(r.get("amount") or 0)
+        ts   = (r.get("timestamp") or "")[:19].replace("T", " ")
+
+        if amt > 0 and (desc.startswith("إيداع") or desc.startswith("شحن")):
+            btn = "شحن محفظتي"
+            typ = "شحن محفظة"
+            rows.append([btn, "—", ts, _fmt_syp_signed(amt), typ])
+            net += amt
+        elif amt < 0 and desc.startswith("تحويل إلى"):
+            btn = "تحويل محفظة"
+            typ = "تحويل صادر"
+            rows.append([btn, "—", ts, _fmt_syp_signed(amt), typ])
+            net += amt
+        else:
+            # عمليات أخرى إن وجدت
+            btn = "عملية"
+            typ = "أخرى"
+            rows.append([btn, "—", ts, _fmt_syp_signed(amt), typ])
+            net += amt
 
     if not rows:
         bot.send_message(
@@ -110,30 +182,9 @@ def show_transfers(bot, message, history=None):
         )
         return
 
-    lines = []
-    for r in rows:
-        desc = (r.get("description") or "").strip()
-        amt  = int(r.get("amount") or 0)
-        ts   = (r.get("timestamp") or "")[:19].replace("T", " ")
-
-        if amt > 0 and (desc.startswith("إيداع") or desc.startswith("شحن")):
-            lines.append(f"شحن محفظة | {amt:,} ل.س | {ts}")
-            continue
-
-        if amt < 0 and desc.startswith("تحويل إلى"):
-            lines.append(f"تحويل صادر | {abs(amt):,} ل.س | {ts}")
-            continue
-
-    if not lines:
-        bot.send_message(
-            message.chat.id,
-            f"📄 يا {name}، ما فيش عمليات لسه.",
-            reply_markup=keyboards.wallet_menu()
-        )
-        return
-
-    text = "📑 السجل: شحن المحفظة + تحويلاتك الصادرة\n" + "\n".join(lines)
-    bot.send_message(message.chat.id, text, reply_markup=keyboards.wallet_menu())
+    table = _mk_table(headers, rows)
+    footer = f"\n<b>الصافي (الفترة):</b> {_fmt_syp_signed(net)}"
+    bot.send_message(message.chat.id, f"📑 السجل المالي\n{table}{footer}", parse_mode="HTML", reply_markup=keyboards.wallet_menu())
 
 # --- تسجيل هاندلرات الأزرار داخل register ---
 def register(bot, history=None):
