@@ -4,7 +4,6 @@ import logging
 from datetime import datetime
 import httpx
 import threading
-# استورد get_table بدل استعمال client.table(...)
 from database.db import get_table
 from config import ADMIN_MAIN_ID
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
@@ -12,6 +11,9 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedia
 QUEUE_TABLE = "pending_requests"
 _queue_lock = threading.Lock()
 _queue_cooldown = False  # يمنع إظهار أكثر من طلب
+
+# حد أقصى آمن لكابتشن الصور في تليجرام (نخلّيه أقل من 1024 بهامش)
+_MAX_CAPTION = 900
 
 def add_pending_request(user_id: int, username: str, request_text: str, payload=None):
     for attempt in range(1, 4):
@@ -30,7 +32,7 @@ def add_pending_request(user_id: int, username: str, request_text: str, payload=
             logging.warning(f"Attempt {attempt}: ReadError in add_pending_request: {e}")
             time.sleep(0.5)
     logging.error(f"Failed to add pending request for user {user_id} after 3 attempts.")
-    
+
 def delete_pending_request(request_id: int):
     try:
         get_table(QUEUE_TABLE).delete().eq("id", request_id).execute()
@@ -68,6 +70,43 @@ def postpone_request(request_id: int):
     except Exception:
         logging.exception(f"Error postponing request {request_id}")
 
+def _send_admin_with_photo(bot, photo_id: str, text: str, keyboard: InlineKeyboardMarkup):
+    """
+    يرسل صورة + رسالة الإدمن.
+    لو النص أطول من حد الكابتشن، نرسل كابتشن قصير ثم رسالة كاملة مع الأزرار.
+    """
+    try:
+        if text and len(text) <= _MAX_CAPTION:
+            bot.send_photo(
+                ADMIN_MAIN_ID,
+                photo_id,
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        else:
+            # كابتشن قصير + نص كامل بعده
+            bot.send_photo(
+                ADMIN_MAIN_ID,
+                photo_id,
+                caption="🖼️ تفاصيل الطلب في الرسالة التالية ⬇️",
+                parse_mode="HTML"
+            )
+            bot.send_message(
+                ADMIN_MAIN_ID,
+                text or "طلب جديد",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+    except Exception:
+        logging.exception("Failed sending admin photo/message; falling back to text-only")
+        bot.send_message(
+            ADMIN_MAIN_ID,
+            text or "طلب جديد",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
 def process_queue(bot):
     global _queue_cooldown
     if _queue_cooldown:
@@ -79,8 +118,7 @@ def process_queue(bot):
             return
 
         request_id = req.get("id")
-        text = req.get("request_text", "")
-
+        text = req.get("request_text", "") or "طلب جديد"
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
             InlineKeyboardButton("🔁 تأجيل", callback_data=f"admin_queue_postpone_{request_id}"),
@@ -96,29 +134,21 @@ def process_queue(bot):
 
         # =========== فرع شحن المحفظة ===========
         if typ == "recharge" and photo_id:
-            bot.send_photo(
-                ADMIN_MAIN_ID,
-                photo_id,
-                caption=text,
-                parse_mode="HTML",
-                reply_markup=keyboard
-            )
+            _send_admin_with_photo(bot, photo_id, text, keyboard)
 
         # =========== فرع إعلانات القناة ===========
         elif typ == "ads":
             images = payload.get("images", [])
             if images:
                 if len(images) == 1:
-                    bot.send_photo(
-                        ADMIN_MAIN_ID,
-                        images[0],
-                        caption=text,
-                        parse_mode="HTML",
-                        reply_markup=keyboard
-                    )
+                    _send_admin_with_photo(bot, images[0], text, keyboard)
                 else:
-                    media = [InputMediaPhoto(fid) for fid in images]
-                    bot.send_media_group(ADMIN_MAIN_ID, media)            # الصور أولاً
+                    # مجموعة صور أولًا (بدون أزرار)، ثم رسالة التفاصيل مع الأزرار
+                    try:
+                        media = [InputMediaPhoto(fid) for fid in images]
+                        bot.send_media_group(ADMIN_MAIN_ID, media)
+                    except Exception:
+                        logging.exception("Failed to send media group, fallback to message only")
                     bot.send_message(
                         ADMIN_MAIN_ID,
                         text,
@@ -141,7 +171,6 @@ def process_queue(bot):
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
-
 
 def queue_cooldown_start(bot=None):
     global _queue_cooldown
