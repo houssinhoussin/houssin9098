@@ -246,12 +246,22 @@ def register(bot, history):
                 product_id_raw = payload.get("product_id")
                 player_id      = payload.get("player_id")
                 amt            = int(amt or payload.get("price", 0) or 0)
-                try:
-                    prod = get_product_by_id(int(product_id_raw)) if product_id_raw else None
-                except Exception:
-                    prod = None
-                pid_for_db = int(product_id_raw) if (product_id_raw and prod) else None
-                product_name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id_raw}"
+
+                # استخدم اسم المنتج الحقيقي الممرَّر من الـpayload أولاً، ثم من الـDB، ثم fallback عام
+                product_name = (payload.get("product_name") or "").strip()
+                prod_obj = None
+                if not product_name and product_id_raw:
+                    try:
+                        prod_obj = get_product_by_id(int(product_id_raw))
+                    except Exception:
+                        prod_obj = None
+                    if prod_obj and isinstance(prod_obj, dict):
+                        product_name = (prod_obj.get("name") or "").strip()
+
+                if not product_name:
+                    product_name = "منتج رقمي"
+
+                pid_for_db = int(product_id_raw) if (product_id_raw and (prod_obj or payload.get("product_name"))) else None
 
                 _insert_purchase_row(user_id, pid_for_db, product_name, amt, _safe(player_id))
                 try:
