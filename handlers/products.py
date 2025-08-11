@@ -87,9 +87,11 @@ def show_game_categories(bot, message):
 def show_product_options(bot, message, category):
     options = PRODUCTS.get(category, [])
     keyboard = types.InlineKeyboardMarkup(row_width=2)
-    # اسم الزر = اسم المنتج بالضبط
+    # اسم الزر = اسم المنتج + السعر بالدولار
     for p in options:
-        keyboard.add(types.InlineKeyboardButton(p.name, callback_data=f"select_{p.product_id}"))
+        usd = f"{p.price:.2f}".rstrip("0").rstrip(".")
+        label = f"{p.name} — {usd}$"
+        keyboard.add(types.InlineKeyboardButton(label, callback_data=f"select_{p.product_id}"))
     keyboard.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
     bot.send_message(message.chat.id, f"📦 منتجات {category}: اختار اللي على مزاجك 😎", reply_markup=keyboard)
 
