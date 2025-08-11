@@ -5,7 +5,7 @@ import logging
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
-from services.wallet_service import register_user_if_not_exist, get_balance, deduct_balance
+from services.wallet_service import register_user_if_not_exist, get_balance, get_available_balance, create_hold
 from config import BOT_NAME
 from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
@@ -247,19 +247,41 @@ def setup_inline_handlers(bot, admin_ids):
         if not is_product_active(product.product_id):
             return bot.answer_callback_query(call.id, "⛔ هذا المنتج متوقف حالياً.")
 
-        # تحقق الرصيد
-        balance = get_balance(user_id)
-        if balance < price_syp:
+        # تحقق الرصيد (المتاح فقط)
+        available = get_available_balance(user_id)
+        if available < price_syp:
             bot.send_message(
                 user_id,
-                f"❌ لا يوجد رصيد كافٍ لإرسال الطلب.\nرصيدك الحالي: {balance:,} ل.س\nالسعر المطلوب: {price_syp:,} ل.س\nيرجى شحن المحفظة أولاً."
+                f"❌ لا يوجد رصيد كافٍ لإرسال الطلب.\nرصيدك المتاح: {available:,} ل.س\nالسعر المطلوب: {price_syp:,} ل.س\nيرجى شحن المحفظة أولاً."
             )
             return
 
-        # ✅ حجز المبلغ عند الإرسال إلى الطابور (وصف واضح للحجز)
-        deduct_balance(user_id, price_syp, f"حجز منتج - {product.name}")
+        # ✅ حجز المبلغ عند الإرسال إلى الطابور (حجز فعلي عبر RPC)
+        hold_id = None
+        try:
+            resp = create_hold(user_id, price_syp)  # TTL الافتراضي كما هو
+            if getattr(resp, "error", None):
+                # نفصّل رسالة نقص الرصيد إن ظهرت من الدالة
+                err_msg = str(resp.error).lower()
+                if "insufficient_funds" in err_msg or "amount must be > 0" in err_msg:
+                    bot.send_message(
+                        user_id,
+                        f"❌ لا يوجد رصيد كافٍ لإرسال الطلب.\nرصيدك المتاح: {available:,} ل.س\nالسعر المطلوب: {price_syp:,} ل.س."
+                    )
+                    return
+                logging.error("create_hold RPC error: %s", resp.error)
+                bot.send_message(user_id, "❌ حصل خطأ غير متوقع أثناء الحجز. حاول لاحقاً.")
+                return
+            hold_id = resp.data  # UUID
+            if not hold_id:
+                bot.send_message(user_id, "❌ تعذّر إنشاء الحجز. حاول لاحقاً.")
+                return
+        except Exception as e:
+            logging.exception("create_hold exception: %s", e)
+            bot.send_message(user_id, "❌ حصل خطأ أثناء الحجز. حاول لاحقاً.")
+            return
 
-        # (اختياري) تحديث الرصيد للعرض في رسالة الأدمن
+        # (اختياري) تحديث الرصيد للعرض في رسالة الأدمن (نفس المنطق السابق)
         balance = get_balance(user_id)
 
         admin_msg = (
@@ -276,7 +298,7 @@ def setup_inline_handlers(bot, admin_ids):
             f"(select_{product.product_id})"
         )
 
-        # تمرير reserved للإدارة (ليتم الاسترجاع أو الخصم النهائي عند القبول)
+        # تمرير hold_id للإدارة لإتمام/إلغاء لاحقًا + معلومة reserved كما كانت
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
@@ -286,7 +308,8 @@ def setup_inline_handlers(bot, admin_ids):
                 "product_id": product.product_id,
                 "player_id": player_id,
                 "price": price_syp,
-                "reserved": price_syp
+                "reserved": price_syp,
+                "hold_id": hold_id
             }
         )
 
