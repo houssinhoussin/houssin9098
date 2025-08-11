@@ -1,8 +1,8 @@
-# admin.py
+# handlers/admin.py
 
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from telebot import types
 from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
@@ -32,6 +32,11 @@ from services.wallet_service import (
     add_companies_transfer_purchase,
     add_university_fees_purchase,
     add_ads_purchase,
+    # ✅ واجهات الحجز/التصفية الآمنة
+    capture_hold,
+    release_hold,
+    get_product_by_id,
+    add_game_purchase,
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
@@ -40,6 +45,22 @@ _cancel_pending = {}
 _accept_pending = {}
 _msg_pending = {}
 
+# ---------- Helpers موحّدة للرسائل ----------
+def _fmt_syp(n: int) -> str:
+    try:
+        return f"{int(n):,} ل.س"
+    except Exception:
+        return f"{n} ل.س"
+
+def _user_name(bot, user_id: int) -> str:
+    try:
+        ch = bot.get_chat(user_id)
+        name = getattr(ch, "first_name", None) or getattr(ch, "full_name", None) or ""
+        name = (name or "").strip()
+        return name if name else "صديقنا"
+    except Exception:
+        return "صديقنا"
+
 def _amount_from_payload(payload: dict) -> int:
     """محاولة ذكية لاستخراج المبلغ من أي مفتاح محتمل داخل الـ payload."""
     for k in ("reserved", "total", "price", "amount"):
@@ -47,6 +68,22 @@ def _amount_from_payload(payload: dict) -> int:
         if isinstance(v, (int, float)) and v > 0:
             return int(v)
     return 0
+
+def _insert_purchase_row(user_id: int, product_id, product_name: str, price: int, player_id: str):
+    """إدراج في purchases بدون خصم (الخصم تم عبر capture_hold)."""
+    data = {
+        "user_id": user_id,
+        "product_id": (int(product_id) if product_id else None),
+        "product_name": product_name,
+        "price": int(price),
+        "player_id": str(player_id or ""),
+        "created_at": datetime.utcnow().isoformat(),
+        "expire_at": (datetime.utcnow() + timedelta(hours=15)).isoformat(),
+    }
+    try:
+        get_table("purchases").insert(data).execute()
+    except Exception as e:
+        logging.exception("insert purchases failed: %s", e)
 
 def register(bot, history):
     # تسجيل الهاندلرات للتحويلات
@@ -126,6 +163,7 @@ def register(bot, history):
         req      = res.data[0]
         user_id  = req["user_id"]
         payload  = req.get("payload") or {}
+        name     = _user_name(bot, user_id)
 
         # حذف رسالة الأدمن
         try:
@@ -138,7 +176,7 @@ def register(bot, history):
             if not allowed(call.from_user.id, "queue:cancel"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             postpone_request(request_id)
-            bot.send_message(user_id, "⏳ نعتذر؛ طلبك أعيد إلى نهاية القائمة.")
+            bot.send_message(user_id, f"⏳ يا {name}، رجّعنا طلبك لآخر الطابور. هنكمله أول ما نيجي عليه.")
             bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
             queue_cooldown_start(bot)
             return
@@ -147,60 +185,76 @@ def register(bot, history):
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
-            delete_pending_request(request_id)
+            hold_id  = payload.get("hold_id")
             reserved = int(payload.get("reserved", 0) or 0)
-            if reserved:
-                add_balance(user_id, reserved, "إلغاء حجز")
-                bot.send_message(user_id, f"🚫 تم استرجاع {reserved:,} ل.س إلى محفظتك.")
+
+            if hold_id:
+                # إلغاء الحجز الذرّي
+                try:
+                    r = release_hold(hold_id)
+                    if getattr(r, "error", None):
+                        logging.error("release_hold error: %s", r.error)
+                except Exception as e:
+                    logging.exception("release_hold exception: %s", e)
+            else:
+                # مسار قديم بدون hold_id: نردّ المبلغ يدويًا لو كان تم خصمه سابقًا
+                if reserved > 0:
+                    add_balance(user_id, reserved, "إلغاء حجز (قديم)")
+
+            delete_pending_request(request_id)
+            if reserved > 0:
+                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
+            else:
+                bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
             return
 
         # === قبول الطلب ===
         if action == "accept":
-            typ = payload.get("type")
+            typ      = payload.get("type")
+            hold_id  = payload.get("hold_id")
+            amt      = _amount_from_payload(payload)
 
-            # إرجاع الحجز فقط للأنواع التي تستخدم الحجز وبوصف واضح
-            RESERVED_TYPES = {
-                "order","syr_unit","mtn_unit","syr_bill","mtn_bill",
-                "internet","cash_transfer","companies_transfer",
-                "university_fees","ads"
-            }
-            reserved = int(payload.get("reserved") or 0)
-            if typ in RESERVED_TYPES and reserved > 0:
-                add_balance(user_id, reserved, "استرجاع حجز")
+            # لو فيه حجز، صفّيه أولًا (خصم فعلي) — بدون أي خصم إضافي لاحقًا
+            if hold_id:
+                try:
+                    r = capture_hold(hold_id)
+                    if getattr(r, "error", None) or not bool(r.data):
+                        logging.error("capture_hold failed: %s", getattr(r, "error", r.data))
+                        return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز. أعد المحاولة.")
+                except Exception as e:
+                    logging.exception("capture_hold exception: %s", e)
+                    return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز. أعد المحاولة.")
 
             # ——— طلبات المنتجات الرقمية ———
-          
             if typ == "order":
                 product_id_raw = payload.get("product_id")
-                player_id = payload.get("player_id")
-                amt = _amount_from_payload(payload)
+                player_id      = payload.get("player_id")
+                amt            = int(amt or payload.get("price", 0) or 0)
 
-                # جرّب تجيب المنتج؛ وإذا مو موجود، خلّي pid None لتفادي FK
+                # جلب اسم المنتج (إن وجد)
                 try:
-                    from services.wallet_service import get_product_by_id
                     prod = get_product_by_id(int(product_id_raw)) if product_id_raw else None
                 except Exception:
                     prod = None
 
                 pid_for_db = int(product_id_raw) if (product_id_raw and prod) else None
-                name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id_raw}"
+                product_name = (prod.get("name") if prod else None) or f"طلب منتج #{product_id_raw}"
 
-                # يسجل في purchases ويخصم الرصيد
-                add_purchase(user_id, pid_for_db, name, amt, player_id)
-
-                # يسجل نسخة في game_purchases بدون خرق FK
+                # إدراج في purchases بدون خصم (الخصم تم عبر capture_hold)
+                _insert_purchase_row(user_id, pid_for_db, product_name, amt, str(player_id))
+                # تسجيل في game_purchases (Write-through)
                 try:
-                    from services.wallet_service import add_game_purchase
-                    add_game_purchase(user_id, pid_for_db, name, int(amt), str(player_id or ""))
+                    add_game_purchase(user_id, pid_for_db, product_name, int(amt), str(player_id or ""))
                 except Exception:
                     pass
 
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم تنفيذ طلبك: {name}\nتم خصم {amt:,} ل.س من محفظتك.",
+                    f"🎉 تمام يا {name}! تم تحويل {product_name} لآيدي «{player_id}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -209,23 +263,21 @@ def register(bot, history):
 
             # ——— وحدات (سيرياتيل/MTN) ———
             elif typ in ("syr_unit", "mtn_unit"):
-                price = int(payload.get("price", 0) or 0)
+                price = int(payload.get("price", 0) or amt or 0)
                 num   = payload.get("number")
-                name  = payload.get("unit_name") or "وحدات"
-                add_purchase(user_id, None, name, price, str(num))
-                # ✅ كتابة إضافية في جدول bill_and_units_purchases
+                unit_name = payload.get("unit_name") or "وحدات"
+
+                _insert_purchase_row(user_id, None, unit_name, price, str(num))
                 try:
-                    add_bill_or_units_purchase(user_id, bill_name=name, price=price, number=str(num))
+                    add_bill_or_units_purchase(user_id, bill_name=unit_name, price=price, number=str(num))
                 except Exception:
                     pass
 
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم تنفيذ عملية تحويل الوحدات بنجاح!\n"
-                    f"• الرقم: <code>{num}</code>\n"
-                    f"• الكمية: {name}\n"
-                    f"• السعر: {price:,} ل.س",
+                    f"✅ تمام يا {name}! تم تحويل {unit_name} للرقم «{num}» "
+                    f"وتم خصم {_fmt_syp(price)} من محفظتك.",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -234,11 +286,11 @@ def register(bot, history):
 
             # ——— فواتير (سيرياتيل/MTN) ———
             elif typ in ("syr_bill", "mtn_bill"):
-                amt   = _amount_from_payload(payload)
+                amt   = int(amt or payload.get("price", 0) or 0)
                 num   = payload.get("number")
                 label = payload.get("unit_name", "فاتورة")
-                add_purchase(user_id, None, label, amt, str(num))
-                # ✅ كتابة إضافية في جدول bill_and_units_purchases
+
+                _insert_purchase_row(user_id, None, label, amt, str(num))
                 try:
                     add_bill_or_units_purchase(user_id, bill_name=label, price=amt, number=str(num))
                 except Exception:
@@ -247,9 +299,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم دفع الفاتورة بنجاح!\n"
-                    f"• الرقم: <code>{num}</code>\n"
-                    f"• المبلغ: {amt:,} ل.س",
+                    f"🧾 تمام يا {name}! تم دفع {label} للرقم «{num}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -258,14 +309,13 @@ def register(bot, history):
 
             # ——— إنترنت ———
             elif typ == "internet":
-                amt      = _amount_from_payload(payload)
+                amt      = int(amt or payload.get("price", 0) or 0)
                 provider = payload.get("provider")
                 speed    = payload.get("speed")
                 phone    = payload.get("phone")
-                name     = f"إنترنت {provider} {speed}"
+                name_lbl = f"إنترنت {provider} {speed}".strip()
 
-                add_purchase(user_id, None, name, amt, str(phone))
-                # ✅ كتابة إضافية في جدول internet_providers_purchases
+                _insert_purchase_row(user_id, None, name_lbl, amt, str(phone))
                 try:
                     add_internet_purchase(user_id, provider_name=provider, price=amt, phone=str(phone), speed=speed)
                 except Exception:
@@ -274,8 +324,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم دفع فاتورة الإنترنت ({provider}) بسرعة {speed} لرقم `{phone}` بنجاح.\n"
-                    f"تم خصم {amt:,} ل.س من محفظتك.",
+                    f"🌐 تمام يا {name}! تم دفع فاتورة الإنترنت ({provider} {speed}) للرقم «{phone}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -284,22 +334,22 @@ def register(bot, history):
 
             # ——— تحويل نقدي ———
             elif typ == "cash_transfer":
-                amt       = _amount_from_payload(payload)
+                amt       = int(amt or payload.get("price", 0) or 0)
                 number    = payload.get("number")
                 cash_type = payload.get("cash_type")
-                name      = f"تحويل كاش {cash_type}"
+                name_lbl  = f"تحويل كاش {cash_type}".strip()
 
-                add_purchase(user_id, None, name, amt, str(number))
-                # ✅ كتابة إضافية في جدول cash_transfer_purchases
+                _insert_purchase_row(user_id, None, name_lbl, amt, str(number))
                 try:
-                    add_cash_transfer_purchase(user_id, transfer_name=name, price=amt, number=str(number))
+                    add_cash_transfer_purchase(user_id, transfer_name=name_lbl, price=amt, number=str(number))
                 except Exception:
                     pass
 
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم تنفيذ طلبك بنجاح.\nتم خصم {amt:,} ل.س.",
+                    f"💸 تمام يا {name}! تم تحويل {name_lbl} للرقم «{number}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
                     parse_mode="HTML",
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -308,13 +358,12 @@ def register(bot, history):
 
             # ——— تحويلات شركات ———
             elif typ == "companies_transfer":
-                amt                = _amount_from_payload(payload)
+                amt                = int(amt or payload.get("price", 0) or 0)
                 company            = payload.get("company")
                 beneficiary_number = payload.get("beneficiary_number")
-                name               = f"حوالة مالية عبر {company}"
+                name_lbl           = f"حوالة مالية عبر {company}".strip()
 
-                add_purchase(user_id, None, name, amt, str(beneficiary_number))
-                # ✅ كتابة إضافية في جدول companies_transfer_purchases
+                _insert_purchase_row(user_id, None, name_lbl, amt, str(beneficiary_number))
                 try:
                     add_companies_transfer_purchase(user_id, company_name=company, price=amt, beneficiary_number=str(beneficiary_number))
                 except Exception:
@@ -323,7 +372,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم تنفيذ طلبك بنجاح.\nتم خصم {amt:,} ل.س.",
+                    f"🏢 تمام يا {name}! تم تحويل شركة عبر {company} للمستفيد «{beneficiary_number}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
                     parse_mode="HTML",
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -332,13 +382,12 @@ def register(bot, history):
 
             # ——— رسوم جامعية ———
             elif typ == "university_fees":
-                amt           = _amount_from_payload(payload)
+                amt           = int(amt or payload.get("price", 0) or 0)
                 university    = payload.get("university")
                 university_id = payload.get("university_id")
-                name          = f"دفع رسوم جامعية ({university})"
+                name_lbl      = f"دفع رسوم جامعية ({university})".strip()
 
-                add_purchase(user_id, None, name, amt, str(university_id))
-                # ✅ كتابة إضافية في جدول university_fees_purchases
+                _insert_purchase_row(user_id, None, name_lbl, amt, str(university_id))
                 try:
                     add_university_fees_purchase(user_id, university_name=university, price=amt, university_id=str(university_id))
                 except Exception:
@@ -347,7 +396,9 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تم دفع رسومك الجامعية ({wwwuniversity}) بمبلغ {amt:,} ل.س بنجاح."
+                    f"🎓 تمام يا {name}! تم دفع رسوم جامعية ({university}) للرقم الجامعي «{university_id}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
@@ -355,67 +406,27 @@ def register(bot, history):
 
             # ——— شحن محفظة ———
             elif typ in ("recharge", "wallet_recharge", "deposit"):
-                # استخرج المبلغ بمرونة
                 amount = _amount_from_payload(payload) or payload.get("amount") or 0
                 amount = int(amount) if amount else 0
                 if amount <= 0:
-                    bot.answer_callback_query(call.id, "❌ مبلغ الشحن غير صالح.")
-                    return
+                    return bot.answer_callback_query(call.id, "❌ مبلغ الشحن غير صالح.")
 
-                # لوج للمراقبة
                 try:
                     logging.info(f"[ADMIN][RECHARGE][{user_id}] approve amount={amount} req_id={request_id}")
                 except Exception:
                     pass
 
-                # أضف رصيدًا بوصف واضح يمرّ عبر الفلتر في شاشة السجل
                 add_balance(user_id, amount, "شحن محفظة — من الإدارة")
-
-                # احذف الطلب
                 delete_pending_request(request_id)
 
-                # أبلغ العميل
-                bot.send_message(user_id, f"✅ تم شحن محفظتك بمبلغ {amount:,} ل.س بنجاح.")
+                bot.send_message(user_id, f"⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دُوس واشتري اللي نفسك فيه! 😉")
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
-                queue_cooldown_start(bot)
-                return
-
-            # ——— إعلانات ———
-            elif typ == "ads":
-                if not allowed(call.from_user.id, "ads:post"):
-                    return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية نشر إعلان.")
-                amt     = _amount_from_payload(payload)
-                count   = payload.get("count", 1)
-                contact = payload.get("contact", "")
-                ad_text = payload.get("ad_text", "")
-                images  = payload.get("images", [])
-
-                # خصم نهائي للمبلغ (بعد إعادة الحجز في الأعلى)
-                if amt > 0:
-                    deduct_balance(user_id, amt)
-
-                # إدراج الإعلان في جدول القناة
-                add_channel_ad(user_id, count, amt, contact, ad_text, images)
-                # ✅ كتابة إضافية في جدول ads_purchases
-                try:
-                    add_ads_purchase(user_id, ad_name="إعلان مدفوع", price=amt)
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"✅ تم قبول إعلانك وسيتم نشره في القناة حسب الجدولة.\n"
-                    f"تم خصم {amt:,} ل.س.",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم قبول الإعلان")
                 queue_cooldown_start(bot)
                 return
 
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
-                
+
         # أيّ أكشن آخر
         bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
 
@@ -463,7 +474,7 @@ def register(bot, history):
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم.")
         _accept_pending.pop(msg.from_user.id, None)
 
-    # ===== تسجيل هاندلرات قائمة الأدمن (داخل register بحيث يتوفر bot) =====
+    # ===== تسجيل هاندلرات قائمة الأدمن =====
 
     @bot.message_handler(commands=['admin'])
     def admin_menu(msg):
