@@ -3,12 +3,15 @@ from config import ADMIN_MAIN_ID
 from services.recharge_service import apply_recharge
 from handlers import keyboards  # ✅ الكيبورد الموحد
 from services.wallet_service import register_user_if_not_exist, get_balance  # ✅ إضافة get_balance لرسالة الأدمن
-from types import SimpleNamespace  # 🔴 التصحيح هنا
+from types import SimpleNamespace
 from services.queue_service import add_pending_request, process_queue
 import logging
 
 recharge_requests = {}
 recharge_pending = set()
+
+# ✅ الحد الأدنى للشحن
+MIN_RECHARGE = 15000
 
 SYRIATEL_NUMBERS = ["0011111", "0022222", "0033333", "0044444"]
 MTN_NUMBERS = ["0005555", "0006666", "0006666", "0007777"]
@@ -186,6 +189,17 @@ def register(bot, history):
             return
 
         amount = int(amount_text)
+        # ✅ رفض مبكر قبل إرسال الطلب للأدمن/الطابور
+        if amount < MIN_RECHARGE:
+            bot.send_message(
+                msg.chat.id,
+                f"⚠️ يا {name}، الحد الأدنى للشحن هو <b>{_fmt_syp(MIN_RECHARGE)}</b>.\n"
+                f"اكتب مبلغ أكبر أو يساويه، وبنبقى ننفّذ طلبك {ETA_TEXT}.",
+                parse_mode="HTML",
+                reply_markup=keyboards.recharge_menu()
+            )
+            return
+
         data = recharge_requests[user_id]
         data["amount"] = amount
 
@@ -236,6 +250,21 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "لا يوجد طلب قيد المعالجة.")
                 return
 
+            amount = int(data.get("amount") or 0)
+            # ✅ حراسة إضافية: منع تمرير مبلغ أقل من الحد الأدنى
+            if amount < MIN_RECHARGE:
+                # لا نرسل للأدمن ولا نضيف للطابور
+                recharge_requests[user_id].pop("amount", None)
+                bot.answer_callback_query(call.id, "المبلغ أقل من الحد الأدنى.")
+                bot.send_message(
+                    user_id,
+                    f"⚠️ يا {name}، الحد الأدنى للشحن هو <b>{_fmt_syp(MIN_RECHARGE)}</b>.\n"
+                    f"من فضلك ادخل مبلغ جديد أكبر أو يساويه.",
+                    parse_mode="HTML",
+                    reply_markup=keyboards.recharge_menu()
+                )
+                return
+
             # ✅ تأكيد التسجيل وضبط رصيد المستخدم (للإظهار فقط في رسالة الأدمن)
             register_user_if_not_exist(user_id, name)
             balance = 0
@@ -245,7 +274,6 @@ def register(bot, history):
                 pass
 
             # ===== رسالة الأدمن بالقالب الموحّد =====
-            # المنتج = "شحن محفظة" / التصنيف = "محفظة" / آيدي اللاعب = "—"
             admin_msg = (
                 f"💰 رصيد المستخدم: {balance:,} ل.س\n"
                 f"🆕 طلب جديد\n"
@@ -255,10 +283,9 @@ def register(bot, history):
                 f"آيدي اللاعب: <code>—</code>\n"
                 f"🔖 المنتج: شحن محفظة\n"
                 f"التصنيف: محفظة\n"
-                f"💵 السعر: {data['amount']:,} ل.س\n"
+                f"💵 السعر: {amount:,} ل.س\n"
                 f"(recharge)"
             )
-            # تفاصيل إضافية للشحن
             admin_msg += (
                 f"\n\n"
                 f"🔢 رقم الإشعار: <code>{data['ref']}</code>\n"
@@ -272,7 +299,7 @@ def register(bot, history):
                 request_text=admin_msg,
                 payload={
                     "type": "recharge",
-                    "amount": data['amount'],
+                    "amount": amount,
                     "method": data['method'],
                     "ref": data['ref'],
                     "photo": data.get("photo"),
@@ -283,14 +310,13 @@ def register(bot, history):
             # ===== رسالة موحّدة للعميل =====
             bot.send_message(
                 user_id,
-                f"✅ تمام يا {name}! استلمنا طلب شحن محفظتك بقيمة <b>{_fmt_syp(data['amount'])}</b>.\n"
+                f"✅ تمام يا {name}! استلمنا طلب شحن محفظتك بقيمة <b>{_fmt_syp(amount)}</b>.\n"
                 f"⏱️ سيتم تنفيذ الطلب {ETA_TEXT}.\n"
                 f"لو في أي ملاحظة هنبعتلك فورًا 💬",
                 parse_mode="HTML",
                 reply_markup=keyboards.recharge_menu()
             )
             recharge_pending.add(user_id)
-            # إزالة أزرار الرسالة السابقة
             bot.edit_message_reply_markup(
                 call.message.chat.id,
                 call.message.message_id,
@@ -321,7 +347,6 @@ def register(bot, history):
             if not isinstance(history.get(user_id), list):
                 history[user_id] = []
 
-            from types import SimpleNamespace
             fake_msg = SimpleNamespace()
             fake_msg.from_user = SimpleNamespace()
             fake_msg.from_user.id = user_id
