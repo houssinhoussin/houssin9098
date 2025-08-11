@@ -1,11 +1,14 @@
 from telebot import types
-from services.wallet_service import add_purchase, get_balance, has_sufficient_balance, deduct_balance
+from services.wallet_service import (
+    add_purchase,
+    has_sufficient_balance,
+    register_user_if_not_exist,
+    # هولد
+    create_hold,
+)
 from database.db import get_table
-from config import ADMIN_MAIN_ID
-from services.wallet_service import register_user_if_not_exist
 from handlers import keyboards
-from services.queue_service import add_pending_request
-from services.queue_service import process_queue
+from services.queue_service import add_pending_request, process_queue
 import math  # لإدارة صفحات الكيبورد
 import logging
 
@@ -18,6 +21,17 @@ CASH_TYPES = [
 ]
 
 CASH_PAGE_SIZE = 3
+COMMISSION_PER_50000 = 3500
+
+def _name_of(user):
+    # محاولة لطيفة لاستخراج اسم العميل
+    return (getattr(user, "full_name", None) or getattr(user, "first_name", None) or "صديقنا").strip()
+
+def _fmt(n):
+    try:
+        return f"{int(n):,} ل.س"
+    except Exception:
+        return f"{n} ل.س"
 
 def build_cash_menu(page: int = 0):
     total = len(CASH_TYPES)
@@ -38,8 +52,6 @@ def build_cash_menu(page: int = 0):
     kb.add(types.InlineKeyboardButton("❌ إلغاء", callback_data="commission_cancel"))
     return kb
 
-COMMISSION_PER_50000 = 3500
-
 def calculate_commission(amount):
     blocks = amount // 50000
     remainder = amount % 50000
@@ -48,9 +60,14 @@ def calculate_commission(amount):
         commission += int(COMMISSION_PER_50000 * (remainder / 50000))
     return commission
 
+# التفافات بسيطة للرصيد (نحافظ على بنية ملفك الأصلي)
+def get_balance(user_id):
+    from services.wallet_service import get_balance as _get
+    return _get(user_id)
+
 def start_cash_transfer(bot, message, history=None):
     user_id = message.from_user.id
-    register_user_if_not_exist(user_id)
+    register_user_if_not_exist(user_id, _name_of(message.from_user))
     if history is not None:
         if not isinstance(history.get(user_id), list):
             history[user_id] = []
@@ -68,16 +85,9 @@ def make_inline_buttons(*buttons):
         kb.add(types.InlineKeyboardButton(text, callback_data=data))
     return kb
 
-def get_balance(user_id):
-    from services.wallet_service import get_balance as get_bal
-    return get_bal(user_id)
-
-def deduct_balance(user_id, amount):
-    from services.wallet_service import deduct_balance as deduct_bal
-    deduct_bal(user_id, amount)
-
 def register(bot, history):
 
+    # تنقّل صفحات أنواع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_page_"))
     def _paginate_cash_menu(call):
         page = int(call.data.split("_")[-1])
@@ -88,6 +98,7 @@ def register(bot, history):
         )
         bot.answer_callback_query(call.id)
 
+    # اختيار نوع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_sel_"))
     def _cash_type_selected(call):
         idx = int(call.data.split("_")[-1])
@@ -103,10 +114,11 @@ def register(bot, history):
             history[user_id] = []
         history[user_id].append("cash_menu")
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type}")
+        name = _name_of(call.from_user)
         text = (
-            "⚠️ تنويه:\n"
-            f"العمولة لكل 50000 ل.س هي {COMMISSION_PER_50000} ل.س.\n"
-            "هل تريد المتابعة وكتابة الرقم المراد التحويل له؟"
+            f"⚠️ يا {name}، تنويه مهم:\n"
+            f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_50000:,} ل.س.\n\n"
+            "لو تمام كمل واكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
             ("✅ موافق", "commission_confirm"),
@@ -120,24 +132,26 @@ def register(bot, history):
         )
         bot.answer_callback_query(call.id)
 
+    # الدخول من زر بالقائمة الرئيسية (لو عندك زر)
     @bot.message_handler(func=lambda msg: msg.text == "💵 تحويل الى رصيد كاش")
     def open_cash_menu(msg):
         start_cash_transfer(bot, msg, history)
 
+    # نفس الفكرة لكن لو المستخدم كتب نوع التحويل كنص
     @bot.message_handler(func=lambda msg: msg.text in CASH_TYPES)
     def handle_cash_type(msg):
         user_id = msg.from_user.id
-
         cash_type = msg.text
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
         if not isinstance(history.get(user_id), list):
             history[user_id] = []
         history[user_id].append("cash_menu")
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type} (من رسالة)")
+        name = _name_of(msg.from_user)
         text = (
-            "⚠️ تنويه:\n"
-            f"العمولة لكل 50000 ل.س هي {COMMISSION_PER_50000} ل.س.\n"
-            "هل تريد المتابعة وكتابة الرقم المراد التحويل له؟"
+            f"⚠️ يا {name}، تنويه مهم:\n"
+            f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_50000:,} ل.س.\n\n"
+            "لو تمام كمل واكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
             ("✅ موافق", "commission_confirm"),
@@ -145,28 +159,29 @@ def register(bot, history):
         )
         bot.send_message(msg.chat.id, text, reply_markup=kb)
 
+    # إلغاء
     @bot.callback_query_handler(func=lambda call: call.data == "commission_cancel")
     def commission_cancel(call):
         user_id = call.from_user.id
         logging.info(f"[CASH][{user_id}] ألغى عملية التحويل")
-        bot.edit_message_text("❌ تم إلغاء العملية.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text("❌ تم إلغاء العملية. رجعناك للقائمة 👌", call.message.chat.id, call.message.message_id)
         user_states.pop(user_id, None)
 
+    # موافقة على الشروط → اطلب الرقم
     @bot.callback_query_handler(func=lambda call: call.data == "commission_confirm")
     def commission_confirmed(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_number"
-        kb = make_inline_buttons(
-            ("❌ إلغاء", "commission_cancel")
-        )
-        bot.edit_message_text("📲 أكتب الرقم المراد التحويل له:", call.message.chat.id, call.message.message_id, reply_markup=kb)
+        kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
+        bot.edit_message_text("📲 ابعتلنا الرقم اللي هتحوّل له:", call.message.chat.id, call.message.message_id, reply_markup=kb)
 
+    # استلام الرقم
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_number")
     def get_target_number(msg):
         user_id = msg.from_user.id
-        user_states[user_id]["number"] = msg.text
+        user_states[user_id]["number"] = msg.text.strip()
         user_states[user_id]["step"] = "confirm_number"
-        logging.info(f"[CASH][{user_id}] أدخل رقم التحويل: {msg.text}")
+        logging.info(f"[CASH][{user_id}] رقم التحويل: {msg.text}")
         kb = make_inline_buttons(
             ("❌ إلغاء", "commission_cancel"),
             ("✏️ تعديل", "edit_number"),
@@ -174,7 +189,7 @@ def register(bot, history):
         )
         bot.send_message(
             msg.chat.id,
-            f"الرقم المدخل: {msg.text}\n\nهل تريد المتابعة؟",
+            f"🔢 الرقم المدخل: {msg.text}\n\nتمام كده؟",
             reply_markup=kb
         )
 
@@ -182,27 +197,28 @@ def register(bot, history):
     def edit_number(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_number"
-        bot.send_message(call.message.chat.id, "📲 أعد كتابة الرقم المراد التحويل له:")
+        bot.send_message(call.message.chat.id, "📲 اكتب الرقم من جديد:")
 
+    # بعد تأكيد الرقم → اطلب المبلغ
     @bot.callback_query_handler(func=lambda call: call.data == "number_confirm")
     def number_confirm(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
-        kb = make_inline_buttons(
-            ("❌ إلغاء", "commission_cancel")
-        )
-        bot.edit_message_text("💰 اكتب المبلغ الذي تريد تحويله:", call.message.chat.id, call.message.message_id, reply_markup=kb)
+        kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
+        bot.edit_message_text("💰 اكتب قيمة التحويل المطلوب (بالأرقام):", call.message.chat.id, call.message.message_id, reply_markup=kb)
 
+    # استلام المبلغ وحساب العمولة
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_amount")
     def get_amount_and_confirm(msg):
         user_id = msg.from_user.id
+        name = _name_of(msg.from_user)
         try:
-            amount = int(msg.text)
+            amount = int(msg.text.replace(",", "").strip())
             if amount <= 0:
                 raise ValueError
         except ValueError:
-            logging.warning(f"[CASH][{user_id}] محاولة إدخال مبلغ غير صالح: {msg.text}")
-            bot.send_message(msg.chat.id, "⚠️ الرجاء إدخال مبلغ صحيح بالأرقام.")
+            logging.warning(f"[CASH][{user_id}] مبلغ غير صالح: {msg.text}")
+            bot.send_message(msg.chat.id, f"⚠️ يا {name}، دخّل مبلغ صحيح بالأرقام من غير فواصل.")
             return
 
         state = user_states[user_id]
@@ -211,9 +227,7 @@ def register(bot, history):
         state["amount"] = amount
         state["commission"] = commission
         state["total"] = total
-
         state["step"] = "confirming"
-        logging.info(f"[CASH][{user_id}] أدخل مبلغ التحويل: {amount}, عمولة: {commission}, الإجمالي: {total}")
 
         kb = make_inline_buttons(
             ("❌ إلغاء", "commission_cancel"),
@@ -221,12 +235,12 @@ def register(bot, history):
             ("✔️ تأكيد", "cash_confirm")
         )
         summary = (
-            f"📤 تأكيد العملية:\n"
-            f"📲 الرقم: {state['number']}\n"
-            f"💸 المبلغ: {amount:,} ل.س\n"
-            f"🧾 العمولة: {commission:,} ل.س\n"
-            f"✅ الإجمالي: {total:,} ل.س\n"
-            f"💼 الطريقة: {state['cash_type']}"
+            "📤 تأكيد العملية:\n"
+            f"• الرقم: {state['number']}\n"
+            f"• المبلغ: {_fmt(amount)}\n"
+            f"• العمولة: {_fmt(commission)}\n"
+            f"• الإجمالي: {_fmt(total)}\n"
+            f"• الطريقة: {state['cash_type']}"
         )
         bot.send_message(msg.chat.id, summary, reply_markup=kb)
 
@@ -234,168 +248,103 @@ def register(bot, history):
     def edit_amount(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
-        bot.send_message(call.message.chat.id, "💰 أعد كتابة المبلغ:")
+        bot.send_message(call.message.chat.id, "💰 اكتب المبلغ من جديد:")
 
+    # تأكيد نهائي → إنشاء هولد + إرسال للطابور
     @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
     def confirm_transfer(call):
         user_id = call.from_user.id
-        data = user_states.get(user_id, {})
-        amount = data.get('amount')
-        commission = data.get('commission')
-        total = data.get('total')
+        name = _name_of(call.from_user)
+
+        # منع ازدواج الطلبات
+        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
+        if existing.data:
+            return bot.edit_message_text(
+                f"⏳ يا {name}، عندك طلب شغال بالفعل. استنى نخلّصه وبعدين ابعت الجديد.",
+                call.message.chat.id, call.message.message_id
+            )
+
+        data = user_states.get(user_id, {}) or {}
+        number = data.get("number")
+        cash_type = data.get("cash_type")
+        amount = int(data.get('amount') or 0)
+        commission = int(data.get('commission') or 0)
+        total = int(data.get('total') or 0)
+
+        # فحص الرصيد
         balance = get_balance(user_id)
+        if balance is None:
+            return bot.edit_message_text("❌ حصل خطأ في جلب الرصيد. جرّب تاني.", call.message.chat.id, call.message.message_id)
 
         if balance < total:
-            logging.warning(f"[CASH][{user_id}] محاولة تحويل بمبلغ يفوق الرصيد. الرصيد: {balance}, المطلوب: {total}")
             shortage = total - balance
-            kb = make_inline_buttons(
-                ("💳 شحن المحفظة", "recharge_wallet"),
-                ("⬅️ رجوع", "commission_cancel")
-            )
-            bot.edit_message_text(
-                f"❌ لا يوجد رصيد كافٍ في محفظتك.\n"
-                f"الإجمالي المطلوب: {total:,} ل.س\n"
-                f"رصيدك الحالي: {balance:,} ل.س\n"
-                f"المبلغ الناقص: {shortage:,} ل.س\n"
-                "يرجى شحن المحفظة أو العودة.",
+            kb = make_inline_buttons(("💳 شحن المحفظة", "recharge_wallet"), ("⬅️ رجوع", "commission_cancel"))
+            return bot.edit_message_text(
+                f"❌ يا {name}، رصيدك الحالي {_fmt(balance)} والمطلوب {_fmt(total)}.\n"
+                f"نقصك {_fmt(shortage)} — كمّل شحن ونمشي الطلب سِكة سريعة 😉",
                 call.message.chat.id, call.message.message_id,
                 reply_markup=kb
             )
-            return
-        deduct_balance(user_id, total)
-        user_states[user_id]["step"] = "waiting_admin"
-        kb_admin = make_inline_buttons(
-            ("✅ تأكيد التحويل", f"admin_cash_accept_{user_id}_{total}"),
-            ("❌ رفض التحويل", f"admin_cash_reject_{user_id}")
-        )
-        message = (
-            f"📤 طلب تحويل كاش جديد\n"
-            f"-----------------------------\n"
-            f"👤 المستخدم: <code>{user_id}</code>\n"
-            f"📲 الرقم المستلم: <code>{data.get('number')}</code>\n"
-            f"💼 طريقة التحويل: <b>{data.get('cash_type')}</b>\n"
-            f"-----------------------------\n"
-            f"💰 المبلغ: <b>{amount:,} ل.س</b>\n"
-            f"🧾 العمولة: <b>{commission:,} ل.س</b>\n"
-            f"✅ الإجمالي: <b>{total:,} ل.س</b>\n"
-            f"-----------------------------\n"
-            f"📩 يمكنك الرد برسالة أو صورة لتصل للعميل."
+
+        # إنشاء هولد بدل الخصم الفوري
+        hold_desc = f"حجز تحويل كاش — {cash_type} — رقم {number}"
+        r = create_hold(user_id, total, hold_desc)
+        if getattr(r, "error", None) or not getattr(r, "data", None):
+            logging.error(f"[CASH][{user_id}] create_hold failed: {getattr(r, 'error', r)}")
+            return bot.edit_message_text("❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.", call.message.chat.id, call.message.message_id)
+
+        hold_id = r.data.get("id") or r.data.get("hold_id") or r.data.get("hold") or None
+        # رصيد بعد الحجز (لو متوفر)
+        try:
+            balance_after = get_balance(user_id)
+        except Exception:
+            balance_after = None
+
+        # رسالة الإدمن الموحّدة
+        admin_msg = (
+            f"💰 رصيد المستخدم الآن: {_fmt(balance_after if balance_after is not None else balance)}\n"
+            f"🆕 طلب جديد — تحويل كاش\n"
+            f"👤 الاسم: <code>{_name_of(call.from_user)}</code>\n"
+            f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
+            f"آيدي: <code>{user_id}</code>\n"
+            f"🔖 النوع: {cash_type}\n"
+            f"📲 رقم المستفيد: <code>{number}</code>\n"
+            f"💸 المبلغ: {_fmt(amount)}\n"
+            f"🧾 العمولة: {_fmt(commission)}\n"
+            f"✅ الإجمالي: {_fmt(total)}\n"
+            f"🔒 HOLD: <code>{hold_id}</code>"
         )
 
-        logging.info(f"[CASH][{user_id}] طلب تحويل جديد: {data}")
-        bot.edit_message_text("✅ تم إرسال الطلب، بانتظار موافقة الإدارة.", call.message.chat.id, call.message.message_id)
-
-        # إضافة الطلب مع الحجز للطابور
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
-            request_text=(
-                f"📤 طلب تحويل كاش جديد\n"
-                f"──────────────────\n"
-                f"👤 المستخدم: <code>{user_id}</code>\n"
-                f"📲 رقم المستلم: <code>{data.get('number')}</code>\n"
-                f"💼 طريقة التحويل: {data.get('cash_type')}\n"
-                f"──────────────────\n"
-                f"💰 المبلغ: {amount:,} ل.س\n"
-                f"🧾 العمولة: {commission:,} ل.س\n"
-                f"✅ الإجمالي: {total:,} ل.س\n"
-                f"──────────────────"
-            ),
+            request_text=admin_msg,
             payload={
                 "type": "cash_transfer",
-                "number": data.get('number'),
-                "cash_type": data.get('cash_type'),
+                "number": number,
+                "cash_type": cash_type,
                 "amount": amount,
                 "commission": commission,
                 "total": total,
-                "reserved": total,
+                "reserved": total,     # للتوافق مع مسارات قديمة
+                "hold_id": hold_id,    # المسار الحديث الآمن
+                "hold_desc": hold_desc
             }
         )
-        bot.send_message(
-            user_id,
-            "📝 تم إرسال طلبك إلى الإدارة (الطابور).\n"
-            "سيتم تنفيذ العملية بعد الموافقة خلال دقائق.\n"
-            "يرجى انتظار إشعار التنفيذ أو التواصل مع الإدارة عند الحاجة."
-        )
+
+        # شغّل الطابور
         process_queue(bot)
-        
+
+        # رسالة للعميل
+        bot.edit_message_text(
+            f"📨 تمام يا {name}! تم إرسال طلبك للإدارة.\n"
+            f"⏱️ التنفيذ عادةً خلال 1–4 دقايق.\n"
+            f"ℹ️ ملاحظة: مش هتقدر تبعت طلب جديد لحد ما نخلّص الحالي.",
+            call.message.chat.id, call.message.message_id
+        )
+        user_states[user_id]["step"] = "waiting_admin"
+
+    # زر شحن المحفظة
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet")
     def show_recharge_methods(call):
-        bot.send_message(call.message.chat.id, "💳 اختر طريقة شحن المحفظة:", reply_markup=keyboards.recharge_menu())
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_cash_accept_"))
-    def admin_accept_cash_transfer(call):
-        try:
-            parts = call.data.split("_")
-            user_id = int(parts[-2])
-            total = int(parts[-1])
-            # من المفترض أن تستخرج بيانات الطلب من جدول الطابور!
-            from database.db import get_table
-            res = get_table("pending_requests").select("payload").eq("user_id", user_id).execute()
-            if not res.data:
-                bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
-                return
-            payload = res.data[0].get("payload", {})
-            # تأكد من الحجز (reserved) من الطابور وليس من الحالة المؤقتة!
-            reserved = payload.get("reserved", total)
-            number = payload.get("number")
-            cash_type = payload.get("cash_type")
-
-            if not has_sufficient_balance(user_id, reserved):
-                logging.warning(f"[CASH][ADMIN][{user_id}] فشل التحويل، لا يوجد رصيد كافٍ")
-                bot.send_message(user_id, f"❌ فشل تحويل الكاش: لا يوجد رصيد كافٍ في محفظتك.")
-                bot.answer_callback_query(call.id, "❌ لا يوجد رصيد كافٍ لدى العميل.")
-                bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-                return
-
-            # إعادة الحجز أولًا (لو كان خُصم بالحجز الافتراضي في مكان آخر - لتفادي أي خصم مزدوج)
-            # ثم نخصم فعليًا
-            from services.wallet_service import deduct_balance, add_purchase
-            deduct_balance(user_id, reserved)
-            add_purchase(user_id, reserved, f"تحويل كاش {cash_type}", reserved, number)
-
-            logging.info(f"[CASH][ADMIN][{user_id}] تم الخصم وقبول التحويل، الإجمالي: {reserved}")
-            bot.send_message(
-                user_id,
-                f"✅ تم شراء {cash_type} للرقم {number} بمبلغ {reserved:,} ل.س بنجاح."
-            )
-            bot.answer_callback_query(call.id, "✅ تم قبول الطلب")
-            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-
-            def forward_admin_message(m):
-                if m.content_type == "photo":
-                    file_id = m.photo[-1].file_id
-                    bot.send_photo(user_id, file_id, caption=m.caption or "تمت العملية بنجاح.")
-                else:
-                    bot.send_message(user_id, m.text or "تمت العملية بنجاح.")
-            bot.send_message(call.message.chat.id, "📝 أرسل رسالة أو صورة للعميل مع صورة التحويل أو تأكيد العملية.")
-            bot.register_next_step_handler_by_chat_id(call.message.chat.id, forward_admin_message)
-            # احذف الطلب من الطابور بعد التنفيذ
-            from services.queue_service import delete_pending_request
-            delete_pending_request(payload.get("id") or res.data[0].get("id"))
-            # نظّف حالة المستخدم المؤقتة إن وجدت
-            user_states.pop(user_id, None)
-        except Exception as e:
-            logging.error(f"[CASH][ADMIN][{user_id}] خطأ أثناء تأكيد التحويل: {e}", exc_info=True)
-            bot.send_message(call.message.chat.id, f"❌ حدث خطأ: {e}")
-
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_cash_reject_"))
-    def admin_reject_cash_transfer(call):
-        try:
-            user_id = int(call.data.split("_")[-1])
-            logging.info(f"[CASH][ADMIN][{user_id}] تم رفض طلب التحويل")
-            def handle_reject(m):
-                txt = m.text if m.content_type == "text" else "❌ تم رفض الطلب."
-                if m.content_type == "photo":
-                    bot.send_photo(user_id, m.photo[-1].file_id, caption=(m.caption or txt))
-                else:
-                    bot.send_message(user_id, f"❌ تم رفض الطلب من الإدارة.\n📝 السبب: {txt}")
-                bot.answer_callback_query(call.id, "❌ تم رفض الطلب")
-                bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-                user_states.pop(user_id, None)
-            bot.send_message(call.message.chat.id, "📝 اكتب سبب الرفض أو أرسل صورة:")
-            bot.register_next_step_handler_by_chat_id(call.message.chat.id, handle_reject)
-        except Exception as e:
-            logging.error(f"[CASH][ADMIN] خطأ في رفض التحويل: {e}", exc_info=True)
-            bot.send_message(call.message.chat.id, f"❌ حدث خطأ: {e}")
+        bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن المحفظة:", reply_markup=keyboards.recharge_menu())
