@@ -39,39 +39,31 @@ def has_pending_request(user_id: int) -> bool:
     return bool(res.data)
 
 # ============= تعريف المنتجات =============
-
-def make_product(pid: int, amount: int, unit: str, usd: float, category: str = "ألعاب") -> Product:
-    name = f"{amount} {unit}"
-    # نخلي نص الزر = نفس اسم المنتج بالضبط
-    return Product(pid, name, category, usd, name)
-
 PRODUCTS = {
     "PUBG": [
-        make_product(1, 60,   "شدة",   0.89),
-        make_product(2, 325,  "شدة",   4.44),
-        make_product(3, 660,  "شدة",   8.85),
-        make_product(4, 1800, "شدة",  22.09),
-        make_product(5, 3850, "شدة",  43.24),
-        make_product(6, 8100, "شدة",  86.31),
+        Product(1, "60 شدة", "ألعاب", 0.89, "زر 60 شدة"),
+        Product(2, "325 شدة", "ألعاب", 4.44, "زر 325 شدة"),
+        Product(3, "660 شدة", "ألعاب", 8.85, "زر 660 شدة"),
+        Product(4, "1800 شدة", "ألعاب", 22.09, "زر 1800 شدة"),
+        Product(5, "3850 شدة", "ألعاب", 43.24, "زر 3850 شدة"),
+        Product(6, "8100 شدة", "ألعاب", 86.31, "زر 8100 شدة"),
     ],
     "FreeFire": [
-        # ملاحظة: لو تحبها "جوهر" بدل "جوهرة" قولي أبدّلها لك في سطر واحد
-        make_product(7,   100,  "جوهرة",  0.98),
-        make_product(8,   310,  "جوهرة",  2.49),
-        make_product(9,   520,  "جوهرة",  4.13),
-        make_product(10, 1060,  "جوهرة",  9.42),
-        make_product(11, 2180,  "جوهرة", 18.84),
+        Product(7, "100 جوهرة", "ألعاب", 0.98, "زر 100 جوهرة"),
+        Product(8, "310 جوهرة", "ألعاب", 2.49, "زر 310 جوهرة"),
+        Product(9, "520 جوهرة", "ألعاب", 4.13, "زر 520 جوهرة"),
+        Product(10, "1060 جوهرة", "ألعاب", 9.42, "زر 1060 جوهرة"),
+        Product(11, "2180 جوهرة", "ألعاب", 18.84, "زر 2180 جوهرة"),
     ],
     "Jawaker": [
-        make_product(12,  10000, "توكينز",  1.34),
-        make_product(13,  15000, "توكينز",  2.01),
-        make_product(14,  20000, "توكينز",  2.68),
-        make_product(15,  30000, "توكينز",  4.02),
-        make_product(16,  60000, "توكينز",  8.04),
-        make_product(17, 120000, "توكينز", 16.08),
+        Product(12, "10000 توكنز", "ألعاب", 1.34, "زر 10000 توكنز"),
+        Product(13, "15000 توكنز", "ألعاب", 2.01, "زر 15000 توكنز"),
+        Product(14, "20000 توكنز", "ألعاب", 2.68, "زر 20000 توكنز"),
+        Product(15, "30000 توكنز", "ألعاب", 4.02, "زر 30000 توكنز"),
+        Product(16, "60000 توكنز", "ألعاب", 8.04, "زر 60000 توكنز"),
+        Product(17, "120000 توكنز", "ألعاب", 16.08, "زر 120000 توكنز"),
     ],
 }
-
 
 def convert_price_usd_to_syp(usd):
     if usd <= 5:
@@ -329,7 +321,7 @@ def setup_inline_handlers(bot, admin_ids):
             f"(select_{product.product_id})"
         )
 
-        # تمرير hold_id للإدارة لإتمام/إلغاء لاحقًا + معلومة reserved
+        # تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
@@ -337,6 +329,7 @@ def setup_inline_handlers(bot, admin_ids):
             payload={
                 "type": "order",
                 "product_id": product.product_id,
+                "product_name": product.name,   # ✅ مهم لرسالة التنفيذ
                 "player_id": player_id,
                 "price": price_syp,
                 "reserved": price_syp,
