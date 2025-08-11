@@ -13,7 +13,10 @@ from services.wallet_service import (
     add_purchase,
     get_balance,
     has_sufficient_balance,
-    deduct_balance,
+    deduct_balance,   # احتياطي لمسارات قديمة لو احتجناه
+    create_hold,      # ✅ حجز
+    capture_hold,     # ✅ تصفية الحجز (يتم في handlers/admin.py)
+    release_hold,     # ✅ فكّ الحجز (لو رفض الأدمن)
 )
 from services.queue_service import (
     add_pending_request,
@@ -21,6 +24,7 @@ from services.queue_service import (
     delete_pending_request,
 )
 from database.db import get_table  # لمنع الطلبات المتزامنة
+
 # =====================================
 #       ثوابت
 # =====================================
@@ -60,13 +64,21 @@ def calculate_commission(amount: int) -> int:
     blocks = (amount + 5000 - 1) // 5000
     return blocks * COMMISSION_PER_5000
 
+def _user_name(bot, user_id: int) -> str:
+    try:
+        ch = bot.get_chat(user_id)
+        name = (getattr(ch, "first_name", None) or getattr(ch, "full_name", "") or "").strip()
+        return name or "صاحبنا"
+    except Exception:
+        return "صاحبنا"
+
 # =====================================
 #   مفاتيح callback
 # =====================================
 CB_PROV_PREFIX   = "iprov"      # اختيار مزوّد
-CB_SPEED_PREFIX = "ispeed"     # اختيار سرعة
+CB_SPEED_PREFIX  = "ispeed"     # اختيار سرعة
 CB_BACK_PROV     = "iback_prov"   # رجوع لقائمة المزودين
-CB_BACK_SPEED   = "iback_speed"  # رجوع لقائمة السرعات
+CB_BACK_SPEED    = "iback_speed"  # رجوع لقائمة السرعات
 CB_CONFIRM       = "iconfirm"     # تأكيد (إرسال لطابور الأدمن)
 CB_CANCEL        = "icancel"      # إلغاء من المستخدم
 
@@ -117,14 +129,21 @@ def register(bot):
     @bot.callback_query_handler(func=lambda c: c.data.startswith(f"{CB_PROV_PREFIX}:"))
     def cb_choose_provider(call):
         user_id = call.from_user.id
+        name = _user_name(bot, user_id)
         provider = call.data.split(":", 1)[1]
         if provider not in INTERNET_PROVIDERS:
             return bot.answer_callback_query(call.id, "خيار غير صالح.", show_alert=True)
+
+        # منع الطلبات المتزامنة
+        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
+        if existing.data:
+            return bot.answer_callback_query(call.id, f"❌ يا {name}، عندك طلب شغّال دلوقتي. استنى لما يخلص.", show_alert=True)
+
         user_net_state[user_id] = {"step": "choose_speed", "provider": provider}
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="⚡ اختر السرعة المطلوبة:\n💸 العمولة لكل 5000 ل.س = 600 ل.س",
+            text=f"⚡ يا {name}، اختار السرعة المطلوبة:\n💸 العمولة لكل 5000 ل.س = {COMMISSION_PER_5000} ل.س",
             reply_markup=_speeds_inline_kb()
         )
 
@@ -132,11 +151,12 @@ def register(bot):
     @bot.callback_query_handler(func=lambda c: c.data == CB_BACK_PROV)
     def cb_back_to_prov(call):
         user_id = call.from_user.id
+        name = _user_name(bot, user_id)
         user_net_state[user_id] = {"step": "choose_provider"}
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="⚠️ اختر أحد مزودات الإنترنت:\n💸 العمولة لكل 5000 ل.س = 600 ل.س",
+            text=f"⚠️ يا {name}، اختار واحد من مزودات الإنترنت:\n💸 العمولة لكل 5000 ل.س = {COMMISSION_PER_5000} ل.س",
             reply_markup=_provider_inline_kb()
         )
 
@@ -144,6 +164,7 @@ def register(bot):
     @bot.callback_query_handler(func=lambda c: c.data.startswith(f"{CB_SPEED_PREFIX}:"))
     def cb_choose_speed(call):
         user_id = call.from_user.id
+        name = _user_name(bot, user_id)
         try:
             idx = int(call.data.split(":", 1)[1])
             speed = INTERNET_SPEEDS[idx]
@@ -161,13 +182,14 @@ def register(bot):
         bot.answer_callback_query(call.id)
         bot.send_message(
             chat_id=call.message.chat.id,
-            text="📱 أرسل رقم الهاتف / الحساب المطلوب شحنه (مع رمز المحافظة، مثال: 011XXXXXXX).\nأرسل /cancel للإلغاء."
+            text=f"📱 يا {name}، ابعت رقم الهاتف/الحساب المطلوب شحنه (مع رمز المحافظة، مثال: 011XXXXXXX).\nاكتب /cancel للإلغاء."
         )
 
     # رجوع لشاشة السرعات
     @bot.callback_query_handler(func=lambda c: c.data == CB_BACK_SPEED)
     def cb_back_to_speed(call):
         user_id = call.from_user.id
+        name = _user_name(bot, user_id)
         st = user_net_state.get(user_id, {})
         if "provider" not in st:
             return cb_back_to_prov(call)
@@ -175,7 +197,7 @@ def register(bot):
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="⚡ اختر السرعة المطلوبة:\n💸 العمولة لكل 5000 ل.س = 600 ل.س",
+            text=f"⚡ يا {name}، اختار السرعة المطلوبة:\n💸 العمولة لكل 5000 ل.س = {COMMISSION_PER_5000} ل.س",
             reply_markup=_speeds_inline_kb()
         )
 
@@ -183,19 +205,21 @@ def register(bot):
     @bot.callback_query_handler(func=lambda c: c.data == CB_CANCEL)
     def cb_cancel(call):
         user_net_state.pop(call.from_user.id, None)
+        name = _user_name(bot, call.from_user.id)
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="تم الإلغاء. أرسل /start للعودة إلى القائمة الرئيسية."
+            text=f"✅ تمام يا {name}، اتلغت. ابعت /start عشان ترجع للقائمة الرئيسية."
         )
 
     # إدخال رقم الهاتف
     @bot.message_handler(func=lambda m: user_net_state.get(m.from_user.id, {}).get("step") == "enter_phone")
     def handle_phone_entry(msg):
         user_id = msg.from_user.id
+        name = _user_name(bot, user_id)
         phone = _normalize_phone(msg.text)
         if not phone or len(phone) < 5:
-            return bot.reply_to(msg, "⚠️ رقم غير صالح، أعد الإرسال.")
+            return bot.reply_to(msg, f"⚠️ يا {name}، الرقم مش واضح. ابعته تاني بشكل صحيح.")
 
         st = user_net_state[user_id]
         st["phone"] = phone
@@ -206,56 +230,78 @@ def register(bot):
         total = price + comm
 
         summary = (
-            "📦 *تفاصيل الطلب*\n"
+            f"📦 تفاصيل الطلب يا {name}\n"
             f"مزود: {st['provider']}\n"
             f"سرعة: {st['speed']}\n"
             f"السعر: {price:,} ل.س\n"
             f"العمولة: {comm:,} ل.س\n"
             f"الإجمالي: {total:,} ل.س\n\n"
-            f"رقم: `{phone}`\n\n"
-            "اضغط لإرسال الطلب إلى الأدمن"
+            f"رقم: {phone}\n\n"
+            "لو تمام، اضغط تأكيد عشان نبعت الطلب للإدارة."
         )
         bot.send_message(
             msg.chat.id,
             summary,
-            parse_mode="Markdown",
             reply_markup=_confirm_inline_kb()
         )
 
-    # إرسال الطلب إلى طابور الأدمن مع حجز المبلغ
+    # إرسال الطلب إلى طابور الأدمن مع "هولد" للمبلغ
     @bot.callback_query_handler(func=lambda c: c.data == CB_CONFIRM)
     def cb_confirm(call):
         user_id = call.from_user.id
+        name = _user_name(bot, user_id)
         st = user_net_state.get(user_id)
         if not st or st.get("step") != "confirm":
-            return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)  
+            return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)
 
         price = st["price"]
         comm  = calculate_commission(price)
         total = price + comm
+
+        # منع الطلبات المتزامنة
+        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
+        if existing.data:
+            return bot.answer_callback_query(call.id, f"❌ يا {name}، عندك طلب شغّال دلوقتي. استنى لما يخلص.", show_alert=True)
 
         balance = get_balance(user_id)
         if balance < total:
             missing = total - balance
             return bot.answer_callback_query(
                 call.id,
-                f"❌ رصيدك الحالي: {balance:,} ل.س\nالناقص: {missing:,} ل.س\nيرجى شحن المحفظة أولاً.",
+                f"❌ يا {name}، رصيدك الحالي: {balance:,} ل.س\nالناقص: {missing:,} ل.س\nاشحن المحفظة الأول.",
                 show_alert=True
             )
 
-        # حجز الرصيد
-        deduct_balance(user_id, total)
+        # ✅ إنشاء حجز بدل الخصم الفوري
+        hold_id = None
+        try:
+            reason = f"حجز إنترنت — {st['provider']} {st['speed']}"
+            res = create_hold(user_id, total, reason)
+            d = getattr(res, "data", None)
+            if isinstance(d, dict):
+                hold_id = d.get("id") or d.get("hold_id")
+            elif isinstance(d, (list, tuple)) and d:
+                hold_id = d[0].get("id") if isinstance(d[0], dict) else d[0]
+            elif isinstance(d, (int, str)):
+                hold_id = d
+        except Exception as e:
+            logging.exception(f"[INET][{user_id}] create_hold failed: {e}")
 
+        if not hold_id:
+            return bot.answer_callback_query(call.id, f"⚠️ يا {name}، حصلت مشكلة وإحنا بنثبت قيمة العملية. جرّب تاني بعد شوية.", show_alert=True)
+
+        # نص الإداريين بصيغة HTML (متوافق مع queue_service)
         adm_txt = (
-            "📥 *طلب جديد (إنترنت)*\n"
-            f"المستخدم: {user_id}\n"
-            f"رصيد المستخدم: {balance:,} ل.س\n"
-            f"مزود: {st['provider']}\n"
-            f"سرعة: {st['speed']}\n"
-            f"رقم: `{st['phone']}`\n"
-            f"المبلغ: {price:,} + عمولة {comm:,} = {total:,} ل.س"
+            "🌐 <b>طلب دفع إنترنت</b>\n"
+            f"👤 المستخدم: <code>{user_id}</code>\n"
+            f"🏷️ المزود: <b>{st['provider']}</b>\n"
+            f"⚡ السرعة: <b>{st['speed']}</b>\n"
+            f"📞 الرقم/الحساب: <code>{st['phone']}</code>\n"
+            f"💰 السعر: <b>{price:,} ل.س</b>\n"
+            f"🧾 العمولة: <b>{comm:,} ل.س</b>\n"
+            f"✅ الإجمالي (محجوز): <b>{total:,} ل.س</b>"
         )
-        print(f"[DEBUG] Adding pending request with reserved amount: {total}")
+
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
@@ -269,6 +315,7 @@ def register(bot):
                 "comm": comm,
                 "total": total,
                 "reserved": total,
+                "hold_id": hold_id,  # ✅ مهم
             }
         )
         process_queue(bot)
@@ -277,15 +324,15 @@ def register(bot):
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="📨 تم إرسال طلبك لمسؤول البوت. سيتم إشعارك بعد المراجعة."
+            text=f"📨 يا {name}، طلبك اتبعت لمسؤول البوت. هنراجع ونبعتلك إشعار أول ما يتنفذ."
         )
-
         st["step"] = "wait_admin"
 
 def start_internet_provider_menu(bot, message):
+    name = _user_name(bot, message.from_user.id)
     bot.send_message(
         message.chat.id,
-        "⚠️ اختر أحد مزودات الإنترنت:\n💸 العمولة لكل 5000 ل.س = 600 ل.س",
+        f"⚠️ يا {name}، اختار مزود الإنترنت اللي عايزه:\n💸 العمولة لكل 5000 ل.س = {COMMISSION_PER_5000} ل.س",
         reply_markup=_provider_inline_kb()
     )
     user_net_state[message.from_user.id] = {"step": "choose_provider"}
