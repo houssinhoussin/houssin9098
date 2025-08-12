@@ -1,7 +1,20 @@
+# -*- coding: utf-8 -*-
+# handlers/ads.py — نظام الإعلانات داخل البوت
+# • /cancel للإلغاء في أي وقت
+# • confirm_guard عند التأكيد (يحذف الكيبورد فقط + Debounce)
+# • رسائل محسّنة وإيموجي وبانر
+# • حجز المبلغ عبر create_hold مع وصف واضح
+
 from telebot import types
 from services.wallet_service import get_balance, get_available_balance, create_hold
 from services.queue_service import add_pending_request, process_queue
-from handlers.keyboards import main_menu 
+from handlers.keyboards import main_menu
+
+# حارس التأكيد الموحّد (يحذف الكيبورد + يمنع الدبل-كليك)
+try:
+    from services.ui_guards import confirm_guard
+except Exception:
+    from ui_guards import confirm_guard
 
 # ----------------------------------
 # خيارات الإعلان
@@ -18,6 +31,17 @@ AD_OPTIONS = [
 user_ads_state: dict[int, dict] = {}
 
 # ==== Helpers للرسائل ====
+BAND = "━━━━━━━━━━━━━━━━"
+CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
+ETA_TEXT = "من 1 إلى 4 دقائق"
+
+def banner(title: str, lines: list[str]) -> str:
+    body = "\n".join(lines)
+    return f"{BAND}\n{title}\n{body}\n{BAND}"
+
+def with_cancel_hint(text: str) -> str:
+    return f"{text}\n\n{CANCEL_HINT}"
+
 def _name_from_user(u) -> str:
     n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
     n = (n or "").strip()
@@ -29,8 +53,6 @@ def _fmt_syp(n: int) -> str:
     except Exception:
         return f"{n} ل.س"
 
-ETA_TEXT = "من 1 إلى 4 دقائق"
-
 # ====================================================================
 # التسجيل
 # ====================================================================
@@ -38,13 +60,24 @@ ETA_TEXT = "من 1 إلى 4 دقائق"
 def register(bot, _history):
     """تسجيل جميع هاندلرات مسار الإعلانات."""
 
+    # ===== /cancel العام =====
+    @bot.message_handler(commands=['cancel'])
+    def cancel_cmd(msg):
+        uid = msg.from_user.id
+        user_ads_state.pop(uid, None)
+        bot.send_message(
+            msg.chat.id,
+            banner("❌ تم الإلغاء", [f"يا {_name_from_user(msg.from_user)}، رجعناك للقائمة الرئيسية 👇"]),
+            reply_markup=main_menu()
+        )
+
     # ----------------------------------------------------------------
     # 1) مدخل الإعلان – رسالة ترويجية أولية
     # ----------------------------------------------------------------
     @bot.message_handler(func=lambda msg: msg.text == "📢 إعلاناتك")
     def ads_entry(msg):
         name = _name_from_user(msg.from_user)
-        promo = (
+        promo = with_cancel_hint(
             "✨ <b>مساحة إعلانات متجرنا</b> ✨\n\n"
             "عبر قناتنا <a href=\"https://t.me/shop100sho\">@shop100sho</a> توصل رسالتك لـ <b>آلاف</b> يوميًا!\n"
             "• روّج لمنتجك أو أسعارك الجديدة\n"
@@ -67,7 +100,7 @@ def register(bot, _history):
         for text, times, _ in AD_OPTIONS:
             mk.add(types.InlineKeyboardButton(text, callback_data=f"ads_{times}"))
         mk.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="ads_back"))
-        bot.send_message(chat_id, "🟢 اختار باقتك:", reply_markup=mk)
+        bot.send_message(chat_id, with_cancel_hint("🟢 اختار باقتك:"), reply_markup=mk)
 
     @bot.callback_query_handler(func=lambda call: call.data == "ads_start")
     def proceed_to_ads(call):
@@ -104,7 +137,7 @@ def register(bot, _history):
         name = _name_from_user(call.from_user)
         bot.send_message(
             call.message.chat.id,
-            f"✏️ يا {name}، ابعت وسيلة التواصل (رقم/يوزر/لينك) اللي هتظهر مع الإعلان:"
+            with_cancel_hint(f"✏️ يا {name}، ابعت وسيلة التواصل (رقم/يوزر/لينك) اللي هتظهر مع الإعلان:")
         )
 
     # ----------------------------------------------------------------
@@ -118,12 +151,12 @@ def register(bot, _history):
 
         markup = types.InlineKeyboardMarkup()
         markup.add(
-            types.InlineKeyboardButton("تأكيد", callback_data="ads_contact_confirm"),
-            types.InlineKeyboardButton("إلغاء", callback_data="ads_cancel")
+            types.InlineKeyboardButton("✅ تأكيد", callback_data="ads_contact_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء", callback_data="ads_cancel")
         )
         bot.send_message(
             msg.chat.id,
-            f"📞 هنعرض للتواصل:\n{msg.text}\n\nنكمل؟",
+            with_cancel_hint(f"📞 هنعرض للتواصل:\n{msg.text}\n\nنكمل؟"),
             reply_markup=markup
         )
 
@@ -136,7 +169,7 @@ def register(bot, _history):
         user_id = call.from_user.id
         if call.data == "ads_contact_confirm":
             user_ads_state[user_id]["step"] = "ad_text"
-            bot.send_message(call.message.chat.id, "📝 ابعت نص إعلانك (هيظهر في القناة):")
+            bot.send_message(call.message.chat.id, with_cancel_hint("📝 ابعت نص إعلانك (هيظهر في القناة):"))
         else:
             user_ads_state.pop(user_id, None)
             bot.send_message(call.message.chat.id, "❌ اتلغت عملية الإعلان. نورتنا 🙏", reply_markup=types.ReplyKeyboardRemove())
@@ -156,7 +189,7 @@ def register(bot, _history):
             types.InlineKeyboardButton("🖼️ أضف صورتين", callback_data="ads_two_images"),
             types.InlineKeyboardButton("➡️ تخطي الصور", callback_data="ads_skip_images")
         )
-        bot.send_message(msg.chat.id, "🖼️ عايز تضيف صور؟ اختار:", reply_markup=markup)
+        bot.send_message(msg.chat.id, with_cancel_hint("🖼️ عايز تضيف صور؟ اختار:"), reply_markup=markup)
 
     # ----------------------------------------------------------------
     # 6) تحديد عدد الصور المطلوب
@@ -168,7 +201,7 @@ def register(bot, _history):
         expect = 1 if call.data == "ads_one_image" else 2
         state = user_ads_state.setdefault(user_id, {})
         state.update({"expect_images": expect, "images": [], "step": "wait_images"})
-        bot.send_message(call.message.chat.id, "📸 ابعت الصورة دلوقتي." if expect == 1 else "📸 ابعت الصورتين وراء بعض.")
+        bot.send_message(call.message.chat.id, with_cancel_hint("📸 ابعت الصورة دلوقتي." if expect == 1 else "📸 ابعت الصورتين وراء بعض."))
 
     # ----------------------------------------------------------------
     # 7) استقبال الصور
@@ -247,7 +280,7 @@ def register(bot, _history):
             types.InlineKeyboardButton("📝 تعديل الإعلان", callback_data="ads_edit"),
             types.InlineKeyboardButton("❌ إلغاء", callback_data="ads_cancel")
         )
-        bot.send_message(chat_id, ad_preview, reply_markup=markup, parse_mode="HTML")
+        bot.send_message(chat_id, with_cancel_hint(ad_preview), reply_markup=markup, parse_mode="HTML")
 
     # ----------------------------------------------------------------
     # 10) تعديل الإعلان
@@ -257,7 +290,7 @@ def register(bot, _history):
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         user_ads_state[user_id]["step"] = "ad_text"
-        bot.send_message(call.message.chat.id, "🔄 عدّل نص إعلانك أو ابعت نص جديد:")
+        bot.send_message(call.message.chat.id, with_cancel_hint("🔄 عدّل نص إعلانك أو ابعت نص جديد:"))
 
     # ----------------------------------------------------------------
     # 11) إلغاء الإعلان
@@ -270,12 +303,16 @@ def register(bot, _history):
         bot.send_message(call.message.chat.id, "❌ اتلغت عملية الإعلان. نورتنا 🙏", reply_markup=types.ReplyKeyboardRemove())
 
     # ----------------------------------------------------------------
-    # 12) تأكيد الإعلان (إرساله للطابور)
+    # 12) تأكيد الإعلان (إرساله للطابور مع حجز المبلغ)
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")
     def confirm_ad(call):
-        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
+
+        # ✅ عند التأكيد — احذف الكيبورد فقط + Debounce
+        if confirm_guard(bot, call, "ads_confirm_send"):
+            return
+
         data = user_ads_state.get(user_id)
 
         # التحقق من المرحلة
@@ -286,7 +323,6 @@ def register(bot, _history):
 
         price   = int(data["price"])
         times   = int(data["times"])
-        balance = int(get_available_balance(user_id) or 0)
         name    = _name_from_user(call.from_user)
 
         # ✅ الرصيد المتاح (balance - held)
@@ -295,35 +331,41 @@ def register(bot, _history):
             missing = price - available
             bot.send_message(
                 call.message.chat.id,
-                f"❌ يا {name}، رصيدك المتاح مش كفاية للبـاقة.\n"
-                f"المتاح: <b>{_fmt_syp(available)}</b>\n"
-                f"السعر: <b>{_fmt_syp(price)}</b>\n"
-                f"الناقص تقريبًا: <b>{_fmt_syp(missing)}</b>",
+                with_cancel_hint(
+                    f"❌ يا {name}، رصيدك المتاح مش كفاية للبـاقة.\n"
+                    f"المتاح: <b>{_fmt_syp(available)}</b>\n"
+                    f"السعر: <b>{_fmt_syp(price)}</b>\n"
+                    f"الناقص تقريبًا: <b>{_fmt_syp(missing)}</b>"
+                ),
                 parse_mode="HTML"
             )
             return
 
         # ——— حجز المبلغ عبر RPC ———
+        hold_id = None
         try:
-            hold_resp = create_hold(user_id, price)
+            hold_desc = f"حجز إعلان مدفوع × {times}"
+            # توقّعات التوقيع: create_hold(user_id, amount, description)
+            hold_resp = create_hold(user_id, price, hold_desc)
             if getattr(hold_resp, "error", None) or not getattr(hold_resp, "data", None):
                 bot.send_message(
                     call.message.chat.id,
-                    f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية.",
+                    with_cancel_hint(f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية."),
                 )
                 return
-            hold_id = hold_resp.data  # UUID
+            hold_id = hold_resp.data  # غالبًا UUID
         except Exception:
             bot.send_message(
                 call.message.chat.id,
-                f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية.",
+                with_cancel_hint(f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية."),
             )
             return
 
         # ===== رسالة الأدمن بالقالب الموحّد =====
+        balance_now = int(get_balance(user_id) or 0)
         id_value = (data.get("contact") or "").strip() or "—"
         admin_msg = (
-            f"💰 رصيد المستخدم: {balance:,} ل.س\n"
+            f"💰 رصيد المستخدم: {balance_now:,} ل.س\n"
             f"🆕 طلب جديد\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
             f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
@@ -343,8 +385,9 @@ def register(bot, _history):
             "contact": data.get("contact"),
             "ad_text": data.get("ad_text"),
             "images": data.get("images", []),
-            "reserved": price,    # مبلغ محجوز
-            "hold_id": hold_id,   # للقبول/الإلغاء
+            "reserved": price,      # مبلغ محجوز
+            "hold_id": hold_id,     # للقبول/الإلغاء من لوحة الأدمن
+            "hold_desc": hold_desc, # وصف للتتبع
         }
 
         add_pending_request(
@@ -359,9 +402,13 @@ def register(bot, _history):
 
         bot.send_message(
             user_id,
-            f"✅ تمام يا {name}! بعتنا إعلانك للإدارة.\n"
-            f"⏱️ سيتم تنفيذ الطلب {ETA_TEXT}.\n"
-            f"حجزنا <b>{_fmt_syp(price)}</b> من محفظتك مؤقتًا لباقة الإعلان (×{times}).",
+            banner(
+                f"✅ تمام يا {name}! إعلانك اتبعت للإدارة 🚀",
+                [
+                    f"⏱️ التنفيذ عادةً {ETA_TEXT}.",
+                    f"🔒 حجزنا {_fmt_syp(price)} مؤقتًا لباقة الإعلان (×{times}).",
+                ]
+            ),
             parse_mode="HTML"
         )
         user_ads_state.pop(user_id, None)
