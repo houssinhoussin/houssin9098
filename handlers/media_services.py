@@ -46,10 +46,13 @@ def register_media_services(bot, history):
         register_user_if_not_exist(user_id, _name(msg.from_user))
         if history is not None:
             history.setdefault(user_id, []).append("media_menu")
+        text = (
+            f"🎯 يا {_name(msg.from_user)}، اختار الخدمة الإعلامية اللي تناسبك:\n"
+            f"{BAND}"
+        )
         bot.send_message(
             msg.chat.id,
-            f"🎯 يا {_name(msg.from_user)}، اختار الخدمة الإعلامية اللي تناسبك:
-{BAND}",
+            text,
             reply_markup=media_services_menu()
         )
 
@@ -71,19 +74,16 @@ def register_media_services(bot, history):
             types.InlineKeyboardButton("✅ تمام.. أكّد الطلب", callback_data="media_final_confirm"),
             types.InlineKeyboardButton("❌ إلغاء", callback_data="media_cancel")
         )
+        text = (
+            f"✨ اختيار هايل يا {_name(msg.from_user)}!\n"
+            f"• الخدمة: {service}\n"
+            f"• السعر: {_fmt_usd(price_usd)} ≈ {_fmt_syp(price_syp)}\n"
+            f"{BAND}\n"
+            "لو تمام، أكّد الطلب وهنبعته على طول للإدارة."
+        )
         bot.send_message(
             msg.chat.id,
-            (
-                f"✨ اختيار هايل يا {_name(msg.from_user)}!
-"
-                f"• الخدمة: {service}
-"
-                f"• السعر: {_fmt_usd(price_usd)} ≈ {_fmt_syp(price_syp)}
-"
-                f"{BAND}
-"
-                "لو تمام، أكّد الطلب وهنبعته على طول للإدارة."
-            ),
+            text,
             reply_markup=kb
         )
 
@@ -109,18 +109,13 @@ def register_media_services(bot, history):
         # ✅ الرصيد المتاح فقط
         available = get_available_balance(user_id)
         if available < price_syp:
-            return bot.send_message(
-                user_id,
-                (
-                    f"❌ يا {name}، رصيدك المتاح مش مكفّي.
-"
-                    f"المتاح: {_fmt_syp(available)}
-"
-                    f"السعر: {_fmt_syp(price_syp)}
-"
-                    "اشحن المحفظة وبعدين كمّل الطلب 😉"
-                )
+            text = (
+                f"❌ يا {name}، رصيدك المتاح مش مكفّي.\n"
+                f"المتاح: {_fmt_syp(available)}\n"
+                f"السعر: {_fmt_syp(price_syp)}\n"
+                "اشحن المحفظة وبعدين كمّل الطلب 😉"
             )
+            return bot.send_message(user_id, text)
 
         # ✅ إنشاء حجز (Hold) ذري
         hold_id = None
@@ -164,15 +159,13 @@ def register_media_services(bot, history):
         )
         process_queue(bot)
         bot.answer_callback_query(c.id, "تم الإرسال 🚀")
-        bot.send_message(
-            user_id,
-            (
-                f"✅ تمام يا {name}! بعتنا طلب «{service}» للإدارة.\n"
-                f"⏱️ التنفيذ بيتم خلال 1–4 دقايق (غالبًا أسرع 😉).\n"
-                f"{BAND}\n"
-                "ممكن تطلب خدمة تانية في نفس الوقت — بنحجز من المتاح بس."
-            )
+        user_text = (
+            f"✅ تمام يا {name}! بعتنا طلب «{service}» للإدارة.\n"
+            f"⏱️ التنفيذ بيتم خلال 1–4 دقايق (غالبًا أسرع 😉).\n"
+            f"{BAND}\n"
+            "ممكن تطلب خدمة تانية في نفس الوقت — بنحجز من المتاح بس."
         )
+        bot.send_message(user_id, user_text)
 
 def register(bot, history):
     register_media_services(bot, history)
