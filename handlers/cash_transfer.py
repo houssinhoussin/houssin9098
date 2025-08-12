@@ -42,7 +42,7 @@ from services.wallet_service import (
     create_hold,
     # ✅ مهم علشان نتحقق من المتاح (balance - held)
     get_available_balance,
-    # لعرض الرصيد في رسالة الأدمن بعد الحجز
+    # لعرض الرصيد في رسالة الإدمن بعد الحجز
     get_balance,
 )
 from database.db import get_table
@@ -51,8 +51,23 @@ from services.queue_service import add_pending_request, process_queue
 import math  # لإدارة صفحات الكيبورد
 import logging
 
+# صيانة + أعلام المزايا (Feature Flags)
+try:
+    from services.system_service import is_maintenance, maintenance_message
+except Exception:
+    def is_maintenance(): return False
+    def maintenance_message(): return "🔧 النظام تحت الصيانة مؤقتًا."
+
+try:
+    from services.feature_flags import block_if_disabled  # يتطلب مفتاح "cash_transfer"
+except Exception:
+    # بديل بسيط: دايمًا يسمح
+    def block_if_disabled(bot, chat_id, flag_key, nice_name):
+        return False
+
 from services.state_adapter import UserStateDictLike
 user_states = UserStateDictLike()
+
 CASH_TYPES = [
     "تحويل إلى سيرياتيل كاش",
     "تحويل إلى أم تي إن كاش",
@@ -83,6 +98,15 @@ def _fmt(n):
     except Exception:
         return f"{n} ل.س"
 
+def _service_unavailable_guard(bot, chat_id) -> bool:
+    """يرجع True إذا كانت الخدمة غير متاحة (صيانة أو متوقفة عبر Feature Flag)."""
+    if is_maintenance():
+        bot.send_message(chat_id, maintenance_message())
+        return True
+    if block_if_disabled(bot, chat_id, "cash_transfer", "تحويل كاش"):
+        return True
+    return False
+
 def build_cash_menu(page: int = 0):
     total = len(CASH_TYPES)
     pages = max(1, math.ceil(total / CASH_PAGE_SIZE))
@@ -94,7 +118,7 @@ def build_cash_menu(page: int = 0):
         kb.add(types.InlineKeyboardButton(label, callback_data=f"cash_sel_{idx}"))
     nav = []
     if page > 0:
-        nav.append(types.inline_keyboard_button("◀️", f"cash_page_{page-1}"))
+        nav.append(types.InlineKeyboardButton("◀️", callback_data=f"cash_page_{page-1}"))
     nav.append(types.InlineKeyboardButton(f"{page+1}/{pages}", callback_data="cash_noop"))
     if page < pages - 1:
         nav.append(types.InlineKeyboardButton("▶️", callback_data=f"cash_page_{page+1}"))
@@ -126,6 +150,9 @@ def make_inline_buttons(*buttons):
 def start_cash_transfer(bot, message, history=None):
     user_id = message.from_user.id
     register_user_if_not_exist(user_id, _name_of(message.from_user))
+    # حارس توفر الخدمة
+    if _service_unavailable_guard(bot, message.chat.id):
+        return
     if history is not None:
         if not isinstance(history.get(user_id), list):
             history[user_id] = []
@@ -153,6 +180,8 @@ def register(bot, history):
     # تنقّل صفحات أنواع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_page_"))
     def _paginate_cash_menu(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         page = int(call.data.split("_")[-1])
         try:
             bot.edit_message_reply_markup(
@@ -172,6 +201,8 @@ def register(bot, history):
     # اختيار نوع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_sel_"))
     def _cash_type_selected(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         idx = int(call.data.split("_")[-1])
         if idx < 0 or idx >= len(CASH_TYPES):
             logging.warning(f"[CASH][{call.from_user.id}] اختيار نوع كاش غير صالح: {idx}")
@@ -215,6 +246,9 @@ def register(bot, history):
     @bot.message_handler(func=lambda msg: msg.text in CASH_TYPES)
     def handle_cash_type(msg):
         user_id = msg.from_user.id
+        # حارس توفر الخدمة
+        if _service_unavailable_guard(bot, msg.chat.id):
+            return
         cash_type = msg.text
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
         if not isinstance(history.get(user_id), list):
@@ -252,6 +286,8 @@ def register(bot, history):
     # موافقة على الشروط → اطلب الرقم
     @bot.callback_query_handler(func=lambda call: call.data == "commission_confirm")
     def commission_confirmed(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         user_states[user_id] = {"step": "awaiting_number", **user_states.get(user_id, {})}
         kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
@@ -262,13 +298,15 @@ def register(bot, history):
             )
         except Exception:
             bot.send_message(call.message.chat.id, with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"), reply_markup=kb)
+        bot.answer_callback_query(call.id)
 
     # استلام الرقم
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_number")
     def get_target_number(msg):
         user_id = msg.from_user.id
-        user_states[user_id] = {**user_states.get(user_id, {}), "number": msg.text.strip(), "step": "confirm_number"}
-        logging.info(f"[CASH][{user_id}] رقم التحويل: {msg.text}")
+        number = (msg.text or "").strip()
+        user_states[user_id] = {**user_states.get(user_id, {}), "number": number, "step": "confirm_number"}
+        logging.info(f"[CASH][{user_id}] رقم التحويل: {number}")
         kb = make_inline_buttons(
             ("❌ إلغاء", "commission_cancel"),
             ("✏️ تعديل", "edit_number"),
@@ -276,7 +314,7 @@ def register(bot, history):
         )
         bot.send_message(
             msg.chat.id,
-            with_cancel_hint(f"🔢 الرقم المدخل: {msg.text}\n\nتمام كده؟"),
+            with_cancel_hint(f"🔢 الرقم المدخل: {number}\n\nتمام كده؟"),
             reply_markup=kb
         )
 
@@ -285,10 +323,13 @@ def register(bot, history):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_number"
         bot.send_message(call.message.chat.id, with_cancel_hint("📲 اكتب الرقم من جديد:"))
+        bot.answer_callback_query(call.id)
 
     # بعد تأكيد الرقم → اطلب المبلغ
     @bot.callback_query_handler(func=lambda call: call.data == "number_confirm")
     def number_confirm(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
         kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
@@ -299,6 +340,7 @@ def register(bot, history):
             )
         except Exception:
             bot.send_message(call.message.chat.id, with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"), reply_markup=kb)
+        bot.answer_callback_query(call.id)
 
     # استلام المبلغ وحساب العمولة
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_amount")
@@ -313,7 +355,7 @@ def register(bot, history):
             bot.send_message(msg.chat.id, with_cancel_hint(f"⚠️ يا {name}، دخّل مبلغ صحيح بالأرقام من غير فواصل/رموز."))
             return
 
-        state = user_states.get(user_id, {})
+        state = user_states.get(user_id, {}) or {}
         commission = calculate_commission(amount)
         total = amount + commission
         state.update({"amount": amount, "commission": commission, "total": total, "step": "confirming"})
@@ -341,6 +383,7 @@ def register(bot, history):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
         bot.send_message(call.message.chat.id, with_cancel_hint("💰 اكتب المبلغ من جديد:"))
+        bot.answer_callback_query(call.id)
 
     # تأكيد نهائي → إنشاء هولد + إرسال للطابور
     @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
@@ -350,6 +393,10 @@ def register(bot, history):
 
         # ✅ قاعدة عامة: عند التأكيد — احذف الكيبورد فقط + Debounce
         if confirm_guard(bot, call, "cash_confirm"):
+            return
+
+        # حارس توفر الخدمة
+        if _service_unavailable_guard(bot, call.message.chat.id):
             return
 
         data = user_states.get(user_id, {}) or {}
@@ -378,13 +425,25 @@ def register(bot, history):
 
         # إنشاء هولد بدل الخصم الفوري (ذرّي من خلال الـ RPC)
         hold_desc = f"حجز تحويل كاش — {cash_type} — رقم {number}"
-        r = create_hold(user_id, total, hold_desc)
+        try:
+            r = create_hold(user_id, total, hold_desc)
+        except Exception as e:
+            logging.exception(f"[CASH][{user_id}] create_hold exception: {e}")
+            return bot.send_message(call.message.chat.id, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
+
         if getattr(r, "error", None) or not getattr(r, "data", None):
             logging.error(f"[CASH][{user_id}] create_hold failed: {getattr(r, 'error', r)}")
             return bot.send_message(call.message.chat.id, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
 
+        # استخراج hold_id بمرونة (dict/list/primitive)
         data_resp = getattr(r, "data", None)
-        hold_id = (data_resp if isinstance(data_resp, str) else (data_resp.get("id") if isinstance(data_resp, dict) else None))
+        if isinstance(data_resp, dict):
+            hold_id = data_resp.get("id") or data_resp.get("hold_id") or data_resp
+        elif isinstance(data_resp, (list, tuple)) and data_resp:
+            first = data_resp[0]
+            hold_id = first.get("id") if isinstance(first, dict) else first
+        else:
+            hold_id = data_resp
 
         # رصيد بعد الحجز (اختياري للعرض)
         try:
@@ -444,3 +503,7 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet")
     def show_recharge_methods(call):
         bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن المحفظة:", reply_markup=keyboards.recharge_menu())
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
