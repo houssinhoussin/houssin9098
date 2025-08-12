@@ -2,7 +2,10 @@
 """
 (نفس الهيدر التوضيحي السابق)
 """
+
+import uuid
 from datetime import datetime, timedelta
+
 from database.db import (
     get_table,
     # واجهات RPC الذرّية
@@ -20,6 +23,18 @@ TRANSACTION_TABLE = "transactions"
 PURCHASES_TABLE   = "purchases"
 PRODUCTS_TABLE    = "products"
 CHANNEL_ADS_TABLE = "channel_ads"
+
+
+# ================= أدوات مساعدة =================
+
+def _is_uuid_like(x) -> bool:
+    """يتحقق إن كانت القيمة تمثل UUID صالحًا."""
+    try:
+        uuid.UUID(str(x))
+        return True
+    except Exception:
+        return False
+
 
 # ================= عمليات المستخدم =================
 
@@ -130,6 +145,7 @@ def transfer_balance(from_user_id: int, to_user_id: int, amount: int, fee: int =
     record_transaction(to_user_id,   amount, f"تحويل من {from_user_id}")
     return True
 
+
 # ================= المشتريات (الأساسي) =================
 
 def get_purchases(user_id: int, limit: int = 10):
@@ -171,6 +187,7 @@ def add_purchase(user_id: int, product_id, product_name: str, price: int, player
     get_table(PURCHASES_TABLE).insert(data).execute()
     deduct_balance(user_id, int(price), f"شراء {product_name}")
 
+
 # ================= السجلات المالية =================
 
 def get_transfers(user_id: int, limit: int = 10):
@@ -210,6 +227,7 @@ def get_deposit_transfers(user_id: int, limit: int = 10):
                 break
     return out
 
+
 # ================= المنتجات =================
 
 def get_all_products():
@@ -224,6 +242,7 @@ def get_product_by_id(product_id: int):
 def _select_single(table_name, field, value):
     response = get_table(table_name).select(field).eq(field, value).limit(1).execute()
     return response.data[0][field] if response.data else None
+
 
 # ================= جداول مشتريات متخصصة (عرض/قراءة) =================
 # (بدون تغييرات)
@@ -281,12 +300,12 @@ def get_wholesale_purchases(user_id: int):
 def user_has_admin_approval(user_id):
     return True
 
+
 # ================= إضافات العرض الموحّد =================
 # (تبقى كما هي — لا تغييرات على هذا القسم)
 
 def get_all_purchases_structured(user_id: int, limit: int = 50):
-    # ... (المحتوى كما أرسلته دون تغيير)
-    # (اختصرته هنا للمساحة — أبقه كما في ملفك السابق)
+    # ... (المحتوى كما في نسختك السابقة)
     from datetime import datetime as _dt  # لتفادي أي التباس بالأسماء
     items = []
 
@@ -406,6 +425,7 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
             break
     return out
 
+
 # ===== تسجيلات إضافية في الجداول المتخصصة (Write-through) =====
 # (تبقى كما هي — بدون تغيير)
 
@@ -507,10 +527,18 @@ def add_ads_purchase(user_id: int, ad_name: str, price: int, created_at: str = N
     except Exception:
         pass
 
-# ===== واجهات الحجز (للاستخدام من الهاندلرز) =====
-# هذه أسماء بسيطة تستعمل RPC كما هي
 
-def create_hold(user_id: int, amount: int, order_id=None, ttl_seconds: int = 900):
+# ===== واجهات الحجز (للاستخدام من الهاندلرز) =====
+# (Back-compat: نقبل UUID أو وصف نصّي، ونمرّر دائمًا UUID صالح للـ RPC)
+
+def create_hold(user_id: int, amount: int, order_or_reason=None, ttl_seconds: int = 900):
+    """
+    يقبل UUID أو وصف نصّي:
+      - لو البراميتر UUID: نستخدمه كـ order_id.
+      - لو None أو نص/أي شيء تاني: نولّد UUID جديد ونستخدمه كـ order_id.
+    دائمًا نمرّر UUID صالح للـ RPC لتفادي 22P02.
+    """
+    order_id = str(order_or_reason) if _is_uuid_like(order_or_reason) else str(uuid.uuid4())
     return _rpc_create_hold(user_id, int(amount), order_id, ttl_seconds)
 
 def capture_hold(hold_id: str):
