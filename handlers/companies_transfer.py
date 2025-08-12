@@ -53,6 +53,19 @@ from handlers import keyboards
 from services.queue_service import add_pending_request, process_queue
 import logging
 
+# صيانة + أعلام المزايا (Feature Flags اختيارية)
+try:
+    from services.system_service import is_maintenance, maintenance_message
+except Exception:
+    def is_maintenance(): return False
+    def maintenance_message(): return "🔧 النظام تحت الصيانة مؤقتًا. جرّب لاحقًا."
+
+try:
+    from services.feature_flags import block_if_disabled  # يتطلب مفتاح "companies_transfer"
+except Exception:
+    def block_if_disabled(bot, chat_id, flag_key, nice_name):
+        return False
+
 from services.state_adapter import UserStateDictLike
 user_states = UserStateDictLike()
 COMMISSION_PER_50000 = 1500
@@ -76,6 +89,15 @@ def _user_name(bot, user_id: int) -> str:
         return name or "صاحبنا"
     except Exception:
         return "صاحبنا"
+
+def _service_unavailable_guard(bot, chat_id) -> bool:
+    """يرجع True إذا الخدمة غير متاحة (صيانة/مقفلة عبر Feature Flag)."""
+    if is_maintenance():
+        bot.send_message(chat_id, maintenance_message())
+        return True
+    if block_if_disabled(bot, chat_id, "companies_transfer", "حوالة عبر الشركات"):
+        return True
+    return False
 
 def calculate_commission(amount: int) -> int:
     # حساب عددي صحيح: عمولة 1500 لكل 50,000 + جزء نسبي
@@ -125,6 +147,8 @@ def register_companies_transfer(bot, history):
     @bot.message_handler(func=lambda msg: msg.text == "حوالة مالية عبر شركات")
     def open_companies_menu(msg):
         user_id = msg.from_user.id
+        if _service_unavailable_guard(bot, msg.chat.id):
+            return
         name = _user_name(bot, user_id)
         register_user_if_not_exist(user_id)
         user_states[user_id] = {"step": None}
@@ -139,10 +163,33 @@ def register_companies_transfer(bot, history):
             reply_markup=companies_transfer_menu()
         )
 
+    # ===== أزرار عامة: رجوع / ابدأ من جديد =====
+    @bot.callback_query_handler(func=lambda call: call.data in ["back", "restart"])
+    def back_or_restart(call):
+        user_id = call.from_user.id
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
+        user_states.pop(user_id, None)
+        try:
+            remove_inline_keyboard(bot, call.message)
+        except Exception:
+            pass
+        bot.send_message(
+            call.message.chat.id,
+            "⬅️ رجعناك لقائمة الشركات. اختار من جديد:",
+            reply_markup=companies_transfer_menu()
+        )
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+
     @bot.callback_query_handler(func=lambda call: call.data in [
         "company_alharam", "company_alfouad", "company_shakhashir"
     ])
     def select_company(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
 
@@ -171,6 +218,7 @@ def register_companies_transfer(bot, history):
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=kb)
         except Exception:
             bot.send_message(call.message.chat.id, text, reply_markup=kb)
+        bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_commission_cancel")
     def company_commission_cancel(call):
@@ -187,9 +235,15 @@ def register_companies_transfer(bot, history):
             reply_markup=companies_transfer_menu()
         )
         user_states.pop(user_id, None)
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_commission_confirm")
     def company_commission_confirm(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_beneficiary_name"
@@ -203,22 +257,26 @@ def register_companies_transfer(bot, history):
             )
         except Exception:
             bot.send_message(call.message.chat.id, with_cancel_hint(f"👤 يا {name}، ابعت اسم المستفيد بالكامل: (الاسم الكنية ابن الأب)"), reply_markup=kb)
+        bot.answer_callback_query(call.id)
 
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_beneficiary_name")
     def get_beneficiary_name(msg):
         user_id = msg.from_user.id
         name = _user_name(bot, user_id)
-        user_states[user_id]["beneficiary_name"] = msg.text.strip()
+        full_name = (msg.text or "").strip()
+        if len(full_name) < 5:
+            return bot.send_message(msg.chat.id, with_cancel_hint(f"⚠️ يا {name}، اكتب الاسم الثلاثي/الرباعي كاملًا."))
+        user_states[user_id]["beneficiary_name"] = full_name
         user_states[user_id]["step"] = "confirm_beneficiary_name"
         kb = make_inline_buttons(
             ("❌ إلغاء", "company_commission_cancel"),
             ("✏️ تعديل", "edit_beneficiary_name"),
             ("✔️ تأكيد", "beneficiary_name_confirm")
         )
-        logging.info(f"[COMPANY][{user_id}] اسم المستفيد: {msg.text.strip()}")
+        logging.info(f"[COMPANY][{user_id}] اسم المستفيد: {full_name}")
         bot.send_message(
             msg.chat.id,
-            with_cancel_hint(f"👤 تمام يا {name}، الاسم المدخّل:\n{msg.text}\n\nنكمل؟"),
+            with_cancel_hint(f"👤 تمام يا {name}، الاسم المدخّل:\n{full_name}\n\nنكمل؟"),
             reply_markup=kb
         )
 
@@ -228,9 +286,12 @@ def register_companies_transfer(bot, history):
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_beneficiary_name"
         bot.send_message(call.message.chat.id, with_cancel_hint(f"👤 تمام يا {name}، ابعت الاسم تاني (الاسم الكنية ابن الأب):"))
+        bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "beneficiary_name_confirm")
     def beneficiary_name_confirm(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_beneficiary_number"
@@ -240,12 +301,13 @@ def register_companies_transfer(bot, history):
             bot.edit_message_text(with_cancel_hint(f"📱 يا {name}، ابعت رقم المستفيد (لازم يبدأ بـ 09) — 10 أرقام:"), call.message.chat.id, call.message.message_id, reply_markup=kb)
         except Exception:
             bot.send_message(call.message.chat.id, with_cancel_hint(f"📱 يا {name}، ابعت رقم المستفيد (لازم يبدأ بـ 09) — 10 أرقام:"), reply_markup=kb)
+        bot.answer_callback_query(call.id)
 
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_beneficiary_number")
     def get_beneficiary_number(msg):
         user_id = msg.from_user.id
         name = _user_name(bot, user_id)
-        number = msg.text.strip()
+        number = (msg.text or "").strip()
         if not (number.startswith("09") and number.isdigit() and len(number) == 10):
             logging.warning(f"[COMPANY][{user_id}] رقم مستفيد غير صالح: {number}")
             bot.send_message(msg.chat.id, with_cancel_hint(f"⚠️ يا {name}، الرقم لازم يبدأ بـ 09 ويتكوّن من 10 أرقام. جرّب تاني."))
@@ -270,9 +332,12 @@ def register_companies_transfer(bot, history):
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_beneficiary_number"
         bot.send_message(call.message.chat.id, with_cancel_hint(f"📱 يا {name}، ابعت الرقم تاني (لازم يبدأ بـ 09):"))
+        bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "beneficiary_number_confirm")
     def beneficiary_number_confirm(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_transfer_amount"
@@ -282,6 +347,7 @@ def register_companies_transfer(bot, history):
             bot.edit_message_text(with_cancel_hint(f"💵 يا {name}، ابعت المبلغ اللي عايز تحوّله (مثال: 12345):"), call.message.chat.id, call.message.message_id, reply_markup=kb)
         except Exception:
             bot.send_message(call.message.chat.id, with_cancel_hint(f"💵 يا {name}، ابعت المبلغ اللي عايز تحوّله (مثال: 12345):"), reply_markup=kb)
+        bot.answer_callback_query(call.id)
 
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_transfer_amount")
     def get_transfer_amount(msg):
@@ -327,6 +393,7 @@ def register_companies_transfer(bot, history):
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_transfer_amount"
         bot.send_message(call.message.chat.id, with_cancel_hint(f"💵 تمام يا {name}، ابعت المبلغ تاني (مثال: 12345):"))
+        bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_transfer_confirm")
     def company_transfer_confirm(call):
@@ -335,6 +402,9 @@ def register_companies_transfer(bot, history):
 
         # ✅ قاعدة عامة: عند التأكيد — احذف الكيبورد فقط + Debounce
         if confirm_guard(bot, call, "company_transfer_confirm"):
+            return
+
+        if _service_unavailable_guard(bot, call.message.chat.id):
             return
 
         data = user_states.get(user_id, {})
@@ -395,7 +465,8 @@ def register_companies_transfer(bot, history):
             f"💰 المبلغ: {amount:,} ل.س\n"
             f"🏢 الشركة: {data.get('company')}\n"
             f"🧾 العمولة: {commission:,} ل.س\n"
-            f"✅ الإجمالي (محجوز): {total:,} ل.س\n\n"
+            f"✅ الإجمالي (محجوز): {total:,} ل.س\n"
+            f"🔒 HOLD: <code>{hold_id}</code>\n\n"
             f"يمكنك الرد برسالة أو صورة ليصل للعميل."
         )
 
@@ -428,6 +499,10 @@ def register_companies_transfer(bot, history):
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         bot.send_message(call.message.chat.id, f"💳 يا {name}، اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
 
     # ===== أدمن (مسارات بديلة قديمة) — مفضّلين الهولد لو موجود =====
 
@@ -527,7 +602,7 @@ def register_companies_transfer(bot, history):
             except Exception:
                 pass
 
-            logging.info(f"[COMPANY][ADMIN][{user_id}] تم رفض الحوالة")
+            logging.info(f"[COMPANY][ADMIN] رفض حوالة للمستخدم {user_id}")
             def handle_reject(m):
                 txt = m.text if m.content_type == "text" else "❌ تم رفض الطلب."
                 if m.content_type == "photo":
