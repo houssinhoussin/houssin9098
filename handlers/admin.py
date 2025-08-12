@@ -10,7 +10,7 @@ from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
 from services.state_service import purge_state
-from services.products_admin import set_product_active
+from services.products_admin import set_product_active, get_product_active
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
 from services.activity_logger import log_action
@@ -43,6 +43,9 @@ from services.wallet_service import (
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
+
+# لقراءة المجموعات/الملفات والمنتجات المعروضة للمستخدمين
+from handlers.products import PRODUCTS
 
 # محاولة استيراد منظّم الشحن لإزالة القفل المحلي بعد القبول/الإلغاء (استيراد كسول وآمن)
 try:
@@ -122,7 +125,6 @@ def _extract_identifier(payload: dict, request_text: str = "", prefer_keys=None)
                 return s
     return ""
 
-
 def _amount_from_payload(payload: dict) -> int:
     for k in ("reserved", "total", "price", "amount"):
         v = payload.get(k)
@@ -163,6 +165,40 @@ def _clear_recharge_local_lock_safe(user_id: int):
             recharge_handlers.clear_pending_request(user_id)
     except Exception as e:
         logging.exception("[ADMIN] clear recharge local lock failed: %s", e)
+
+# ─────────────────────────────────────
+#   متصفح المنتجات للأدمن (حسب الملفات)
+# ─────────────────────────────────────
+def _slug(s: str) -> str:
+    return re.sub(r'[^A-Za-z0-9]+', '-', s).strip('-')[:30]
+
+def _admin_products_groups_markup():
+    kb = types.InlineKeyboardMarkup()
+    for group in PRODUCTS.keys():
+        kb.add(types.InlineKeyboardButton(text=f"📁 {group}", callback_data=f"adm_prod_g:{_slug(group)}"))
+    return kb
+
+def _admin_products_list_markup(group_name: str):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for p in PRODUCTS[group_name]:
+        active = get_product_active(p.product_id)
+        state = "🟢 شغّال" if active else "🔴 موقوف"
+        kb.add(types.InlineKeyboardButton(
+            text=f"{state} — {p.name} (#{p.product_id})",
+            callback_data=f"adm_prod_i:{p.product_id}"
+        ))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع للملفات", callback_data="adm_prod_back"))
+    return kb
+
+def _admin_product_actions_markup(pid: int):
+    active = get_product_active(pid)
+    kb = types.InlineKeyboardMarkup()
+    if active:
+        kb.add(types.InlineKeyboardButton("🚫 إيقاف المنتج", callback_data=f"adm_prod_t:{pid}:0"))
+    else:
+        kb.add(types.InlineKeyboardButton("✅ تشغيل المنتج", callback_data=f"adm_prod_t:{pid}:1"))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_prod_back"))
+    return kb
 
 # ─────────────────────────────────────
 #   التسجيل
@@ -307,6 +343,10 @@ def register(bot, history):
 
         # === قبول الطلب ===
         if action == "accept":
+            # ✅ فحص صلاحية التأكيد (مهم)
+            if not allowed(call.from_user.id, "queue:confirm"):
+                return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
+
             typ      = (payload.get("type") or "").strip()
             hold_id  = payload.get("hold_id")
             amt      = _amount_from_payload(payload)
@@ -599,7 +639,6 @@ def register(bot, history):
         _accept_pending.pop(msg.from_user.id, None)
 
     # ===== قائمة الأدمن =====
-
     @bot.message_handler(commands=['admin'])
     def admin_menu(msg):
         if msg.from_user.id not in ADMINS:
@@ -616,22 +655,62 @@ def register(bot, history):
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
 
+    # ✅ بدّل إدخال الـID بمتصفح ملفات/منتجات إنلاين
     @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and m.from_user.id in ADMINS)
-    def toggle_product_prompt(m):
-        bot.send_message(m.chat.id, "أدخل رقم معرف المنتج (ID):")
-        bot.register_next_step_handler(m, lambda msg: toggle_product_apply(msg, enable=(m.text=="✅ تشغيل منتج")))
+    def admin_products_browser(m):
+        bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
 
-    def toggle_product_apply(msg, enable: bool):
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_g:") and c.from_user.id in ADMINS)
+    def adm_group_open(call: types.CallbackQuery):
+        slug = call.data.split(":", 1)[1]
+        group_name = next((g for g in PRODUCTS.keys() if _slug(g) == slug), None)
+        if not group_name:
+            return bot.answer_callback_query(call.id, "❌ المجموعة غير موجودة.")
         try:
-            pid = int(msg.text.strip())
+            bot.edit_message_text(f"📁 {group_name} — اختر منتجًا:", call.message.chat.id, call.message.message_id,
+                                  reply_markup=_admin_products_list_markup(group_name))
         except Exception:
-            return bot.reply_to(msg, "رقم غير صحيح.")
-        ok = set_product_active(pid, active=enable)
-        if ok:
-            log_action(msg.from_user.id, f"{'enable' if enable else 'disable'}_product", f"id={pid}")
-            bot.reply_to(msg, ("✅ تم تشغيل المنتج" if enable else "🚫 تم إيقاف المنتج"))
-        else:
-            bot.reply_to(msg, "لم يتم العثور على المنتج.")
+            # لو تعذّر التعديل أرسل رسالة جديدة
+            bot.send_message(call.message.chat.id, f"📁 {group_name} — اختر منتجًا:", reply_markup=_admin_products_list_markup(group_name))
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm_prod_back" and c.from_user.id in ADMINS)
+    def adm_back(call: types.CallbackQuery):
+        try:
+            bot.edit_message_text("اختر الملف لعرض منتجاته:", call.message.chat.id, call.message.message_id,
+                                  reply_markup=_admin_products_groups_markup())
+        except Exception:
+            bot.send_message(call.message.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_i:") and c.from_user.id in ADMINS)
+    def adm_product_open(call: types.CallbackQuery):
+        pid = int(call.data.split(":", 1)[1])
+        state = "شغّال 🟢" if get_product_active(pid) else "موقوف 🔴"
+        txt = f"المنتج #{pid}\nالحالة الحالية: {state}\nيمكنك تبديل الحالة:"
+        try:
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id,
+                                  reply_markup=_admin_product_actions_markup(pid))
+        except Exception:
+            bot.send_message(call.message.chat.id, txt, reply_markup=_admin_product_actions_markup(pid))
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and c.from_user.id in ADMINS)
+    def adm_product_toggle(call: types.CallbackQuery):
+        _, pid, to = call.data.split(":")
+        pid, to = int(pid), bool(int(to))
+        ok = set_product_active(pid, to)
+        if not ok:
+            return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الحالة.")
+        log_action(call.from_user.id, f"{'enable' if to else 'disable'}_product", f"id={pid}")
+        state = "✅ تم تشغيل المنتج" if to else "🚫 تم إيقاف المنتج"
+        txt = f"المنتج #{pid}\n{state}\nالحالة الآن: {'شغّال 🟢' if to else 'موقوف 🔴'}"
+        try:
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id,
+                                  reply_markup=_admin_product_actions_markup(pid))
+        except Exception:
+            bot.send_message(call.message.chat.id, txt, reply_markup=_admin_product_actions_markup(pid))
+        bot.answer_callback_query(call.id, "تم التحديث.")
 
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
     def quick_reports(m):
