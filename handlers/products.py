@@ -12,6 +12,8 @@ from services.wallet_service import (
     create_hold,   # ✅ حجز ذرّي
 )
 from config import BOT_NAME
+from services.telegram_safety import remove_inline_keyboard
+from services.anti_spam import too_soon
 from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
 from database.models.product import Product
@@ -261,6 +263,13 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
+        user_id = call.from_user.id
+        # اقفل الأزرار ومنع التكرار السريع
+        remove_inline_keyboard(bot, call.message)
+        from services.telegram_safety import remove_inline_keyboard
+        from services.anti_spam import too_soon
+        if too_soon(user_id, 'final_confirm_order', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _name_from_user(call.from_user)
         order = user_orders.get(user_id)
