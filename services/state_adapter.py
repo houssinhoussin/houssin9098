@@ -21,4 +21,4 @@ class UserStateDictLike:
             clear_state(user_id)
             return v
         except Exception:
-            return default\n
+            return default
