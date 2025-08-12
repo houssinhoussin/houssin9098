@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+try:
+    from validators import parse_amount
+except Exception:
+    try:
+        from services.validators import parse_amount
+    except Exception:
+        from handlers.validators import parse_amount
+
 # handlers/internet_providers.py — قوائم ADSL مع حجز ذري + رسائل موحّدة
 
 import logging
@@ -257,9 +265,6 @@ def register(bot):
     # تأكيد وإرسال إلى طابور الأدمن + إنشاء HOLD
     @bot.callback_query_handler(func=lambda c: c.data == CB_CONFIRM)
     def cb_confirm(call):
-        remove_inline_keyboard(bot, call.message)
-        if too_soon(call.from_user.id, 'cb_confirm', seconds=2):
-            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         uid = call.from_user.id
         nm = _name(bot, uid)
         st = user_net_state.get(uid)
