@@ -265,10 +265,7 @@ def setup_inline_handlers(bot, admin_ids):
     def final_confirm_order(call):
         user_id = call.from_user.id
         # اقفل الأزرار ومنع التكرار السريع
-        remove_inline_keyboard(bot, call.message)
-        from services.telegram_safety import remove_inline_keyboard
-        from services.anti_spam import too_soon
-        if too_soon(user_id, 'final_confirm_order', seconds=2):
+        remove_inline_keyboard(bot, call.message)        if too_soon(user_id, 'final_confirm_order', seconds=2):
             return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _name_from_user(call.from_user)
