@@ -14,7 +14,8 @@ from services.wallet_service import (
     get_balance,
     has_sufficient_balance,
     deduct_balance,   # احتياطي لمسارات قديمة لو احتجناه
-    create_hold,      # ✅ حجز
+    create_hold,      # ━━━━━━━━━━━━━━━━
+✅ حجز
     capture_hold,     # ✅ تصفية الحجز (يتم في handlers/admin.py)
     release_hold,     # ✅ فكّ الحجز (لو رفض الأدمن)
 )
@@ -312,7 +313,8 @@ def register(bot):
         )
         process_queue(bot)
 
-        bot.answer_callback_query(call.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.")
+        bot.answer_callback_query(call.id, "✅ تم إرسال طلبك للإدارة، بانتظار الموافقة.
+━━━━━━━━━━━━━━━━")
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
