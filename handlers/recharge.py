@@ -186,7 +186,10 @@ def register(bot, history):
         name = _name_from_user(msg.from_user)
         amount_text = (msg.text or "").strip()
 
-        if not amount_text.isdigit():
+        # ✅ استخدام validator الآمن بدلاً من isdigit/int
+        try:
+            amount = parse_amount(amount_text, min_value=MIN_RECHARGE)
+        except Exception:
             logging.warning(f"[RECHARGE][{user_id}] محاولة إدخال مبلغ شحن غير صالح: {amount_text}")
             bot.send_message(
                 msg.chat.id,
@@ -195,7 +198,6 @@ def register(bot, history):
             )
             return
 
-        amount = int(amount_text)
         # ✅ رفض مبكر قبل إرسال الطلب للأدمن/الطابور
         if amount < MIN_RECHARGE:
             bot.send_message(
@@ -251,7 +253,9 @@ def register(bot, history):
         name = _name_from_user(call.from_user)
 
         if call.data == "user_confirm_recharge":
+            # 🔒 اقفل الأزرار فورًا
             remove_inline_keyboard(bot, call.message)
+
             data = recharge_requests.get(user_id)
             if not data:
                 logging.warning(f"[RECHARGE][{user_id}] تأكيد طلب شحن بدون بيانات")
@@ -277,7 +281,7 @@ def register(bot, history):
             register_user_if_not_exist(user_id, name)
             balance = 0
             try:
-                balance = int(get_available_balance(user_id))
+                balance = int(get_balance(user_id))
             except Exception:
                 pass
 
@@ -325,11 +329,9 @@ def register(bot, history):
                 reply_markup=keyboards.recharge_menu()
             )
             recharge_pending.add(user_id)
-            bot.edit_message_reply_markup(
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=None
-            )
+
+            # 🧹 بدل النداء المباشر لـ edit_message_reply_markup (اللي ممكن يرجّع 400)
+            remove_inline_keyboard(bot, call.message)
 
         elif call.data == "user_edit_recharge":
             if user_id in recharge_requests:
@@ -341,7 +343,8 @@ def register(bot, history):
                     "🔄 ابعت رقم الإشعار / رمز العملية من جديد:",
                     reply_markup=keyboards.recharge_menu()
                 )
-            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            # 🧹 إزالة الكيبورد بأمان
+            remove_inline_keyboard(bot, call.message)
 
         elif call.data == "user_cancel_recharge":
             clear_pending_request(user_id)
@@ -363,4 +366,5 @@ def register(bot, history):
             fake_msg.chat.id = user_id
 
             start_recharge_menu(bot, fake_msg, history)
-            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            # 🧹 إزالة الكيبورد بأمان
+            remove_inline_keyboard(bot, call.message)
