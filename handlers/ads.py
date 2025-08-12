@@ -286,7 +286,7 @@ def register(bot, _history):
 
         price   = int(data["price"])
         times   = int(data["times"])
-        balance = int(get_balance(user_id) or 0)
+        balance = int(get_available_balance(user_id) or 0)
         name    = _name_from_user(call.from_user)
 
         # ✅ الرصيد المتاح (balance - held)
