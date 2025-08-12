@@ -1,3 +1,27 @@
+try:
+    from anti_spam import too_soon
+except Exception:
+    try:
+        from services.anti_spam import too_soon
+    except Exception:
+        from handlers.anti_spam import too_soon
+
+try:
+    from telegram_safety import remove_inline_keyboard
+except Exception:
+    try:
+        from services.telegram_safety import remove_inline_keyboard
+    except Exception:
+        from handlers.telegram_safety import remove_inline_keyboard
+
+try:
+    from validators import parse_amount
+except Exception:
+    try:
+        from services.validators import parse_amount
+    except Exception:
+        from handlers.validators import parse_amount
+
 # handlers/companies_transfer.py
 from telebot import types
 from services.wallet_service import (
@@ -16,7 +40,6 @@ from config import ADMIN_MAIN_ID
 from handlers import keyboards
 from services.queue_service import add_pending_request, process_queue
 import logging
-from anti_spam import too_soon
 
 user_states = {}
 
@@ -118,8 +141,6 @@ def register_companies_transfer(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_commission_confirm")
     def company_commission_confirm(call):
-        if too_soon(call.from_user.id, 'company_commission_confirm', seconds=2):
-            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_beneficiary_name"
@@ -197,8 +218,6 @@ def register_companies_transfer(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "beneficiary_number_confirm")
     def beneficiary_number_confirm(call):
-        if too_soon(call.from_user.id, 'beneficiary_number_confirm', seconds=2):
-            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_transfer_amount"
@@ -252,8 +271,6 @@ def register_companies_transfer(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_transfer_confirm")
     def company_transfer_confirm(call):
-        if too_soon(call.from_user.id, 'company_transfer_confirm', seconds=2):
-            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         data = user_states.get(user_id, {})
