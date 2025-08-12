@@ -1,335 +1,216 @@
-# handlers/university_fees.py
-from telebot import types
-from services.wallet_service import (
-    add_purchase,
-    get_balance,
-    has_sufficient_balance,
-    deduct_balance,   # احتياطي لمسارات قديمة
-    create_hold,      # ✅ حجز
-    capture_hold,     # ✅ تصفية الحجز
-    release_hold,     # ✅ فكّ الحجز
-)
-from config import ADMIN_MAIN_ID
-from services.wallet_service import register_user_if_not_exist
-from handlers import keyboards
-from services.queue_service import add_pending_request, process_queue, delete_pending_request
-from database.db import get_table
 import logging
+import time
+from telebot import types
+from handlers import keyboards
+from config import BOT_NAME, FORCE_SUB_CHANNEL_USERNAME
+from services.wallet_service import register_user_if_not_exist
 
+START_BTN_TEXT = "✨ ستارت"
+START_BTN_TEXT_SUB = "✅ تم الاشتراك"
+SUB_BTN_TEXT = "🔔 اشترك الآن في القناة"
 
-user_uni_state = {}
+CB_START = "cb_start_main"
+CB_CHECK_SUB = "cb_check_sub"
 
-COMMISSION_PER_50000 = 3500
+_sub_status_cache = {}
+_sub_status_ttl = 60
+_user_start_limit = {}
+_rate_limit_seconds = 5
 
-def calculate_uni_commission(amount):
-    blocks = amount // 50000
-    remainder = amount % 50000
-    commission = blocks * COMMISSION_PER_50000
-    if remainder > 0:
-        commission += int(COMMISSION_PER_50000 * (remainder / 50000))
-    return commission
-
-def make_inline_buttons(*buttons):
-    kb = types.InlineKeyboardMarkup()
-    for text, data in buttons:
-        kb.add(types.InlineKeyboardButton(text, callback_data=data))
-    return kb
-
-def university_fee_menu():
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("⬅️ رجوع", callback_data="back"),
-        types.InlineKeyboardButton("❌ إلغاء", callback_data="uni_cancel")
-    )
-    return kb
-
-def _user_name(bot, user_id: int) -> str:
+def _reset_user_flows(user_id: int):
     try:
-        ch = bot.get_chat(user_id)
-        name = (getattr(ch, "first_name", None) or getattr(ch, "full_name", "") or "").strip()
-        return name or "صاحبنا"
-    except Exception:
-        return "صاحبنا"
-
-def register_university_fees(bot, history):
-
-    @bot.message_handler(func=lambda msg: msg.text == "🎓 دفع رسوم جامعية")
-    def open_uni_menu(msg):
-        user_id = msg.from_user.id
-        name = _user_name(bot, user_id)
-        register_user_if_not_exist(user_id)
-        user_uni_state[user_id] = {"step": "university_name"}
-        history.setdefault(user_id, []).append("university_fees_menu")
-        kb = university_fee_menu()
-        bot.send_message(msg.chat.id, f"🏫 يا {name}، اكتب اسم الجامعة وفي أنهي محافظة:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda msg: user_uni_state.get(msg.from_user.id, {}).get("step") == "university_name")
-    def enter_university(msg):
-        user_id = msg.from_user.id
-        name = _user_name(bot, user_id)
-        user_uni_state[user_id]["university"] = msg.text.strip()
-        user_uni_state[user_id]["step"] = "national_id"
-        kb = university_fee_menu()
-        bot.send_message(msg.chat.id, f"🆔 يا {name}، ابعت الرقم الوطني:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda msg: user_uni_state.get(msg.from_user.id, {}).get("step") == "national_id")
-    def enter_national_id(msg):
-        user_id = msg.from_user.id
-        name = _user_name(bot, user_id)
-        user_uni_state[user_id]["national_id"] = msg.text.strip()
-        user_uni_state[user_id]["step"] = "university_id"
-        kb = university_fee_menu()
-        bot.send_message(msg.chat.id, f"🎓 يا {name}، ابعت الرقم الجامعي:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda msg: user_uni_state.get(msg.from_user.id, {}).get("step") == "university_id")
-    def enter_university_id(msg):
-        user_id = msg.from_user.id
-        name = _user_name(bot, user_id)
-        user_uni_state[user_id]["university_id"] = msg.text.strip()
-        user_uni_state[user_id]["step"] = "amount"
-        kb = university_fee_menu()
-        bot.send_message(msg.chat.id, f"💰 يا {name}، ابعت المبلغ المطلوب دفعه:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda msg: user_uni_state.get(msg.from_user.id, {}).get("step") == "amount")
-    def enter_amount(msg):
-        user_id = msg.from_user.id
-        name = _user_name(bot, user_id)
-        try:
-            amount = int(msg.text.strip())
-            if amount <= 0:
-                raise ValueError
-            user_uni_state[user_id]["amount"] = amount
-        except ValueError:
-            return bot.send_message(msg.chat.id, f"⚠️ يا {name}، اكتب رقم صحيح للمبلغ.")
-
-        commission = calculate_uni_commission(amount)
-        total = amount + commission
-
-        user_uni_state[user_id]["commission"] = commission
-        user_uni_state[user_id]["total"] = total
-        user_uni_state[user_id]["step"] = "confirm_details"
-
-        text = (
-            f"❓ تأكيد دفع الرسوم يا {name}؟\n"
-            f"🏫 الجامعة: {user_uni_state[user_id]['university']}\n"
-            f"🆔 الرقم الوطني: {user_uni_state[user_id]['national_id']}\n"
-            f"🎓 الرقم الجامعي: {user_uni_state[user_id]['university_id']}\n"
-            f"💰 المبلغ: {amount:,} ل.س\n"
-            f"🧾 العمولة: {commission:,} ل.س\n"
-            f"✅ الإجمالي: {total:,} ل.س"
-        )
-
-        kb = make_inline_buttons(
-            ("✏️ تعديل", "edit_university_fees"),
-            ("✔️ تأكيد", "uni_confirm"),
-            ("❌ إلغاء", "uni_cancel")
-        )
-        bot.send_message(msg.chat.id, text, reply_markup=kb)
-        
-    @bot.callback_query_handler(func=lambda call: call.data == "back")
-    def go_back(call):
-        user_id = call.from_user.id
-        name = _user_name(bot, user_id)
-        state = user_uni_state.get(user_id, {})
-        current_step = state.get("step")
-
-        if current_step == "national_id":
-            state["step"] = "university_name"
-            bot.edit_message_text(f"🏫 يا {name}، اكتب اسم الجامعة وفي أنهي محافظة:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
-        elif current_step == "university_id":
-            state["step"] = "national_id"
-            bot.edit_message_text(f"🆔 يا {name}، ابعت الرقم الوطني:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
-        elif current_step == "amount":
-            state["step"] = "university_id"
-            bot.edit_message_text(f"🎓 يا {name}، ابعت الرقم الجامعي:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
-        elif current_step == "confirm_details":
-            state["step"] = "amount"
-            bot.edit_message_text(f"💰 يا {name}، ابعت المبلغ المطلوب دفعه:", call.message.chat.id, call.message.message_id, reply_markup=university_fee_menu())
-        else:
-            user_uni_state.pop(user_id, None)
-            bot.edit_message_text("❌ رجعناك للقائمة الرئيسية.", call.message.chat.id, call.message.message_id)
-
-    @bot.callback_query_handler(func=lambda call: call.data == "edit_university_fees")
-    def edit_university_fees(call):
-        user_id = call.from_user.id
-        user_uni_state[user_id]["step"] = "amount"
-        bot.send_message(call.message.chat.id, "💰 ابعت المبلغ من جديد:")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "uni_cancel")
-    def cancel_uni(call):
-        name = _user_name(bot, call.from_user.id)
-        user_uni_state.pop(call.from_user.id, None)
-        bot.edit_message_text(f"🚫 تمام يا {name}، اتلغت.", call.message.chat.id, call.message.message_id)
-
-    @bot.callback_query_handler(func=lambda call: call.data == "uni_confirm")
-    def confirm_uni_order(call):
-        user_id = call.from_user.id
-        name = _user_name(bot, user_id)
-        state = user_uni_state.get(user_id, {})
-        total = int(state.get("total") or 0)
-
-        # منع التوازي
-        balance = get_available_balance(user_id)
-        if balance is None or balance < total:
-            shortage = total - (balance or 0)
-            kb = make_inline_buttons(
-                ("💳 شحن المحفظة", "recharge_wallet_uni"),
-                ("⬅️ رجوع", "uni_cancel")
-            )
-            bot.edit_message_text(
-                f"❌ يا {name}، رصيدك مش مكفي.\n"
-                f"الإجمالي المطلوب: {total:,} ل.س\n"
-                f"رصيدك الحالي: {balance or 0:,} ل.س\n"
-                f"الناقص: {shortage:,} ل.س\n"
-                "اشحن المحفظة أو ارجع خطوة.",
-                call.message.chat.id, call.message.message_id,
-                reply_markup=kb
-            )
-            return
-
-        # ✅ حجز بدل الخصم الفوري
-        hold_id = None
-        try:
-            reason = f"حجز رسوم جامعية — {state.get('university','')}"
-            res = create_hold(user_id, total, reason)
-            d = getattr(res, "data", None)
-            if isinstance(d, dict):
-                hold_id = d.get("id") or d.get("hold_id")
-            elif isinstance(d, (list, tuple)) and d:
-                hold_id = d[0].get("id") if isinstance(d[0], dict) else d[0]
-            elif isinstance(d, (int, str)):
-                hold_id = d
-        except Exception as e:
-            logging.exception(f"[UNI][{user_id}] create_hold failed: {e}")
-
-        if not hold_id:
-            return bot.answer_callback_query(call.id, f"⚠️ يا {name}، حصلت مشكلة أثناء تثبيت العملية. جرّب تاني.", show_alert=True)
-
-        # رسالة الإدارة (HTML)
-        msg = (
-            f"📚 <b>طلب دفع رسوم جامعية</b>\n"
-            f"👤 المستخدم: <code>{user_id}</code>\n"
-            f"🏫 الجامعة: <b>{state['university']}</b>\n"
-            f"🆔 الرقم الوطني: <code>{state['national_id']}</code>\n"
-            f"🎓 الرقم الجامعي: <code>{state['university_id']}</code>\n"
-            f"💵 المبلغ: <b>{state['amount']:,} ل.س</b>\n"
-            f"🧾 العمولة: <b>{state['commission']:,} ل.س</b>\n"
-            f"✅ الإجمالي (محجوز): <b>{total:,} ل.س</b>"
-        )
-
-        add_pending_request(
-            user_id=user_id,
-            username=call.from_user.username,
-            request_text=msg,
-            payload={
-                "type": "university_fees",
-                "university": state['university'],
-                "national_id": state['national_id'],
-                "university_id": state['university_id'],
-                "amount": state['amount'],
-                "commission": state['commission'],
-                "total": state['total'],
-                "reserved": total,
-                "hold_id": hold_id,   # ✅ مهم
-            }
-        )
-        user_uni_state[user_id]["step"] = "waiting_admin"
-
-        process_queue(bot)
-        bot.edit_message_text(
-            f"✅ يا {name}، طلبك اتبعت للإدارة. هننفّذ وهنبعتلك إشعار أول ما يخلص.",
-            call.message.chat.id, call.message.message_id
-        )
-
-    @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet_uni")
-    def show_recharge_methods_uni(call):
-        bot.send_message(call.message.chat.id, "💳 اختر طريقة شحن المحفظة:", reply_markup=keyboards.recharge_menu())
-
-    # =========================
-    # هاندلرات قديمة (توافقية)
-    # =========================
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_uni_accept_"))
-    def admin_accept_uni_fees(call):
-        """توافقياً: في النظام الحالي، القبول بيتم من handlers/admin.py.
-        لو اتفعّل الزر ده، هنحاول نلقط الطلب ونصفّي الحجز."""
-        try:
-            parts = call.data.split("_")
-            user_id = int(parts[-2])
-            total = int(parts[-1])
-
-            # هات الـpayload من الطابور
-            res = get_table("pending_requests").select("id,payload").eq("user_id", user_id).execute()
-            if not res.data:
-                bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
-                return
-            row = res.data[0]
-            payload = row.get("payload", {}) or {}
-            hold_id = payload.get("hold_id")
-            university = payload.get("university")
-
-            if hold_id:
+        from handlers import internet_providers
+    except Exception as e:
+        logging.error(f"[start.py] import error: {e}")
+        return
+    try:
+        internet_providers.user_net_state.pop(user_id, None)
+    except Exception as e:
+        logging.warning(f"[start.py] user_net_state cleanup error: {e}")
+    try:
+        po = getattr(internet_providers, "pending_orders", None)
+        if isinstance(po, dict):
+            for oid in list(po.keys()):
                 try:
-                    r = capture_hold(hold_id)
-                    if getattr(r, "error", None) or not bool(getattr(r, "data", True)):
-                        return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز.", show_alert=True)
+                    if po[oid].get("user_id") == user_id:
+                        po.pop(oid, None)
                 except Exception as e:
-                    logging.exception(f"[UNI][ADMIN][{user_id}] capture_hold failed: {e}")
-                    return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز.", show_alert=True)
-            else:
-                # مسار قديم: خصم فعلي (تجنّب الازدواجية قدر الإمكان)
-                if not has_sufficient_balance(user_id, total):
-                    bot.answer_callback_query(call.id, "❌ لا يوجد رصيد كافٍ.", show_alert=True)
-                    return
-                deduct_balance(user_id, total)
+                    logging.warning(f"[start.py] pending_orders cleanup: {e}")
+    except Exception as e:
+        logging.warning(f"[start.py] pending_orders main cleanup: {e}")
 
-            # إعلام المستخدم
-            bot.send_message(
-                user_id,
-                f"✅ تم دفع الرسوم الجامعية ({university}) بنجاح.\n"
-                f"المبلغ الإجمالي المدفوع: {total:,} ل.س"
+# --- لوحة تحقق الاشتراك فقط (بدون زر ستارت هنا) ---
+def _sub_inline_kb():
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if FORCE_SUB_CHANNEL_USERNAME:
+        kb.add(
+            types.InlineKeyboardButton(
+                SUB_BTN_TEXT,
+                url=f"https://t.me/{FORCE_SUB_CHANNEL_USERNAME[1:]}"
             )
-            bot.answer_callback_query(call.id, "✅ تم قبول الطلب")
-            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        )
+    kb.add(types.InlineKeyboardButton(START_BTN_TEXT_SUB, callback_data=CB_CHECK_SUB))
+    return kb
 
-            # حذف الطلب من الطابور
-            delete_pending_request(row.get("id"))
-            user_uni_state.pop(user_id, None)
+# --- لوحة ستارت فقط بعد التأكد من الاشتراك ---
+def _welcome_inline_kb():
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(types.InlineKeyboardButton(START_BTN_TEXT, callback_data=CB_START))
+    return kb
 
-        except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ حدث خطأ: {e}")
+def is_user_subscribed(bot, user_id):
+    now = time.time()
+    cached = _sub_status_cache.get(user_id)
+    if cached:
+        status, last_check = cached
+        if now - last_check < _sub_status_ttl:
+            return status
+    try:
+        result = bot.get_chat_member(FORCE_SUB_CHANNEL_USERNAME, user_id)
+        status = result.status in ["member", "creator", "administrator"]
+        _sub_status_cache[user_id] = (status, now)
+        return status
+    except Exception as e:
+        logging.error(f"[start.py] Error get_chat_member: {e}", exc_info=True)
+        _sub_status_cache[user_id] = (False, now)
+        return False
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_uni_reject_"))
-    def admin_reject_uni_fees(call):
-        """توافقياً: لو اتفعّل زر الرفض القديم، نفك الحجز لو موجود."""
+def register(bot, user_history):
+
+    @bot.message_handler(commands=['start'])
+    def send_welcome(message):
+        user_id = message.from_user.id
+        now = time.time()
+        last = _user_start_limit.get(user_id, 0)
+        if now - last < _rate_limit_seconds:
+            try:
+                bot.send_message(message.chat.id, "يرجى الانتظار قبل إعادة المحاولة.")
+            except Exception as e:
+                logging.error(f"[start.py] rate limit send_message: {e}")
+            return
+        _user_start_limit[user_id] = now
+
+        _reset_user_flows(user_id)
+
+        # تحقق الاشتراك فقط هنا
+        if FORCE_SUB_CHANNEL_USERNAME:
+            if not is_user_subscribed(bot, user_id):
+                try:
+                    bot.send_message(
+                        message.chat.id,
+                        f"⚠️ للاستخدام الكامل لبوت {BOT_NAME}\nيرجى الاشتراك بالقناة أولاً.",
+                        reply_markup=_sub_inline_kb()
+                    )
+                except Exception as e:
+                    logging.error(f"[start.py] send sub msg: {e}")
+                return
+
+        # بعد الاشتراك أو إذا لم يكن هناك شرط اشتراك
         try:
-            user_id = int(call.data.split("_")[-1])
-
-            # هات الـpayload
-            res = get_table("pending_requests").select("id,payload").eq("user_id", user_id).execute()
-            row = res.data[0] if res.data else {}
-            payload = row.get("payload", {}) if row else {}
-            hold_id = payload.get("hold_id")
-
-            def finalize_reject(m):
-                txt = m.text if m.content_type == "text" else "❌ تم رفض الطلب."
-                if hold_id:
-                    try:
-                        release_hold(hold_id)
-                    except Exception as e:
-                        logging.exception(f"[UNI][ADMIN][{user_id}] release_hold failed: {e}")
-                # رسالة للمستخدم
-                if m.content_type == "photo":
-                    bot.send_photo(user_id, m.photo[-1].file_id, caption=(m.caption or txt))
-                else:
-                    bot.send_message(user_id, f"❌ تم رفض طلب دفع الرسوم.\n📝 السبب: {txt}")
-                bot.answer_callback_query(call.id, "❌ تم رفض الطلب")
-                bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-                if row:
-                    delete_pending_request(row.get("id"))
-                user_uni_state.pop(user_id, None)
-
-            bot.send_message(call.message.chat.id, "📝 اكتب سبب الرفض أو ابعت صورة:")
-            bot.register_next_step_handler_by_chat_id(call.message.chat.id, finalize_reject)
-
+            bot.send_message(
+                message.chat.id,
+                WELCOME_MESSAGE,
+                parse_mode="Markdown",
+                reply_markup=_welcome_inline_kb()
+            )
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ حدث خطأ: {e}")
+            logging.error(f"[start.py] send welcome msg: {e}")
+
+        user_history[user_id] = []
+
+    # ---- Callback: إعادة فحص الاشتراك ----
+    @bot.callback_query_handler(func=lambda c: c.data == CB_CHECK_SUB)
+    def cb_check_subscription(call):
+        user_id = call.from_user.id
+        _reset_user_flows(user_id)
+
+        if FORCE_SUB_CHANNEL_USERNAME:
+            if not is_user_subscribed(bot, user_id):
+                try:
+                    bot.answer_callback_query(call.id, "لم يتم العثور على اشتراك. اشترك ثم أعد المحاولة.", show_alert=True)
+                except Exception as e:
+                    logging.error(f"[start.py] answer cb_check_sub: {e}")
+                return
+
+        # لو وصلنا هنا، مشترك!
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=WELCOME_MESSAGE,
+                parse_mode="Markdown",
+                reply_markup=_welcome_inline_kb()
+            )
+        except Exception as e:
+            logging.error(f"[start.py] edit_message_text cb_check_sub: {e}")
+        user_history[user_id] = []
+
+    # ---- Callback: ستارت (القائمة الرئيسية) ----
+    @bot.callback_query_handler(func=lambda c: c.data == CB_START)
+    def cb_start_main(call):
+        user_id = call.from_user.id
+        name = getattr(call.from_user, "full_name", None) or call.from_user.first_name
+        _reset_user_flows(user_id)
+        try:
+            register_user_if_not_exist(user_id, name)
+        except Exception as e:
+            logging.error(f"[start.py] register_user_if_not_exist: {e}")
+
+        try:
+            bot.answer_callback_query(call.id)
+            bot.send_message(
+                call.message.chat.id,
+                "✨ تم تسجيلك بنجاح! هذه القائمة الرئيسية.",
+                reply_markup=keyboards.main_menu()
+            )
+        except Exception as e:
+            logging.error(f"[start.py] cb_start_main: {e}")
+
+    # ---- روابط / تعليمات / رجوع ----
+    @bot.message_handler(commands=['help'])
+    def send_help(message):
+        bot.send_message(
+            message.chat.id,
+            "📝 للمساعدة والدعم، راسل الإدارة على الخاص أو تحقق من القناة الرسمية.",
+            reply_markup=keyboards.main_menu()
+        )
+
+    @bot.message_handler(func=lambda msg: msg.text == "🔄 ابدأ من جديد")
+    def restart_user(msg):
+        send_welcome(msg)
+        
+    @bot.message_handler(commands=['about'])
+    def send_about(message):
+        bot.send_message(
+            message.chat.id,
+            f"🤖 هذا البوت من تطوير {BOT_NAME}.\n"
+            "نحن نقدم أفضل الخدمات بأقل الأسعار!",
+            reply_markup=keyboards.main_menu()
+        )
+
+    @bot.message_handler(func=lambda msg: msg.text == "⬅️ رجوع")
+    def back_to_main_menu(message):
+        bot.send_message(
+            message.chat.id,
+            "تم الرجوع إلى القائمة الرئيسية.",
+            reply_markup=keyboards.main_menu()
+        )
+
+# ---- رسالة الترحيب ----
+WELCOME_MESSAGE = (
+    f"مرحبًا بك في {BOT_NAME}, وجهتك الأولى للتسوق الإلكتروني!\n\n"
+    "🚀 نحن هنا نقدم لك تجربة تسوق لا مثيل لها:\n"
+    "💼 منتجات عالية الجودة.\n"
+    "⚡ سرعة في التنفيذ.\n"
+    "📞 دعم فني خبير تحت تصرفك.\n\n"
+    "🌟 لماذا نحن الأفضل؟\n"
+    "1️⃣ توفير منتجات رائعة بأسعار تنافسية.\n"
+    "2️⃣ تجربة تسوق آمنة وسهلة.\n"
+    "3️⃣ فريق محترف جاهز لخدمتك على مدار الساعة.\n\n"
+    "🚨 *تحذيرات هامة لا يمكن تجاهلها!*\n"
+    "1️⃣ أي معلومات خاطئة ترسلها... عليك تحمل مسؤوليتها.\n"
+    "2️⃣ *سيتم حذف محفظتك* إذا لم تقم بأي عملية شراء خلال 40 يومًا.\n"
+    "3️⃣ *لا تراسل الإدارة* إلا في حالة الطوارئ!\n\n"
+    "🔔 *هل أنت جاهز؟* لأننا على استعداد تام لتلبية احتياجاتك!\n"
+    "👇 اضغط على زر ✨ للمتابعة."
+)
