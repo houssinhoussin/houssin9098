@@ -1,3 +1,4 @@
+# handlers/cash_transfer.py
 from telebot import types
 from services.wallet_service import (
     add_purchase,
@@ -5,6 +6,10 @@ from services.wallet_service import (
     register_user_if_not_exist,
     # هولد
     create_hold,
+    # ✅ مهم علشان نتحقق من المتاح (balance - held)
+    get_available_balance,
+    # لعرض الرصيد في رسالة الأدمن بعد الحجز
+    get_balance,
 )
 from database.db import get_table
 from handlers import keyboards
@@ -61,7 +66,7 @@ def calculate_commission(amount):
     return commission
 
 # التفافات بسيطة للرصيد (نحافظ على بنية ملفك الأصلي)
-def get_balance(user_id):
+def get_balance_local(user_id):
     from services.wallet_service import get_balance as _get
     return _get(user_id)
 
@@ -98,6 +103,11 @@ def register(bot, history):
         )
         bot.answer_callback_query(call.id)
 
+    # زر عدّاد صفحات (لا شيء)
+    @bot.callback_query_handler(func=lambda c: c.data == "cash_noop")
+    def _noop(call):
+        bot.answer_callback_query(call.id)
+
     # اختيار نوع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_sel_"))
     def _cash_type_selected(call):
@@ -121,8 +131,7 @@ def register(bot, history):
             "لو تمام كمل واكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
-            ("━━━━━━━━━━━━━━━━
-✅ موافق", "commission_confirm"),
+            ("✅ موافق", "commission_confirm"),
             ("❌ إلغاء", "commission_cancel")
         )
         bot.edit_message_text(
@@ -257,7 +266,6 @@ def register(bot, history):
         user_id = call.from_user.id
         name = _name_of(call.from_user)
 
-        # منع ازدواج الطلبات
         data = user_states.get(user_id, {}) or {}
         number = data.get("number")
         cash_type = data.get("cash_type")
@@ -265,13 +273,13 @@ def register(bot, history):
         commission = int(data.get('commission') or 0)
         total = int(data.get('total') or 0)
 
-        # فحص الرصيد
+        # فحص الرصيد المتاح (balance - held)
         available = get_available_balance(user_id)
         if available is None:
             return bot.edit_message_text("❌ حصل خطأ في جلب الرصيد. جرّب تاني.", call.message.chat.id, call.message.message_id)
 
         if available < total:
-            shortage = total - balance
+            shortage = total - available
             kb = make_inline_buttons(("💳 شحن المحفظة", "recharge_wallet"), ("⬅️ رجوع", "commission_cancel"))
             return bot.edit_message_text(
                 f"❌ يا {name}، متاحك الحالي {_fmt(available)} والمطلوب {_fmt(total)}.\n"
@@ -280,16 +288,17 @@ def register(bot, history):
                 reply_markup=kb
             )
 
-        # إنشاء هولد بدل الخصم الفوري
+        # إنشاء هولد بدل الخصم الفوري (ذرّي من خلال الـ RPC)
         hold_desc = f"حجز تحويل كاش — {cash_type} — رقم {number}"
         r = create_hold(user_id, total, hold_desc)
         if getattr(r, "error", None) or not getattr(r, "data", None):
             logging.error(f"[CASH][{user_id}] create_hold failed: {getattr(r, 'error', r)}")
             return bot.edit_message_text("❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.", call.message.chat.id, call.message.message_id)
 
-        data = getattr(r, "data", None)
-        hold_id = (data if isinstance(data, str) else (data.get("id") if isinstance(data, dict) else None))
-        # رصيد بعد الحجز (لو متوفر)
+        data_resp = getattr(r, "data", None)
+        hold_id = (data_resp if isinstance(data_resp, str) else (data_resp.get("id") if isinstance(data_resp, dict) else None))
+
+        # رصيد بعد الحجز (اختياري للعرض)
         try:
             balance_after = get_balance(user_id)
         except Exception:
@@ -297,7 +306,7 @@ def register(bot, history):
 
         # رسالة الإدمن الموحّدة
         admin_msg = (
-            f"💰 رصيد المستخدم الآن: {_fmt(balance_after if balance_after is not None else balance)}\n"
+            f"💰 رصيد المستخدم الآن: {_fmt(balance_after) if balance_after is not None else '—'}\n"
             f"🆕 طلب جديد — تحويل كاش\n"
             f"👤 الاسم: <code>{_name_of(call.from_user)}</code>\n"
             f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
@@ -332,9 +341,11 @@ def register(bot, history):
 
         # رسالة للعميل
         bot.edit_message_text(
-            f"📨 تمام يا {name}! تم إرسال طلبك للإدارة.\n"
-            f"⏱️ التنفيذ عادةً خلال 1–4 دقايق.\n"
-            f"ℹ️ ملاحظة: تقدر تبعت طلب جديد لحد ما نخلّص الحالي.",
+            "━━━━━━━━━━━━━━━━\n"
+            f"📨 تمام يا {name}! بعتنا طلب تحويلك للإدارة.\n"
+            "⏱️ التنفيذ عادةً خلال 1–4 دقايق.\n"
+            "ℹ️ تقدر تبعت طلب جديد لو حابب—طلباتك كلها بتحترم الرصيد المتاح 😉\n"
+            "━━━━━━━━━━━━━━━━",
             call.message.chat.id, call.message.message_id
         )
         user_states[user_id]["step"] = "waiting_admin"
