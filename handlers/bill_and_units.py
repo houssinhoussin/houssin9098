@@ -78,7 +78,8 @@ MTN_UNITS = [
     {"name": "36000 وحدة", "price": 43200},
 ]
 
-user_states = {}
+from services.state_adapter import UserStateDictLike
+user_states = UserStateDictLike()
 PAGE_SIZE_UNITS = 5
 
 # ========== كيبوردات رئيسية ==========
