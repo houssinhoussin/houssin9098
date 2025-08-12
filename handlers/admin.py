@@ -9,6 +9,7 @@ from telebot import types
 from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
+from services.state_service import purge_state
 from services.products_admin import set_product_active
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
@@ -80,6 +81,47 @@ def _user_name(bot, user_id: int) -> str:
 def _safe(v, dash="—"):
     v = ("" if v is None else str(v)).strip()
     return v if v else dash
+
+# ====== Helpers for extracting number / ID / code safely ======
+def _pick_first(*vals):
+    for v in vals:
+        if v is None:
+            continue
+        s = (str(v).strip() if not isinstance(v, str) else v.strip())
+        if s:
+            return s
+    return None
+
+_DEFAULT_KEYS = [
+    "number","beneficiary_number","msisdn","phone","player_id","account","account_id",
+    "target_id","username","user","id","code","serial","voucher","to","to_user"
+]
+
+def _extract_identifier(payload: dict, request_text: str = "", prefer_keys=None) -> str:
+    keys = list(prefer_keys or []) + _DEFAULT_KEYS
+    for k in keys:
+        if k in payload:
+            v = payload.get(k)
+            s = ("" if v is None else str(v)).strip()
+            if s:
+                return s
+    rt = request_text or ""
+    patterns = [
+        r"الرقم[^:]*:\s*<code>([^<]+)</code>",
+        r"الكود[^:]*:\s*<code>([^<]+)</code>",
+        r"آيدي[^:]*:\s*<code>([^<]+)</code>",
+        r"ID[^:]*:\s*<code>([^<]+)</code>",
+        r"player[^:]*:\s*<code>([^<]+)</code>",
+        r"account[^:]*:\s*<code>([^<]+)</code>",
+    ]
+    for pat in patterns:
+        m = re.search(pat, rt, flags=re.IGNORECASE)
+        if m:
+            s = m.group(1).strip()
+            if s:
+                return s
+    return ""
+
 
 def _amount_from_payload(payload: dict) -> int:
     for k in ("reserved", "total", "price", "amount"):
@@ -210,6 +252,7 @@ def register(bot, history):
         req      = res.data[0]
         user_id  = req["user_id"]
         payload  = req.get("payload") or {}
+        req_text = req.get("request_text") or ""
         name     = _user_name(bot, user_id)
 
         # حذف رسالة الأدمن (لو أمكن)
@@ -281,7 +324,7 @@ def register(bot, history):
             # ——— طلبات المنتجات الرقمية ———
             if typ == "order":
                 product_id_raw = payload.get("product_id")
-                player_id      = payload.get("player_id")
+                player_id      = _extract_identifier(payload, req_text, ["player_id","account","id","username","user","target_id"])
                 amt            = int(amt or payload.get("price", 0) or 0)
 
                 product_name = (payload.get("product_name") or "").strip()
@@ -314,6 +357,10 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                try:
+                    purge_state(user_id)
+                except Exception:
+                    pass
                 return
 
             # ——— إعلانات ———
@@ -346,17 +393,7 @@ def register(bot, history):
 
             elif typ in ("syr_unit", "mtn_unit"):
                 price = int(payload.get("price", 0) or amt or 0)
-                num   = payload.get("number") or payload.get("msisdn") or payload.get("phone")
-                if not num:
-                    # حاول قراءة request_text من قاعدة البيانات
-                    try:
-                        rq = get_table("pending_requests").select("request_text").eq("id", request_id).execute()
-                        rt = (rq.data[0]["request_text"] if rq and rq.data else "")
-                    except Exception:
-                        rt = ""
-                    m = re.search(r"الرقم[^:]*:\s*<code>([^<]+)</code>", str(rt))
-                    if m:
-                        num = m.group(1).strip()
+                num   = _extract_identifier(payload, req_text, ["number","msisdn","phone"])
                 unit_name = payload.get("unit_name") or "وحدات"
 
                 _insert_purchase_row(user_id, None, unit_name, price, _safe(num))
@@ -375,6 +412,10 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                try:
+                    purge_state(user_id)
+                except Exception:
+                    pass
                 return
 
             elif typ in ("syr_bill", "mtn_bill"):
@@ -398,6 +439,10 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                try:
+                    purge_state(user_id)
+                except Exception:
+                    pass
                 return
 
             elif typ == "internet":
@@ -447,6 +492,10 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                try:
+                    purge_state(user_id)
+                except Exception:
+                    pass
                 return
 
             elif typ == "companies_transfer":
@@ -471,6 +520,10 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                try:
+                    purge_state(user_id)
+                except Exception:
+                    pass
                 return
 
             elif typ in ("university_fees",):
