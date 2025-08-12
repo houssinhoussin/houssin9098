@@ -12,13 +12,21 @@ from services.wallet_service import (
     create_hold,   # ✅ حجز ذرّي
 )
 from config import BOT_NAME
-from services.telegram_safety import remove_inline_keyboard
-from services.anti_spam import too_soon
 from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
 from database.models.product import Product
 
+# حارس التأكيد الموحّد: يحذف الكيبورد + يعمل Debounce
+try:
+    from services.ui_guards import confirm_guard
+except Exception:
+    from ui_guards import confirm_guard
+
 # ==== Helpers للرسائل الموحدة ====
+BAND = "━━━━━━━━━━━━━━━━"
+CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
+ETA_TEXT = "من 1 إلى 4 دقائق"
+
 def _name_from_user(u) -> str:
     n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
     n = (n or "").strip()
@@ -30,7 +38,12 @@ def _fmt_syp(n: int) -> str:
     except Exception:
         return f"{n} ل.س"
 
-ETA_TEXT = "من 1 إلى 4 دقائق"
+def _with_cancel(text: str) -> str:
+    return f"{text}\n\n{CANCEL_HINT}"
+
+def _card(title: str, lines: list[str]) -> str:
+    body = "\n".join(lines)
+    return f"{BAND}\n{title}\n{body}\n{BAND}"
 
 # حالة الطلبات لكل مستخدم (للخطوات فقط، مش منع تعدد الطلبات)
 user_orders = {}
@@ -73,13 +86,14 @@ PRODUCTS = {
 }
 
 def convert_price_usd_to_syp(usd):
+    # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
     if usd <= 5:
-        return int(usd * 11800)
+        return int(round(usd * 11800))
     elif usd <= 10:
-        return int(usd * 11600)
+        return int(round(usd * 11600))
     elif usd <= 20:
-        return int(usd * 11300)
-    return int(usd * 11000)
+        return int(round(usd * 11300))
+    return int(round(usd * 11000))
 
 def _button_label(p: Product) -> str:
     # اسم الزر + السعر بالدولار
@@ -92,11 +106,13 @@ def _button_label(p: Product) -> str:
 
 def show_products_menu(bot, message):
     name = _name_from_user(message.from_user)
-    bot.send_message(message.chat.id, f"📍 أهلاً {name}! اختار نوع المنتج اللي يناسبك 😉", reply_markup=keyboards.products_menu())
+    txt = _with_cancel(f"📍 أهلاً {name}! اختار نوع المنتج اللي يناسبك 😉")
+    bot.send_message(message.chat.id, txt, reply_markup=keyboards.products_menu())
 
 def show_game_categories(bot, message):
     name = _name_from_user(message.from_user)
-    bot.send_message(message.chat.id, f"🎮 يا {name}، اختار اللعبة أو التطبيق اللي محتاجه:", reply_markup=keyboards.game_categories())
+    txt = _with_cancel(f"🎮 يا {name}، اختار اللعبة أو التطبيق اللي محتاجه:")
+    bot.send_message(message.chat.id, txt, reply_markup=keyboards.game_categories())
 
 def show_product_options(bot, message, category):
     options = PRODUCTS.get(category, [])
@@ -105,7 +121,7 @@ def show_product_options(bot, message, category):
     for p in options:
         keyboard.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
     keyboard.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
-    bot.send_message(message.chat.id, f"📦 منتجات {category}: اختار اللي على مزاجك 😎", reply_markup=keyboard)
+    bot.send_message(message.chat.id, _with_cancel(f"📦 منتجات {category}: اختار اللي على مزاجك 😎"), reply_markup=keyboard)
 
 # ================= خطوات إدخال آيدي اللاعب =================
 
@@ -132,14 +148,19 @@ def handle_player_id(message, bot):
 
     bot.send_message(
         user_id,
-        (
-            f"تمام يا {name}! 👌\n"
-            f"• المنتج: {product.name}\n"
-            f"• الفئة: {product.category}\n"
-            f"• السعر: {_fmt_syp(price_syp)}\n"
-            f"• آيدي اللاعب: {player_id}\n\n"
-            f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.\n"
-            f"تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
+        _with_cancel(
+            _card(
+                "📦 تفاصيل الطلب",
+                [
+                    f"• المنتج: {product.name}",
+                    f"• الفئة: {product.category}",
+                    f"• السعر: {_fmt_syp(price_syp)}",
+                    f"• آيدي اللاعب: {player_id}",
+                    "",
+                    f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
+                    "تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
+                ]
+            )
         ),
         reply_markup=keyboard
     )
@@ -147,6 +168,18 @@ def handle_player_id(message, bot):
 # ================= تسجيل هاندلرات الرسائل =================
 
 def register_message_handlers(bot, history):
+    # /cancel — إلغاء سريع في أي خطوة
+    @bot.message_handler(commands=['cancel'])
+    def cancel_cmd(msg):
+        uid = msg.from_user.id
+        user_orders.pop(uid, None)
+        name = _name_from_user(msg.from_user)
+        bot.send_message(
+            msg.chat.id,
+            _card("✅ تم الإلغاء", [f"يا {name}، رجعناك لقائمة المنتجات."]),
+            reply_markup=keyboards.products_menu()
+        )
+
     @bot.message_handler(func=lambda msg: msg.text in ["🛒 المنتجات", "💼 المنتجات"])
     def handle_main_product_menu(msg):
         user_id = msg.from_user.id
@@ -231,7 +264,7 @@ def setup_inline_handlers(bot, admin_ids):
         user_orders[user_id] = {"category": selected.category, "product": selected}
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
-        msg = bot.send_message(user_id, f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:", reply_markup=kb)
+        msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
@@ -258,24 +291,22 @@ def setup_inline_handlers(bot, admin_ids):
         name = _name_from_user(call.from_user)
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
-        msg = bot.send_message(user_id, f"📋 يا {name}، ابعت آيدي اللاعب الجديد:", reply_markup=kb)
+        msg = bot.send_message(user_id, _with_cancel(f"📋 يا {name}، ابعت آيدي اللاعب الجديد:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
 
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
         user_id = call.from_user.id
-        # اقفل الأزرار ومنع التكرار السريع
-        remove_inline_keyboard(bot, call.message)
 
-        if too_soon(user_id, 'final_confirm_order', seconds=2):
-            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
-        user_id = call.from_user.id
+        # ✅ احذف الكيبورد فقط + امنع الدبل-كليك (بدون حذف الرسالة)
+        if confirm_guard(bot, call, "final_confirm_order"):
+            return
+
         name = _name_from_user(call.from_user)
         order = user_orders.get(user_id)
         if not order or "product" not in order or "player_id" not in order:
             return bot.answer_callback_query(call.id, f"❌ {name}، الطلب مش كامل. كمّل البيانات الأول.")
 
-        # ❌ (تم إزالة منع تعدد الطلبات)
         product   = order["product"]
         player_id = order["player_id"]
         price_syp = convert_price_usd_to_syp(product.price)
@@ -289,30 +320,34 @@ def setup_inline_handlers(bot, admin_ids):
         if available < price_syp:
             bot.send_message(
                 user_id,
-                f"❌ {name}، رصيدك المتاح مش مكفّي.\n"
-                f"المتاح: {_fmt_syp(available)}\n"
-                f"السعر: {_fmt_syp(price_syp)}\n"
-                f"🧾 اشحن المحفظة وبعدين جرّب تاني."
+                _card(
+                    "❌ رصيدك مش مكفّي",
+                    [
+                        f"المتاح: {_fmt_syp(available)}",
+                        f"السعر: {_fmt_syp(price_syp)}",
+                        "🧾 اشحن المحفظة وبعدين جرّب تاني."
+                    ]
+                )
             )
             return
 
         # ✅ حجز المبلغ فعليًا (HOLD)
         hold_id = None
         try:
-            # لو دالتك بتقبل وصف، هنمرّر وصف واضح؛ لو لا، البارامتر الزائد يتجاهَل حسب تنفيذك
             resp = create_hold(user_id, price_syp, f"حجز شراء — {product.name} — آيدي {player_id}")
             if getattr(resp, "error", None):
                 err_msg = str(resp.error).lower()
                 if "insufficient_funds" in err_msg or "amount must be > 0" in err_msg:
                     bot.send_message(
                         user_id,
-                        f"❌ {name}، الرصيد مش كفاية للحجز.\n"
-                        f"المتاح: {_fmt_syp(available)}\n"
-                        f"السعر: {_fmt_syp(price_syp)}"
+                        _card(
+                            "❌ الرصيد غير كافٍ",
+                            [f"المتاح: {_fmt_syp(available)}", f"السعر: {_fmt_syp(price_syp)}"]
+                        )
                     )
                     return
                 logging.error("create_hold RPC error: %s", resp.error)
-                bot.send_message(user_id, f"❌ يا {name}، حصل خطأ بسيط أثناء الحجز. جرّب كمان شوية.")
+                bot.send_message(user_id, "❌ يا {name}، حصل خطأ بسيط أثناء الحجز. جرّب كمان شوية.")
                 return
             data = getattr(resp, "data", None)
             if isinstance(data, dict):
@@ -364,10 +399,16 @@ def setup_inline_handlers(bot, admin_ids):
         # رسالة موحّدة للعميل بعد إرسال الطلب
         bot.send_message(
             user_id,
-            f"✅ تمام يا {name}! بعتنا طلبك للإدارة.\n"
-            f"⏱️ التنفيذ {ETA_TEXT}.\n"
-            f"ℹ️ تقدر تبعت طلبات تانية — بنسحب من المتاح بس.\n"
-            f"📦 تفاصيل سريعة: حجزنا {_fmt_syp(price_syp)} لطلب «{product.name}» لآيدي اللاعب «{player_id}».",
+            _with_cancel(
+                _card(
+                    f"✅ تمام يا {name}! طلبك اتبعت 🚀",
+                    [
+                        f"⏱️ التنفيذ {ETA_TEXT}.",
+                        f"📦 حجزنا {_fmt_syp(price_syp)} لطلب «{product.name}» لآيدي «{player_id}».",
+                        "تقدر تبعت طلبات تانية — بنسحب من المتاح بس."
+                    ]
+                )
+            ),
         )
         process_queue(bot)
 
