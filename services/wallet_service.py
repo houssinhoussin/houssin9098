@@ -4,8 +4,6 @@
 """
 
 import uuid
-import hashlib
-import time
 from datetime import datetime, timedelta
 
 from database.db import (
@@ -18,12 +16,6 @@ from database.db import (
     transfer_amount_rpc as _rpc_transfer_amount,
     try_deduct_rpc as _rpc_try_deduct,
 )
-
-# محاولة تحميل طبقة الـ idempotency لو موجودة
-try:
-    from services import idempotency as _idem
-except Exception:
-    _idem = None
 
 # أسماء الجداول
 USER_TABLE        = "houssin363"
@@ -42,67 +34,6 @@ def _is_uuid_like(x) -> bool:
         return True
     except Exception:
         return False
-
-def _norm_reason(r) -> str:
-    return (str(r or "")).strip().lower()
-
-def _make_hold_key(user_id: int, amount: int, reason: str) -> str:
-    """
-    مفتاح idempotency لعمليات الحجز (يمنع تكرار الحجز لو الزبون ضغط تأكيد مرتين).
-    يعتمد على: user_id + amount + reason (منطقي لنفس العملية).
-    نافذته قصيرة (ثواني) لالتقاط الضغط المكرر فقط.
-    """
-    base = f"hold:{user_id}:{int(amount)}:{_norm_reason(reason)}"
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()
-
-def _idem_acquire(key: str, ttl_seconds: int) -> bool:
-    """
-    محاولة حجز مفتاح idempotency. إن لم تتوفر services/idempotency
-    نستخدم ذاكرة مؤقتة محلية كـ fallback.
-    """
-    # fallback المحلي
-    if _idem is None:
-        _IDEM_FALLBACK = getattr(_idem_acquire, "_CACHE", {})
-        now = time.time()
-        # تنظيف القديم
-        for k, exp in list(_IDEM_FALLBACK.items()):
-            if exp <= now:
-                _IDEM_FALLBACK.pop(k, None)
-        # فحص/تسجيل
-        if key in _IDEM_FALLBACK and _IDEM_FALLBACK[key] > now:
-            return False
-        _IDEM_FALLBACK[key] = now + ttl_seconds
-        _idem_acquire._CACHE = _IDEM_FALLBACK
-        return True
-
-    # لو عندك services/idempotency.py
-    try:
-        # جرّب API باسم acquire، أو begin حسب اللي عندك
-        if hasattr(_idem, "acquire"):
-            return bool(_idem.acquire(key, ttl_seconds))
-        if hasattr(_idem, "begin"):
-            return bool(_idem.begin(key, ttl_seconds))
-    except Exception:
-        return True
-    return True
-
-def _idem_release(key: str):
-    if _idem is None:
-        _IDEM_FALLBACK = getattr(_idem_acquire, "_CACHE", {})
-        _IDEM_FALLBACK.pop(key, None)
-        _idem_acquire._CACHE = _IDEM_FALLBACK
-        return
-    try:
-        if hasattr(_idem, "release"):
-            _idem.release(key)
-    except Exception:
-        pass
-
-class _Resp:
-    """استجابة خفيفة متوافقة مع نمط resp.data/resp.error المستخدم في الكود."""
-    def __init__(self, data=None, error=None):
-        self.data = data
-        self.error = error
 
 
 # ================= عمليات المستخدم =================
@@ -333,7 +264,7 @@ def get_bill_and_units_purchases(user_id: int):
 def get_cash_transfer_purchases(user_id: int):
     response = get_table('cash_transfer_purchases').select("*").eq("user_id", user_id).execute()
     cash_items = []
-    for item in response.data أو []:
+    for item in response.data or []:
         cash_items.append(f"تحويل نقدي: {item['transfer_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
     return cash_items if cash_items else ["لا توجد مشتريات تحويل نقدي."]
 
@@ -374,8 +305,8 @@ def user_has_admin_approval(user_id):
 # (تبقى كما هي — لا تغييرات على هذا القسم)
 
 def get_all_purchases_structured(user_id: int, limit: int = 50):
-    # ... (نفس منطق نسختك السابقة)
-    from datetime import datetime as _dt
+    # ... (المحتوى كما في نسختك السابقة)
+    from datetime import datetime as _dt  # لتفادي أي التباس بالأسماء
     items = []
 
     try:
@@ -422,7 +353,8 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
                 idp = None
                 for k in probe:
                     if k in r and r.get(k):
-                        idp = r.get(k); break
+                        idp = r.get(k)
+                        break
                 items.append({
                     "title": r.get(title_field) or tname,
                     "price": int(r.get("price") or 0),
@@ -433,7 +365,8 @@ def get_all_purchases_structured(user_id: int, limit: int = 50):
             continue
 
     def _to_sec(s: str):
-        if not s: return None
+        if not s:
+            return None
         s2 = s[:19].replace("T", " ")
         try:
             return int(_dt.fromisoformat(s2).timestamp())
@@ -493,6 +426,108 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
     return out
 
 
+# ===== تسجيلات إضافية في الجداول المتخصصة (Write-through) =====
+# (تبقى كما هي — بدون تغيير)
+
+def add_game_purchase(user_id: int, product_id, product_name: str, price: int, player_id: str, created_at: str = None):
+    pid = int(product_id) if product_id else None
+    if pid:
+        try:
+            chk = get_table(PRODUCTS_TABLE).select("id").eq("id", pid).limit(1).execute()
+            if not (getattr(chk, "data", None) and chk.data):
+                pid = None
+        except Exception:
+            pid = None
+
+    data = {
+        "user_id": user_id,
+        "product_id": pid,
+        "product_name": product_name,
+        "price": int(price),
+        "player_id": str(player_id or ""),
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+    }
+    get_table("game_purchases").insert(data).execute()
+
+def add_bill_or_units_purchase(user_id: int, bill_name: str, price: int, number: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "bill_name": bill_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "number": number
+    }
+    try:
+        get_table("bill_and_units_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_internet_purchase(user_id: int, provider_name: str, price: int, phone: str, speed: str = None, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "provider_name": provider_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "phone": phone,
+        "speed": speed
+    }
+    try:
+        get_table("internet_providers_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_cash_transfer_purchase(user_id: int, transfer_name: str, price: int, number: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "transfer_name": transfer_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "number": number
+    }
+    try:
+        get_table("cash_transfer_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_companies_transfer_purchase(user_id: int, company_name: str, price: int, beneficiary_number: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "company_name": company_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "beneficiary_number": beneficiary_number
+    }
+    try:
+        get_table("companies_transfer_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_university_fees_purchase(user_id: int, university_name: str, price: int, university_id: str, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "university_name": university_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat()),
+        "university_id": university_id
+    }
+    try:
+        get_table("university_fees_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+def add_ads_purchase(user_id: int, ad_name: str, price: int, created_at: str = None):
+    data = {
+        "user_id": user_id,
+        "ad_name": ad_name,
+        "price": price,
+        "created_at": (created_at or datetime.utcnow().isoformat())
+    }
+    try:
+        get_table("ads_purchases").insert(data).execute()
+    except Exception:
+        pass
+
+
 # ===== واجهات الحجز (للاستخدام من الهاندلرز) =====
 # (Back-compat: نقبل UUID أو وصف نصّي، ونمرّر دائمًا UUID صالح للـ RPC)
 
@@ -502,25 +537,9 @@ def create_hold(user_id: int, amount: int, order_or_reason=None, ttl_seconds: in
       - لو البراميتر UUID: نستخدمه كـ order_id.
       - لو None أو نص/أي شيء تاني: نولّد UUID جديد ونستخدمه كـ order_id.
     دائمًا نمرّر UUID صالح للـ RPC لتفادي 22P02.
-    + حماية Idempotency قصيرة: تمنع تكرار الحجز لو الزبون ضغط تأكيد مرتين بسرعة.
     """
-    reason = _norm_reason(order_or_reason)
-    idem_key = _make_hold_key(user_id, int(amount), reason)
-
-    # نافذة 20 ثانية تكفي لمنع الضغط المزدوج
-    if not _idem_acquire(idem_key, ttl_seconds=20):
-        return _Resp(data=None, error="DUPLICATE_CONFIRM")
-
     order_id = str(order_or_reason) if _is_uuid_like(order_or_reason) else str(uuid.uuid4())
-    try:
-        resp = _rpc_create_hold(user_id, int(amount), order_id, ttl_seconds)
-        # إن فشل الـ RPC نحرّر المفتاح فورًا، عشان يقدر يحاول تاني
-        if getattr(resp, "error", None) or not getattr(resp, "data", None):
-            _idem_release(idem_key)
-        return resp
-    except Exception:
-        _idem_release(idem_key)
-        raise
+    return _rpc_create_hold(user_id, int(amount), order_id, ttl_seconds)
 
 def capture_hold(hold_id: str):
     return _rpc_capture_hold(hold_id)
