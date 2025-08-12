@@ -59,12 +59,12 @@ def _fmt(n) -> str:
         return f"{n} ل.س"
 
 def calculate_uni_commission(amount: int) -> int:
+    # ✅ حسْب بالعدد الصحيح فقط (بدون float) — 3500 لكل 50,000 + جزء نسبي
     blocks = amount // 50000
     remainder = amount % 50000
     commission = blocks * COMMISSION_PER_50000
-    if remainder > 0:
-        commission += int(COMMISSION_PER_50000 * (remainder / 50000))
-    return commission
+    commission += (remainder * COMMISSION_PER_50000) // 50000
+    return int(commission)
 
 def make_inline_buttons(*buttons):
     kb = types.InlineKeyboardMarkup()
@@ -154,7 +154,8 @@ def register_university_fees(bot, history):
         txt = (msg.text or "").strip()
         try:
             if parse_amount:
-                amount = parse_amount(txt, min=1)
+                # ✅ الوسيط الصحيح هو min_value
+                amount = parse_amount(txt, min_value=1)
             else:
                 amount = int(txt.replace(",", ""))
                 if amount <= 0:
