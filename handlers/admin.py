@@ -346,7 +346,17 @@ def register(bot, history):
 
             elif typ in ("syr_unit", "mtn_unit"):
                 price = int(payload.get("price", 0) or amt or 0)
-                num   = payload.get("number")
+                num   = payload.get("number") or payload.get("msisdn") or payload.get("phone")
+                if not num:
+                    # حاول قراءة request_text من قاعدة البيانات
+                    try:
+                        rq = get_table("pending_requests").select("request_text").eq("id", request_id).execute()
+                        rt = (rq.data[0]["request_text"] if rq and rq.data else "")
+                    except Exception:
+                        rt = ""
+                    m = re.search(r"الرقم[^:]*:\s*<code>([^<]+)</code>", str(rt))
+                    if m:
+                        num = m.group(1).strip()
                 unit_name = payload.get("unit_name") or "وحدات"
 
                 _insert_purchase_row(user_id, None, unit_name, price, _safe(num))
