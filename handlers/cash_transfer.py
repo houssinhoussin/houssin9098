@@ -121,7 +121,8 @@ def register(bot, history):
             "لو تمام كمل واكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
-            ("✅ موافق", "commission_confirm"),
+            ("━━━━━━━━━━━━━━━━
+✅ موافق", "commission_confirm"),
             ("❌ إلغاء", "commission_cancel")
         )
         bot.edit_message_text(
