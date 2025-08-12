@@ -195,7 +195,7 @@ def register(bot, history):
             )
             return
 
-        amount = parse_amount(amount_text, min_value=MIN_RECHARGE)
+        amount = int(amount_text)
         # ✅ رفض مبكر قبل إرسال الطلب للأدمن/الطابور
         if amount < MIN_RECHARGE:
             bot.send_message(
@@ -250,7 +250,7 @@ def register(bot, history):
         user_id = call.from_user.id
         name = _name_from_user(call.from_user)
 
-        if call.data == \"user_confirm_recharge\":
+        if call.data == "user_confirm_recharge":
             remove_inline_keyboard(bot, call.message)
             data = recharge_requests.get(user_id)
             if not data:
