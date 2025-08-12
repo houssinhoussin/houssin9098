@@ -169,11 +169,7 @@ def register_university_fees(bot, history):
         total = int(state.get("total") or 0)
 
         # منع التوازي
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.edit_message_text(f"❌ يا {name}، عندك طلب قيد التنفيذ دلوقتي. استنى لما يخلص.", call.message.chat.id, call.message.message_id)
-
-        balance = get_balance(user_id)
+        balance = get_available_balance(user_id)
         if balance is None or balance < total:
             shortage = total - (balance or 0)
             kb = make_inline_buttons(
@@ -284,9 +280,8 @@ def register_university_fees(bot, history):
                 if not has_sufficient_balance(user_id, total):
                     bot.answer_callback_query(call.id, "❌ لا يوجد رصيد كافٍ.", show_alert=True)
                     return
-                deduct_balance(user_id, total)
-
-            # إعلام المستخدم
+                # (removed) الخصم يتم عبر capture_hold في لوحة الأدمن
+# إعلام المستخدم
             bot.send_message(
                 user_id,
                 f"✅ تم دفع الرسوم الجامعية ({university}) بنجاح.\n"
