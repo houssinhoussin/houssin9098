@@ -1,6 +1,6 @@
 # handlers/products.py
 
-from services.products_admin import is_product_active
+from services.products_admin import get_product_active
 import logging
 from database.db import get_table
 from telebot import types
@@ -44,6 +44,13 @@ def _with_cancel(text: str) -> str:
 def _card(title: str, lines: list[str]) -> str:
     body = "\n".join(lines)
     return f"{BAND}\n{title}\n{body}\n{BAND}"
+
+def _unavailable_short(product_name: str) -> str:
+    # تنويه احترافي يظهر كـ Alert عندما يكون المنتج موقوفًا
+    return (
+        f"⛔ عذرًا، «{product_name}» غير متاح حاليًا بسبب تحديثات/صيانة.\n"
+        f"سنُعيد فتحه للشراء في أقرب وقت. شكرًا لتفهّمك."
+    )
 
 # حالة الطلبات لكل مستخدم (للخطوات فقط، مش منع تعدد الطلبات)
 user_orders = {}
@@ -257,9 +264,9 @@ def setup_inline_handlers(bot, admin_ids):
         if not selected:
             return bot.answer_callback_query(call.id, f"❌ {name}، المنتج مش موجود. جرّب تاني.")
 
-        # ✅ منع اختيار منتج موقوف
-        if not is_product_active(product_id):
-            return bot.answer_callback_query(call.id, f"⛔ {name}، المنتج متوقّف مؤقتًا.")
+        # ✅ منع اختيار منتج موقوف (Alert برسالة احترافية)
+        if not get_product_active(product_id):
+            return bot.answer_callback_query(call.id, _unavailable_short(selected.name), show_alert=True)
 
         user_orders[user_id] = {"category": selected.category, "product": selected}
         kb = types.InlineKeyboardMarkup()
@@ -311,9 +318,9 @@ def setup_inline_handlers(bot, admin_ids):
         player_id = order["player_id"]
         price_syp = convert_price_usd_to_syp(product.price)
 
-        # المنتج ما زال فعّال؟
-        if not is_product_active(product.product_id):
-            return bot.answer_callback_query(call.id, f"⛔ {name}، المنتج متوقّف مؤقتًا.")
+        # المنتج ما زال فعّال؟ (Alert برسالة احترافية)
+        if not get_product_active(product.product_id):
+            return bot.answer_callback_query(call.id, _unavailable_short(product.name), show_alert=True)
 
         # تحقق الرصيد (المتاح فقط)
         available = get_available_balance(user_id)
