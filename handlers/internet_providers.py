@@ -14,8 +14,6 @@ from services.wallet_service import (
 from services.queue_service import add_pending_request, process_queue
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
-from telegram_safety import remove_inline_keyboard
-from anti_spam import too_soon
 
 # =====================================
 #       إعدادات عامة / ثوابت
@@ -259,9 +257,9 @@ def register(bot):
     # تأكيد وإرسال إلى طابور الأدمن + إنشاء HOLD
     @bot.callback_query_handler(func=lambda c: c.data == CB_CONFIRM)
     def cb_confirm(call):
-    remove_inline_keyboard(bot, call.message)
-    if too_soon(call.from_user.id, 'cb_confirm', seconds=2):
-        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
+        remove_inline_keyboard(bot, call.message)
+        if too_soon(call.from_user.id, 'cb_confirm', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         uid = call.from_user.id
         nm = _name(bot, uid)
         st = user_net_state.get(uid)
