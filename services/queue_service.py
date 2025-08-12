@@ -1,12 +1,20 @@
 # services/queue_service.py
 import time
 import logging
+import hashlib
+import json
 from datetime import datetime
 import httpx
 import threading
 from database.db import get_table
 from config import ADMIN_MAIN_ID
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+
+# محاولة استخدام طبقة idempotency لو متاحة
+try:
+    from services import idempotency as _idem
+except Exception:
+    _idem = None
 
 QUEUE_TABLE = "pending_requests"
 _queue_lock = threading.Lock()
@@ -15,23 +23,94 @@ _queue_cooldown = False  # يمنع إظهار أكثر من طلب
 # حد أقصى آمن لكابتشن الصور في تليجرام (نخلّيه أقل من 1024 بهامش)
 _MAX_CAPTION = 900
 
+def _idem_acquire(key: str, ttl_seconds: int) -> bool:
+    # fallback محلي للمفاتيح
+    if _idem is None:
+        _CACHE = getattr(_idem_acquire, "_CACHE", {})
+        now = time.time()
+        for k, exp in list(_CACHE.items()):
+            if exp <= now:
+                _CACHE.pop(k, None)
+        if key in _CACHE and _CACHE[key] > now:
+            return False
+        _CACHE[key] = now + ttl_seconds
+        _idem_acquire._CACHE = _CACHE
+        return True
+    try:
+        if hasattr(_idem, "acquire"):
+            return bool(_idem.acquire(key, ttl_seconds))
+        if hasattr(_idem, "begin"):
+            return bool(_idem.begin(key, ttl_seconds))
+    except Exception:
+        return True
+    return True
+
+def _idem_release(key: str):
+    if _idem is None:
+        _CACHE = getattr(_idem_acquire, "_CACHE", {})
+        _CACHE.pop(key, None)
+        _idem_acquire._CACHE = _CACHE
+        return
+    try:
+        if hasattr(_idem, "release"):
+            _idem.release(key)
+    except Exception:
+        pass
+
+def _compute_pending_key(user_id: int, request_text: str, payload):
+    """
+    مفتاح idempotency لصف الطلبات المعلّقة:
+      - لو فيه hold_id داخل payload → نستعمله (الأفضل).
+      - وإلا نعمل هاش من user_id + request_text + payload.
+    """
+    if isinstance(payload, dict):
+        hid = payload.get("hold_id") or payload.get("idempotency_key")
+        if hid:
+            return f"pending:{user_id}:{hid}"
+    try:
+        s = json.dumps(payload or {}, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        s = str(payload)
+    base = f"pending:{user_id}:{(request_text or '').strip()}:{s}"
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
+
 def add_pending_request(user_id: int, username: str, request_text: str, payload=None):
-    for attempt in range(1, 4):
+    """
+    يضيف طلب للطابور مع حماية idempotency (TTL = 120 ثانية):
+    نفس الطلب مش هيتكرر للإدمن لو الزبون ضغط تأكيد مرتين بسرعة.
+    """
+    idem_key = _compute_pending_key(user_id, request_text, payload)
+    if not _idem_acquire(idem_key, ttl_seconds=120):
+        logging.info(f"[QUEUE] duplicate suppressed for key={idem_key}")
+        return
+
+    try:
+        data = {
+            "user_id": user_id,
+            "username": username,
+            "request_text": request_text,
+            "created_at": datetime.utcnow().isoformat()
+        }
+        if payload is not None:
+            # خزّن المفتاح للمرجعة (اختياري)
+            if isinstance(payload, dict):
+                payload = dict(payload)
+                payload.setdefault("idempotency_key", idem_key)
+            data["payload"] = payload
+
+        get_table(QUEUE_TABLE).insert(data).execute()
+        return
+    except httpx.ReadError as e:
+        logging.warning(f"ReadError in add_pending_request: {e}")
+    except Exception:
+        logging.exception("Unexpected error in add_pending_request")
+    finally:
+        # لو فشلنا في الإدراج لأي سبب، حرّر المفتاح عشان يقدر يحاول تاني
+        # (لو نجح الإدراج بنعتمد على TTL للمفتاح)
         try:
-            data = {
-                "user_id": user_id,
-                "username": username,
-                "request_text": request_text,
-                "created_at": datetime.utcnow().isoformat()
-            }
-            if payload is not None:
-                data["payload"] = payload
-            get_table(QUEUE_TABLE).insert(data).execute()
-            return
-        except httpx.ReadError as e:
-            logging.warning(f"Attempt {attempt}: ReadError in add_pending_request: {e}")
-            time.sleep(0.5)
-    logging.error(f"Failed to add pending request for user {user_id} after 3 attempts.")
+            _idem_release(idem_key)
+        except Exception:
+            pass
 
 def delete_pending_request(request_id: int):
     try:
@@ -182,5 +261,3 @@ def queue_cooldown_start(bot=None):
         if bot is not None:
             process_queue(bot)
     threading.Thread(target=release, daemon=True).start()
-
-# نهاية ملف queue_service.py
