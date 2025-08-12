@@ -118,8 +118,8 @@ def register_companies_transfer(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_commission_confirm")
     def company_commission_confirm(call):
-    if too_soon(call.from_user.id, 'company_commission_confirm', seconds=2):
-        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
+        if too_soon(call.from_user.id, 'company_commission_confirm', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_beneficiary_name"
@@ -197,8 +197,8 @@ def register_companies_transfer(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "beneficiary_number_confirm")
     def beneficiary_number_confirm(call):
-    if too_soon(call.from_user.id, 'beneficiary_number_confirm', seconds=2):
-        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
+        if too_soon(call.from_user.id, 'beneficiary_number_confirm', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         user_states[user_id]["step"] = "awaiting_transfer_amount"
@@ -252,8 +252,8 @@ def register_companies_transfer(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_transfer_confirm")
     def company_transfer_confirm(call):
-    if too_soon(call.from_user.id, 'company_transfer_confirm', seconds=2):
-        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
+        if too_soon(call.from_user.id, 'company_transfer_confirm', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         data = user_states.get(user_id, {})
