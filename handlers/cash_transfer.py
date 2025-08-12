@@ -16,6 +16,7 @@ from handlers import keyboards
 from services.queue_service import add_pending_request, process_queue
 import math  # لإدارة صفحات الكيبورد
 import logging
+from anti_spam import too_soon
 
 user_states = {}
 
@@ -180,6 +181,8 @@ def register(bot, history):
     # موافقة على الشروط → اطلب الرقم
     @bot.callback_query_handler(func=lambda call: call.data == "commission_confirm")
     def commission_confirmed(call):
+    if too_soon(call.from_user.id, 'commission_confirmed', seconds=2):
+        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_number"
         kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
@@ -212,6 +215,8 @@ def register(bot, history):
     # بعد تأكيد الرقم → اطلب المبلغ
     @bot.callback_query_handler(func=lambda call: call.data == "number_confirm")
     def number_confirm(call):
+    if too_soon(call.from_user.id, 'number_confirm', seconds=2):
+        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
         kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
@@ -263,6 +268,8 @@ def register(bot, history):
     # تأكيد نهائي → إنشاء هولد + إرسال للطابور
     @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
     def confirm_transfer(call):
+    if too_soon(call.from_user.id, 'confirm_transfer', seconds=2):
+        return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _name_of(call.from_user)
 
