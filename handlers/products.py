@@ -74,6 +74,12 @@ def convert_price_usd_to_syp(usd):
         return int(usd * 11300)
     return int(usd * 11000)
 
+def _fmt_usd(x):
+    try:
+        return f"${float(x):.2f}"
+    except Exception:
+        return f"${x}"
+
 # ================= واجهات العرض =================
 
 def show_products_menu(bot, message):
@@ -306,7 +312,9 @@ def setup_inline_handlers(bot, admin_ids):
         # عرض الرصيد الحالي في رسالة الأدمن
         balance = get_balance(user_id)
 
-        admin_msg = (
+        BANNER_TOP = "━━━━━━━━━━━━━━━━\n"
+BANNER_BOT = "\n━━━━━━━━━━━━━━━━"
+admin_msg = (BANNER_TOP + 
             f"💰 رصيد المستخدم: {balance:,} ل.س\n"
             f"🆕 طلب جديد\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
