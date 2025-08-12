@@ -154,3 +154,19 @@ def get_var(user_id: int, key: str, default=None, *, state_key: str = DEFAULT_ST
 def set_var(user_id: int, key: str, value, *, state_key: str = DEFAULT_STATE_KEY, ttl_minutes: int = 120) -> None:
     """Alias لـ set_kv لأغراض التوافق."""
     return set_kv(user_id, key, value, state_key=state_key, ttl_minutes=ttl_minutes)
+
+# ====== واجهة مستوى أعلى لتعامل القاموس بالكامل (باستثناء المفاتيح الداخلية) ======
+_INTERNAL_KEYS = {"__state", "__state_exp"}
+
+def get_data(user_id: int, *, state_key: str = DEFAULT_STATE_KEY) -> Dict[str, Any]:
+    """يرجع نسخة من المتغيرات العامة (بدون مفاتيح النظام)."""
+    vars_dict = _get_vars(user_id, state_key=state_key)
+    return {k: v for k, v in vars_dict.items() if k not in _INTERNAL_KEYS}
+
+def set_data(user_id: int, data: Dict[str, Any], *, state_key: str = DEFAULT_STATE_KEY, ttl_minutes: int = 120) -> None:
+    """يحفظ القاموس كاملاً مع الإبقاء على مفاتيح النظام كما هي وتحديث وقت الانتهاء."""
+    vars_dict = _get_vars(user_id, state_key=state_key)
+    # أبقِ مفاتيح النظام
+    sys_part = {k: v for k, v in vars_dict.items() if k in _INTERNAL_KEYS}
+    merged = {**sys_part, **(data or {})}
+    _set_vars(user_id, merged, state_key=state_key, ttl_minutes=ttl_minutes)
