@@ -170,3 +170,9 @@ def set_data(user_id: int, data: Dict[str, Any], *, state_key: str = DEFAULT_STA
     sys_part = {k: v for k, v in vars_dict.items() if k in _INTERNAL_KEYS}
     merged = {**sys_part, **(data or {})}
     _set_vars(user_id, merged, state_key=state_key, ttl_minutes=ttl_minutes)
+
+
+# ===== حذف كل حالة المستخدم فورًا (يمسح الصف) =====
+def purge_state(user_id: int, *, state_key: str = DEFAULT_STATE_KEY) -> None:
+    """Delete the entire state row for this user (no TTL, no leftovers)."""
+    _delete_row(user_id, state_key=state_key)
