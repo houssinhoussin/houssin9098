@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 # handlers/admin.py
 
 import re
 import logging
 from datetime import datetime, timedelta
 from telebot import types
+
 from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
@@ -25,14 +27,14 @@ from services.wallet_service import (
     add_purchase,
     add_balance,
     get_balance,
-    # ✅ إضافات write-through للجداول المتخصصة
+    # ✅ جداول متخصصة
     add_bill_or_units_purchase,
     add_internet_purchase,
     add_cash_transfer_purchase,
     add_companies_transfer_purchase,
     add_university_fees_purchase,
     add_ads_purchase,
-    # ✅ واجهات الحجز/التصفية الآمنة
+    # ✅ الحجز/التصفية الآمنة
     capture_hold,
     release_hold,
     get_product_by_id,
@@ -41,11 +43,19 @@ from services.wallet_service import (
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
 
+# ─────────────────────────────────────
+#   حالة داخلية
+# ─────────────────────────────────────
 _cancel_pending = {}
 _accept_pending = {}
 _msg_pending = {}
 
-# ---------- Helpers موحّدة ----------
+# ─────────────────────────────────────
+#   تنسيقات ونصوص
+# ─────────────────────────────────────
+BAND = "━━━━━━━━━━━━━━━━"
+CANCEL_HINT_ADMIN = "✋ اكتب /cancel لإلغاء الوضع الحالي."
+
 def _fmt_syp(n: int) -> str:
     try:
         return f"{int(n):,} ل.س"
@@ -88,20 +98,30 @@ def _insert_purchase_row(user_id: int, product_id, product_name: str, price: int
         logging.exception("insert purchases failed: %s", e)
 
 def _prompt_admin_note(bot, admin_id: int, user_id: int):
-    """يطلب من الأدمن كتابة ملاحظة لاحقة تُرسل للعميل (اختياري)."""
+    """يطلب من الأدمن كتابة ملاحظة تُرسل للعميل (اختياري)."""
     try:
         _accept_pending[admin_id] = user_id
         bot.send_message(
             admin_id,
-            "✍️ اكتب ملاحظة للعميل الآن (نص أو صورة)، أو اكتب /skip للتخطي.",
+            f"✍️ اكتب ملاحظة للعميل الآن (نص أو صورة)، أو اكتب /skip للتخطي.\n{CANCEL_HINT_ADMIN}",
         )
     except Exception:
         pass
 
+# ─────────────────────────────────────
+#   التسجيل
+# ─────────────────────────────────────
 def register(bot, history):
-    # تسجيل الهاندلرات للتحويلات
+    # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
+
+    # إلغاء لأي وضع إدخال للأدمن (/cancel)
+    @bot.message_handler(commands=['cancel'])
+    def _admin_cancel_any(msg: types.Message):
+        _msg_pending.pop(msg.from_user.id, None)
+        _accept_pending.pop(msg.from_user.id, None)
+        bot.reply_to(msg, "✅ تم الإلغاء.")
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and msg.from_user.id in ADMINS)
     def handle_done(msg):
@@ -116,9 +136,8 @@ def register(bot, history):
         bot.reply_to(msg, f"🚫 تم إلغاء الطلب {req_id}")
 
     # ────────────────────────────────────────────────
-    #  ✉️ رسالة/🖼️ صورة للعميل (حرّة بصيغة HTML + ترويسة موحّدة)
+    #  ✉️ رسالة/🖼️ صورة للعميل (HTML + ترويسة بسيطة)
     # ────────────────────────────────────────────────
-
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_message_")) and c.from_user.id in ADMINS)
     def cb_queue_message(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:message'):
@@ -129,7 +148,7 @@ def register(bot, history):
             return bot.answer_callback_query(c.id, "❌ الطلب غير موجود.")
         _msg_pending[c.from_user.id] = {"user_id": res.data[0]["user_id"], "mode": "text"}
         bot.answer_callback_query(c.id)
-        bot.send_message(c.from_user.id, "📝 اكتب رسالتك بصيغة HTML (أو /cancel لإلغاء).")
+        bot.send_message(c.from_user.id, f"📝 اكتب رسالتك بصيغة HTML.\n{CANCEL_HINT_ADMIN}")
 
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and c.from_user.id in ADMINS)
     def cb_queue_photo(c: types.CallbackQuery):
@@ -141,7 +160,7 @@ def register(bot, history):
             return bot.answer_callback_query(c.id, "❌ الطلب غير موجود.")
         _msg_pending[c.from_user.id] = {"user_id": res.data[0]["user_id"], "mode": "photo"}
         bot.answer_callback_query(c.id)
-        bot.send_message(c.from_user.id, "📷 أرسل الصورة الآن (مع كابتشن HTML إن حبيت) أو /cancel.")
+        bot.send_message(c.from_user.id, f"📷 أرسل الصورة الآن (مع كابتشن HTML إن حبيت).\n{CANCEL_HINT_ADMIN}")
 
     @bot.message_handler(func=lambda m: m.from_user.id in _msg_pending,
                          content_types=["text", "photo"])
@@ -151,12 +170,12 @@ def register(bot, history):
         if data["mode"] == "text":
             if m.content_type != "text":
                 return bot.reply_to(m, "❌ المطلوب نص فقط.")
-            bot.send_message(uid, f"📩 <b>رسالة من الإدارة</b>\n{m.text}", parse_mode="HTML")
+            bot.send_message(uid, f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{m.text}\n{BAND}", parse_mode="HTML")
         else:
             if m.content_type != "photo":
                 return bot.reply_to(m, "❌ المطلوب صورة فقط.")
             cap = m.caption or ""
-            bot.send_photo(uid, m.photo[-1].file_id, caption=f"📩 <b>رسالة من الإدارة</b>\n{cap}", parse_mode="HTML")
+            bot.send_photo(uid, m.photo[-1].file_id, caption=f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{cap}\n{BAND}", parse_mode="HTML")
         bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
 
     @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and call.from_user.id in ADMINS)
@@ -179,7 +198,7 @@ def register(bot, history):
         payload  = req.get("payload") or {}
         name     = _user_name(bot, user_id)
 
-        # حذف رسالة الأدمن
+        # حذف رسالة الأدمن (لو أمكن)
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception:
@@ -187,7 +206,7 @@ def register(bot, history):
 
         # === تأجيل الطلب ===
         if action == "postpone":
-            if not allowed(call.from_user.id, "queue:cancel"):
+            if not allowed(call.from_user.id, "queue:postpone"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             postpone_request(request_id)
             bot.send_message(user_id, f"⏳ يا {name}، رجّعنا طلبك لآخر الطابور. هنكمله أول ما نيجي عليه.")
@@ -221,21 +240,20 @@ def register(bot, history):
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
-            # ✍️ اطلب ملاحظة اختيارية بعد الإلغاء
             _prompt_admin_note(bot, call.from_user.id, user_id)
             return
 
         # === قبول الطلب ===
         if action == "accept":
-            typ      = payload.get("type")
+            typ      = (payload.get("type") or "").strip()
             hold_id  = payload.get("hold_id")
             amt      = _amount_from_payload(payload)
 
             if hold_id:
                 try:
                     r = capture_hold(hold_id)
-                    if getattr(r, "error", None) or not bool(r.data):
-                        logging.error("capture_hold failed: %s", getattr(r, "error", r.data))
+                    if getattr(r, "error", None) or not bool(getattr(r, "data", True)):
+                        logging.error("capture_hold failed: %s", getattr(r, "error", r))
                         return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز. أعد المحاولة.")
                 except Exception as e:
                     logging.exception("capture_hold exception: %s", e)
@@ -247,7 +265,6 @@ def register(bot, history):
                 player_id      = payload.get("player_id")
                 amt            = int(amt or payload.get("price", 0) or 0)
 
-                # استخدم اسم المنتج الحقيقي الممرَّر من الـpayload أولاً، ثم من الـDB، ثم fallback عام
                 product_name = (payload.get("product_name") or "").strip()
                 prod_obj = None
                 if not product_name and product_id_raw:
@@ -257,7 +274,6 @@ def register(bot, history):
                         prod_obj = None
                     if prod_obj and isinstance(prod_obj, dict):
                         product_name = (prod_obj.get("name") or "").strip()
-
                 if not product_name:
                     product_name = "منتج رقمي"
 
@@ -272,8 +288,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    "━━━━━━━━━━━━━━━━\n" + f"🎉 تمام يا {name}! تم تحويل {product_name} لآيدي «{_safe(player_id)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮" + "\n━━━━━━━━━━━━━━━━",
+                    f"{BAND}\n🎉 تمام يا {name}! تم تحويل «{product_name}» لآيدي «{_safe(player_id)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮\n{BAND}",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -281,21 +297,32 @@ def register(bot, history):
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
 
-            elif typ == "media":
+            # ——— إعلانات ———
+            elif typ in ("ads", "media"):
                 amt     = int(amt or payload.get("price", 0) or 0)
-                service = _safe(payload.get("service"), dash="").strip() or "خدمة ميديا"
-                _insert_purchase_row(user_id, None, service, amt, "")
+                times   = payload.get("count")
+                contact = payload.get("contact") or "—"
+                ad_text = payload.get("ad_text") or ""
+                images  = payload.get("images", [])
+
+                title = f"إعلان مدفوع × {times}" if times else "إعلان مدفوع"
+                _insert_purchase_row(user_id, None, title, amt, _safe(contact))
                 try:
-                    add_ads_purchase(user_id, ad_name=service, price=amt, channel_username=None)
+                    add_ads_purchase(user_id, ad_name=title, price=amt, channel_username=None)
                 except Exception:
                     pass
+
                 delete_pending_request(request_id)
+
+                # إرسال تأكيد للمستخدم
                 bot.send_message(
                     user_id,
-                    f"🎭 تمام يا {name}! تم تنفيذ «{service}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    f"{BAND}\n📣 تمام يا {name}! وتم تأكيد باقة الإعلان ({title}). "
+                    f"اتخصم {_fmt_syp(amt)} من محفظتك، وحننشرها حسب الجدولة.\n{BAND}",
                     parse_mode="HTML"
                 )
+                # (اختياري) لو عايز تنشر تلقائيًا استخدم add_channel_ad هنا
+
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
@@ -315,8 +342,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"✅ تمام يا {name}! تم تحويل {unit_name} للرقم «{_safe(num)}» "
-                    f"وتم خصم {_fmt_syp(price)} من محفظتك.",
+                    f"{BAND}\n✅ تمام يا {name}! تم تحويل {unit_name} للرقم «{_safe(num)}» "
+                    f"وتم خصم {_fmt_syp(price)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -338,8 +365,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"🧾 تمام يا {name}! تم دفع {label} للرقم «{_safe(num)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    f"{BAND}\n🧾 تمام يا {name}! تم دفع {label} للرقم «{_safe(num)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -363,8 +390,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"🌐 تمام يا {name}! تم دفع فاتورة الإنترنت ({name_lbl}) للرقم «{_safe(phone)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    f"{BAND}\n🌐 تمام يا {name}! تم دفع فاتورة الإنترنت ({name_lbl}) للرقم «{_safe(phone)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -387,8 +414,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"💸 تمام يا {name}! تم تحويل {name_lbl} للرقم «{_safe(number)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    f"{BAND}\n💸 تمام يا {name}! تم تنفيذ {name_lbl} للرقم «{_safe(number)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML",
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -411,8 +438,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"🏢 تمام يا {name}! تم تنفيذ {name_lbl} للمستفيد «{_safe(beneficiary_number)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    f"{BAND}\n🏢 تمام يا {name}! تم تنفيذ {name_lbl} للمستفيد «{_safe(beneficiary_number)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML",
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -420,7 +447,7 @@ def register(bot, history):
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
 
-            elif typ == "university_fees":
+            elif typ in ("university_fees",):
                 amt           = int(amt or payload.get("price", 0) or 0)
                 university    = _safe(payload.get("university"), dash="").strip()
                 university_id = payload.get("university_id")
@@ -435,8 +462,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"🎓 تمام يا {name}! تم دفع {name_lbl} للرقم الجامعي «{_safe(university_id)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    f"{BAND}\n🎓 تمام يا {name}! تم دفع {name_lbl} للرقم الجامعي «{_safe(university_id)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -458,7 +485,7 @@ def register(bot, history):
                 add_balance(user_id, amount, "شحن محفظة — من الإدارة")
                 delete_pending_request(request_id)
 
-                bot.send_message(user_id, f"⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉")
+                bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
@@ -479,10 +506,10 @@ def register(bot, history):
         if msg.text and msg.text.strip() == "/skip":
             bot.send_message(msg.chat.id, "✅ تم التخطي.")
         elif msg.content_type == "text":
-            bot.send_message(user_id, f"📝 <b>ملاحظة من الإدارة</b>\n{msg.text.strip()}", parse_mode="HTML")
+            bot.send_message(user_id, f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{msg.text.strip()}\n{BAND}", parse_mode="HTML")
             bot.send_message(msg.chat.id, "✅ أُرسلت الملاحظة للعميل.")
         elif msg.content_type == "photo":
-            bot.send_photo(user_id, msg.photo[-1].file_id, caption="📝 <b>ملاحظة من الإدارة</b>", parse_mode="HTML")
+            bot.send_photo(user_id, msg.photo[-1].file_id, caption=f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{BAND}", parse_mode="HTML")
             bot.send_message(msg.chat.id, "✅ أُرسلت الصورة للعميل.")
         else:
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم. ابعت نص أو صورة، أو /skip للتخطي.")
