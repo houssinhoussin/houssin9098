@@ -491,8 +491,8 @@ def register_bill_and_units(bot, history):
             bot.answer_callback_query(call.id, "❌ رصيد غير كافٍ")
             user_states.pop(user_id, None)
             return
-        deduct_balance(user_id, price)
-        bot.send_message(user_id, f"✅ تم شراء {state['unit']['name']} لوحدات MTN بنجاح.")
+        # (removed) الخصم يتم عبر capture_hold في لوحة الأدمن
+bot.send_message(user_id, f"✅ تم شراء {state['unit']['name']} لوحدات MTN بنجاح.")
         bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
         user_states.pop(user_id, None)
 
