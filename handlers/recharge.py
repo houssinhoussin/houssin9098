@@ -27,7 +27,8 @@ recharge_pending = set()
 MIN_RECHARGE = 15000
 
 SYRIATEL_NUMBERS = ["0011111", "0022222", "0033333", "0044444"]
-MTN_NUMBERS = ["0005555", "0006666", "0006666", "0007777"]
+# 🔧 إصلاح تكرار في القائمة
+MTN_NUMBERS = ["0005555", "0006666", "0007777"]
 SHAMCASH_CODES = ["000xz55XH55", "00YI06MB666"]
 PAYEER_CODES = ["0PPWY0777JG7"]
 
@@ -90,6 +91,7 @@ def get_method_instructions(method):
     return text
 
 def clear_pending_request(user_id):
+    """تُنادى من لوحة الأدمن بعد القبول/الإلغاء لتنظيف قفل الشحن المحلي."""
     recharge_pending.discard(user_id)
     recharge_requests.pop(user_id, None)
 
@@ -189,6 +191,18 @@ def register(bot, history):
             reply_markup=markup
         )
 
+    # دعم نداء عام لعرض طرق الشحن من أي شاشة (يستخدمه بعض المسارات)
+    @bot.callback_query_handler(func=lambda c: c.data == "show_recharge_methods")
+    def _show_recharge_methods_from_anywhere(call):
+        try:
+            bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
+        except Exception:
+            bot.send_message(call.message.chat.id, "💳 لعرض طرق الشحن، افتح قائمة الشحن من الرئيسية.")
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+
     @bot.callback_query_handler(func=lambda call: call.data in ["confirm_recharge_method", "cancel_recharge_method"])
     def handle_method_confirm_cancel(call):
         user_id = call.from_user.id
@@ -226,6 +240,9 @@ def register(bot, history):
         user_id = msg.from_user.id
         if user_id not in recharge_requests or "photo" in recharge_requests[user_id]:
             return
+        # Anti-spam بسيط
+        if too_soon(user_id, 'recharge_photo', seconds=1):
+            return
         photo_id = msg.photo[-1].file_id
         recharge_requests[user_id]["photo"] = photo_id
         name = _name_from_user(msg.from_user)
@@ -238,8 +255,12 @@ def register(bot, history):
         and "ref" not in recharge_requests[msg.from_user.id]
     )
     def get_reference(msg):
-        recharge_requests[msg.from_user.id]["ref"] = (msg.text or "").strip()
-        logging.info(f"[RECHARGE][{msg.from_user.id}] أرسل رقم الإشعار: {msg.text}")
+        user_id = msg.from_user.id
+        # Anti-spam خفيف
+        if too_soon(user_id, 'recharge_ref', seconds=1):
+            return
+        recharge_requests[user_id]["ref"] = (msg.text or "").strip()
+        logging.info(f"[RECHARGE][{user_id}] أرسل رقم الإشعار: {msg.text}")
         bot.send_message(msg.chat.id, _with_cancel("💰 ابعت مبلغ الشحن (بالليرة السورية):"), reply_markup=keyboards.recharge_menu())
 
     @bot.message_handler(
