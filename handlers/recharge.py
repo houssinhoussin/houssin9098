@@ -5,6 +5,9 @@ from handlers import keyboards  # ✅ الكيبورد الموحد
 from services.wallet_service import register_user_if_not_exist, get_balance  # ✅ إضافة get_balance لرسالة الأدمن
 from types import SimpleNamespace
 from services.queue_service import add_pending_request, process_queue
+from services.validators import parse_amount
+from services.telegram_safety import remove_inline_keyboard
+from services.anti_spam import too_soon
 import logging
 
 recharge_requests = {}
@@ -131,6 +134,10 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data in ["confirm_recharge_method", "cancel_recharge_method"])
     def handle_method_confirm_cancel(call):
         user_id = call.from_user.id
+        remove_inline_keyboard(bot, call.message)
+        if too_soon(user_id, 'handle_method_confirm_cancel', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم الاستلام..')
+        user_id = call.from_user.id
         name = _name_from_user(call.from_user)
         if call.data == "confirm_recharge_method":
             logging.info(f"[RECHARGE][{user_id}] أكد طريقة الشحن، بانتظار الصورة")
@@ -243,7 +250,8 @@ def register(bot, history):
         user_id = call.from_user.id
         name = _name_from_user(call.from_user)
 
-        if call.data == "user_confirm_recharge":
+        if call.data == \"user_confirm_recharge\":
+            remove_inline_keyboard(bot, call.message)
             data = recharge_requests.get(user_id)
             if not data:
                 logging.warning(f"[RECHARGE][{user_id}] تأكيد طلب شحن بدون بيانات")
