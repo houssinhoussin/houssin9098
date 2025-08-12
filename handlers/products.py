@@ -1,7 +1,8 @@
-# handlers/products.py
+# handlers/products.py                                                                                      # handlers/products.py
 
 from services.products_admin import get_product_active
 import logging
+import math
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
@@ -26,6 +27,7 @@ except Exception:
 BAND = "━━━━━━━━━━━━━━━━"
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 ETA_TEXT = "من 1 إلى 4 دقائق"
+PAGE_SIZE_PRODUCTS = 6  # ✅ عرض كل المنتجات بالصفحات بدلاً من ظهور 3 فقط
 
 def _name_from_user(u) -> str:
     n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
@@ -109,6 +111,46 @@ def _button_label(p: Product) -> str:
     except Exception:
         return f"{p.name}"
 
+def _build_products_keyboard(category: str, page: int = 0):
+    """لوحة منتجات مع صفحات + إبراز المنتجات الموقوفة."""
+    options = PRODUCTS.get(category, [])
+    total = len(options)
+    pages = max(1, math.ceil(total / PAGE_SIZE_PRODUCTS))
+    page = max(0, min(page, pages - 1))
+    start = page * PAGE_SIZE_PRODUCTS
+    end = start + PAGE_SIZE_PRODUCTS
+    slice_items = options[start:end]
+
+    kb = types.InlineKeyboardMarkup(row_width=2)
+
+    for p in slice_items:
+        try:
+            active = bool(get_product_active(p.product_id))
+        except Exception:
+            active = True
+        if active:
+            # زر عادي لاختيار المنتج
+            kb.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
+        else:
+            # نعرضه لكن كموقوف — ويعطي Alert عند الضغط
+            label = f"🔴 {p.name} — ${float(p.price):.2f} (موقوف)"
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"prod_inactive:{p.product_id}"))
+
+    # شريط تنقّل
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton("◀️", callback_data=f"prodpage:{category}:{page-1}"))
+    nav.append(types.InlineKeyboardButton(f"{page+1}/{pages}", callback_data="prodnoop"))
+    if page < pages - 1:
+        nav.append(types.InlineKeyboardButton("▶️", callback_data=f"prodpage:{category}:{page+1}"))
+    if nav:
+        kb.row(*nav)
+
+    # أزرار مساعدة مختصرة
+    kb.add(types.InlineKeyboardButton("💳 طرق الدفع/الشحن", callback_data="show_recharge_methods"))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
+    return kb, pages
+
 # ================= واجهات العرض =================
 
 def show_products_menu(bot, message):
@@ -122,13 +164,13 @@ def show_game_categories(bot, message):
     bot.send_message(message.chat.id, txt, reply_markup=keyboards.game_categories())
 
 def show_product_options(bot, message, category):
-    options = PRODUCTS.get(category, [])
-    keyboard = types.InlineKeyboardMarkup(row_width=2)
-    # اسم الزر = اسم المنتج + سعره بالدولار
-    for p in options:
-        keyboard.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
-    keyboard.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
-    bot.send_message(message.chat.id, _with_cancel(f"📦 منتجات {category}: اختار اللي على مزاجك 😎"), reply_markup=keyboard)
+    # ⬅️ الآن مع صفحات + عرض كل المنتجات (حتى الموقوفة بعلامة 🔴)
+    keyboard, pages = _build_products_keyboard(category, page=0)
+    bot.send_message(
+        message.chat.id,
+        _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
+        reply_markup=keyboard
+    )
 
 # ================= خطوات إدخال آيدي اللاعب =================
 
@@ -274,12 +316,76 @@ def setup_inline_handlers(bot, admin_ids):
         msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
 
+    # ✅ عرض صفحة جديدة من المنتجات
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("prodpage:"))
+    def _paginate_products(call):
+        try:
+            _, category, page_str = call.data.split(":", 2)
+            page = int(page_str)
+        except Exception:
+            return bot.answer_callback_query(call.id)
+        kb, pages = _build_products_keyboard(category, page=page)
+        try:
+            bot.edit_message_text(
+                _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎"),
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=kb
+            )
+        except Exception:
+            bot.send_message(
+                call.message.chat.id,
+                _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎"),
+                reply_markup=kb
+            )
+        bot.answer_callback_query(call.id)
+
+    # ✅ ضغط على منتج موقوف — نعطي تنبيه فقط
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("prod_inactive:"))
+    def _inactive_alert(call):
+        pid = int(call.data.split(":", 1)[1])
+        # العثور على الاسم للرسالة
+        name = None
+        for items in PRODUCTS.values():
+            for p in items:
+                if p.product_id == pid:
+                    name = p.name
+                    break
+            if name:
+                break
+        bot.answer_callback_query(call.id, _unavailable_short(name or "المنتج"), show_alert=True)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "prodnoop")
+    def _noop(call):
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "show_recharge_methods")
+    def _show_recharge(call):
+        try:
+            bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
+        except Exception:
+            bot.send_message(call.message.chat.id, "💳 لعرض طرق الشحن، افتح قائمة الشحن من الرئيسية.")
+        bot.answer_callback_query(call.id)
+
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
         user_id = call.from_user.id
         category = user_orders.get(user_id, {}).get("category")
         if category:
-            show_product_options(bot, call.message, category)
+            kb, pages = _build_products_keyboard(category, page=0)
+            try:
+                bot.edit_message_text(
+                    _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=kb
+                )
+            except Exception:
+                bot.send_message(
+                    call.message.chat.id,
+                    _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
+                    reply_markup=kb
+                )
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
@@ -325,6 +431,8 @@ def setup_inline_handlers(bot, admin_ids):
         # تحقق الرصيد (المتاح فقط)
         available = get_available_balance(user_id)
         if available < price_syp:
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("💳 طرق الدفع/الشحن", callback_data="show_recharge_methods"))
             bot.send_message(
                 user_id,
                 _card(
@@ -334,7 +442,8 @@ def setup_inline_handlers(bot, admin_ids):
                         f"السعر: {_fmt_syp(price_syp)}",
                         "🧾 اشحن المحفظة وبعدين جرّب تاني."
                     ]
-                )
+                ),
+                reply_markup=kb
             )
             return
 
