@@ -11,6 +11,9 @@ from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
 import logging
 
+# NEW: بنفحص الطابور الفعلي
+from database.db import get_table
+
 # حارس التأكيد الموحّد: يحذف الكيبورد + يعمل Debounce
 try:
     from services.ui_guards import confirm_guard
@@ -90,6 +93,28 @@ def clear_pending_request(user_id):
     recharge_pending.discard(user_id)
     recharge_requests.pop(user_id, None)
 
+# NEW: هل لدى المستخدم طلب شحن مفتوح فعليًا في الطابور؟
+def has_open_recharge(user_id: int) -> bool:
+    try:
+        res = (
+            get_table("pending_requests")
+            .select("id, payload")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        for row in (res.data or []):
+            typ = (row.get("payload") or {}).get("type")
+            if typ in ("recharge", "wallet_recharge", "deposit"):
+                return True
+    except Exception as e:
+        logging.exception("[RECHARGE] has_open_recharge failed: %s", e)
+    return False
+
+# NEW: تنظيف ذاتي لو set فيها بقايا قديمة
+def _heal_local_lock(user_id: int):
+    if user_id in recharge_pending and not has_open_recharge(user_id):
+        recharge_pending.discard(user_id)
+
 def start_recharge_menu(bot, message, history=None):
     uid = message.from_user.id
 
@@ -138,7 +163,12 @@ def register(bot, history):
     def request_invoice(msg):
         user_id = msg.from_user.id
         name = _name_from_user(msg.from_user)
-        if user_id in recharge_pending:
+
+        # NEW: شيل القفل المحلي لو مفيش طلب فعلي مفتوح
+        _heal_local_lock(user_id)
+
+        # NEW: اسمح بالبدء فقط لو مفيش طلب شحن فعلي مفتوح ولا قفل محلي
+        if user_id in recharge_pending or has_open_recharge(user_id):
             logging.warning(f"[RECHARGE][{user_id}] محاولة شحن جديدة أثناء وجود طلب معلق")
             bot.send_message(msg.chat.id, _with_cancel(f"⚠️ يا {name}، عندك طلب شحن قيد المعالجة. استنى شوية لو سمحت."))
             return
