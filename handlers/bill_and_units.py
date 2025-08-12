@@ -312,10 +312,6 @@ def register_bill_and_units(bot, history):
         name = _user_name(call)
 
         # منع الطلب المتزامن
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id, f"⌛ يا {name}، عندك طلب قيد المراجعة. استنى ثواني لحد ما نخلصه.")
-
         state = user_states.get(user_id, {})
         unit = state.get("unit") or {}
         number = state.get("number")
@@ -323,13 +319,13 @@ def register_bill_and_units(bot, history):
         unit_name  = unit.get("name") or "وحدات سيرياتيل"
 
         # التحقق من الرصيد ثم الحجز
-        balance = get_balance(user_id)
-        if balance < price:
+        available = get_available_balance(user_id)
+        if available < price:
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("💼 الذهاب للمحفظة", "go_wallet"))
-            missing = price - (balance or 0)
+            missing = price - (available or 0)
             bot.send_message(
                 call.message.chat.id,
-                f"❌ يا {name}، رصيدك مش مكفّي.\nرصيدك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(price)}\nالناقص: {_fmt_syp(missing)}",
+                f"❌ يا {name}، رصيدك مش مكفّي.\nمتاحك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(price)}\nالناقص: {_fmt_syp(missing)}",
                 reply_markup=kb
             )
             user_states.pop(user_id, None)
@@ -338,8 +334,8 @@ def register_bill_and_units(bot, history):
         # ✅ حجز
         hold_id = None
         try:
-            res = create_hold(user_id, price, f"حجز وحدات سيرياتيل - {unit_name}")
-            hold_id = (res.data[0]["id"] if getattr(res, "data", None) else res.get("id"))
+            resp = create_hold(user_id, price, f"حجز وحدات سيرياتيل - {unit_name}")
+            hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
         except Exception as e:
             logging.exception("create_hold failed: %s", e)
 
@@ -426,23 +422,19 @@ def register_bill_and_units(bot, history):
         user_id = call.from_user.id
         name = _user_name(call)
 
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id, f"⌛ يا {name}، عندك طلب قيد المراجعة. استنى ثواني لحد ما نخلصه.")
-
         state = user_states.get(user_id, {})
         unit = state.get("unit") or {}
         number = state.get("number")
         price = int(unit.get("price") or 0)
         unit_name  = unit.get("name") or "وحدات MTN"
 
-        balance = get_balance(user_id)
-        if balance < price:
+        available = get_available_balance(user_id)
+        if available < price:
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("💼 الذهاب للمحفظة", "go_wallet"))
-            missing = price - (balance or 0)
+            missing = price - (available or 0)
             bot.send_message(
                 call.message.chat.id,
-                f"❌ يا {name}، رصيدك مش مكفّي.\nرصيدك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(price)}\nالناقص: {_fmt_syp(missing)}",
+                f"❌ يا {name}، رصيدك مش مكفّي.\nمتاحك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(price)}\nالناقص: {_fmt_syp(missing)}",
                 reply_markup=kb
             )
             user_states.pop(user_id, None)
@@ -450,8 +442,8 @@ def register_bill_and_units(bot, history):
 
         hold_id = None
         try:
-            res = create_hold(user_id, price, f"حجز وحدات MTN - {unit_name}")
-            hold_id = (res.data[0]["id"] if getattr(res, "data", None) else res.get("id"))
+            resp = create_hold(user_id, price, f"حجز وحدات MTN - {unit_name}")
+            hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
         except Exception as e:
             logging.exception("create_hold failed: %s", e)
 
@@ -492,10 +484,10 @@ def register_bill_and_units(bot, history):
         user_id = int(call.data.split("_")[-1])
         state = user_states.get(user_id, {})
         price = state.get("unit", {}).get("price", 0)
-        balance = get_balance(user_id)
-        if balance < price:
+        available = get_available_balance(user_id)
+        if available < price:
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("💼 الذهاب للمحفظة", "go_wallet"))
-            bot.send_message(user_id, f"❌ لا يوجد رصيد كافٍ.\nرصيدك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(price)}\nالناقص: {_fmt_syp(price-balance)}", reply_markup=kb)
+            bot.send_message(user_id, f"❌ لا يوجد رصيد كافٍ.\nمتاحك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(price)}\nالناقص: {_fmt_syp(price-balance)}", reply_markup=kb)
             bot.answer_callback_query(call.id, "❌ رصيد غير كافٍ")
             user_states.pop(user_id, None)
             return
@@ -579,21 +571,17 @@ def register_bill_and_units(bot, history):
         user_id = call.from_user.id
         name = _user_name(call)
 
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id, f"⌛ يا {name}، عندك طلب قيد المراجعة. استنى ثواني لحد ما نخلصه.")
-
         state = user_states.get(user_id, {})
         number = state.get("number")
         amount = int(state.get("amount") or 0)
         total  = int(state.get("amount_with_fee") or amount)
 
-        balance = get_balance(user_id)
-        if balance < total:
+        available = get_available_balance(user_id)
+        if available < total:
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("💼 المحفظة", "go_wallet"))
             bot.send_message(
                 call.message.chat.id,
-                f"❌ يا {name}، رصيدك مش مكفّي.\nرصيدك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(total)}\nالناقص: {_fmt_syp(total-balance)}",
+                f"❌ يا {name}، رصيدك مش مكفّي.\nمتاحك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(total)}\nالناقص: {_fmt_syp(total-balance)}",
                 reply_markup=kb
             )
             user_states.pop(user_id, None)
@@ -601,8 +589,8 @@ def register_bill_and_units(bot, history):
 
         hold_id = None
         try:
-            res = create_hold(user_id, total, f"حجز فاتورة سيرياتيل للرقم {number}")
-            hold_id = (res.data[0]["id"] if getattr(res, "data", None) else res.get("id"))
+            resp = create_hold(user_id, total, f"حجز فاتورة سيرياتيل للرقم {number}")
+            hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
         except Exception as e:
             logging.exception("create_hold failed: %s", e)
 
@@ -713,21 +701,17 @@ def register_bill_and_units(bot, history):
         user_id = call.from_user.id
         name = _user_name(call)
 
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.send_message(call.message.chat.id, f"⌛ يا {name}، عندك طلب قيد المراجعة. استنى ثواني لحد ما نخلصه.")
-
         state = user_states.get(user_id, {})
         number = state.get("number")
         amount = int(state.get("amount") or 0)
         total  = int(state.get("amount_with_fee") or amount)
 
-        balance = get_balance(user_id)
-        if balance < total:
+        available = get_available_balance(user_id)
+        if available < total:
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("💼 المحفظة", "go_wallet"))
             bot.send_message(
                 call.message.chat.id,
-                f"❌ يا {name}، رصيدك مش مكفّي.\nرصيدك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(total)}\nالناقص: {_fmt_syp(total-balance)}",
+                f"❌ يا {name}، رصيدك مش مكفّي.\nمتاحك: {_fmt_syp(balance)}\nالمطلوب: {_fmt_syp(total)}\nالناقص: {_fmt_syp(total-balance)}",
                 reply_markup=kb
             )
             user_states.pop(user_id, None)
@@ -735,8 +719,8 @@ def register_bill_and_units(bot, history):
 
         hold_id = None
         try:
-            res = create_hold(user_id, total, f"حجز فاتورة MTN للرقم {number}")
-            hold_id = (res.data[0]["id"] if getattr(res, "data", None) else res.get("id"))
+            resp = create_hold(user_id, total, f"حجز فاتورة MTN للرقم {number}")
+            hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
         except Exception as e:
             logging.exception("create_hold failed: %s", e)
 
