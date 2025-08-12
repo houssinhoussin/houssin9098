@@ -135,10 +135,6 @@ def register(bot):
             return bot.answer_callback_query(call.id, "خيار غير صالح.", show_alert=True)
 
         # منع الطلبات المتزامنة
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.answer_callback_query(call.id, f"❌ يا {name}، عندك طلب شغّال دلوقتي. استنى لما يخلص.", show_alert=True)
-
         user_net_state[user_id] = {"step": "choose_speed", "provider": provider}
         bot.edit_message_text(
             chat_id=call.message.chat.id,
@@ -259,11 +255,7 @@ def register(bot):
         total = price + comm
 
         # منع الطلبات المتزامنة
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.answer_callback_query(call.id, f"❌ يا {name}، عندك طلب شغّال دلوقتي. استنى لما يخلص.", show_alert=True)
-
-        balance = get_balance(user_id)
+        balance = get_available_balance(user_id)
         if balance < total:
             missing = total - balance
             return bot.answer_callback_query(
