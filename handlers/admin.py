@@ -281,9 +281,8 @@ def register(bot, history):
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
 
-            
             elif typ == "media":
-                amt   = int(amt or payload.get("price", 0) or 0)
+                amt     = int(amt or payload.get("price", 0) or 0)
                 service = _safe(payload.get("service"), dash="").strip() or "خدمة ميديا"
                 _insert_purchase_row(user_id, None, service, amt, "")
                 try:
@@ -301,7 +300,8 @@ def register(bot, history):
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
-elif typ in ("syr_unit", "mtn_unit"):
+
+            elif typ in ("syr_unit", "mtn_unit"):
                 price = int(payload.get("price", 0) or amt or 0)
                 num   = payload.get("number")
                 unit_name = payload.get("unit_name") or "وحدات"
