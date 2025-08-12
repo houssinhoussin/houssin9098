@@ -51,8 +51,8 @@ from services.queue_service import add_pending_request, process_queue
 import math  # لإدارة صفحات الكيبورد
 import logging
 
-user_states = {}
-
+from services.state_adapter import UserStateDictLike
+user_states = UserStateDictLike()
 CASH_TYPES = [
     "تحويل إلى سيرياتيل كاش",
     "تحويل إلى أم تي إن كاش",
