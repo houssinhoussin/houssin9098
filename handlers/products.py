@@ -257,10 +257,6 @@ def setup_inline_handlers(bot, admin_ids):
         if not order or "product" not in order or "player_id" not in order:
             return bot.answer_callback_query(call.id, f"❌ {name}، الطلب مش كامل. كمّل البيانات الأول.")
 
-        # ✅ منع ازدواج الطلب
-        if has_pending_request(user_id):
-            return bot.answer_callback_query(call.id, f"⏳ {name}، عندك طلب جاري. نكمّله وبعدين ابعت الجديد.")
-
         product   = order["product"]
         player_id = order["player_id"]
         price_syp = convert_price_usd_to_syp(product.price)
@@ -344,7 +340,7 @@ def setup_inline_handlers(bot, admin_ids):
             user_id,
             f"✅ تمام يا {name}! بعتنا طلبك للإدارة.\n"
             f"⏱️ سيتم تنفيذ الطلب {ETA_TEXT}.\n"
-            f"ℹ️ لحد ما نخلّص الطلب ده، مش هتقدر تبعت طلب جديد.\n"
+            f"ℹ️ لو حابب تطلب كمان، خد راحتك — بنشتغل كل طلب لوحده 😉\n"
             f"📦 تفاصيل سريعة: حجزنا {_fmt_syp(price_syp)} لطلب «{product.name}» لآيدي اللاعب «{player_id}».",
         )
         process_queue(bot)
