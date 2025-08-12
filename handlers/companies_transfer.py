@@ -53,8 +53,8 @@ from handlers import keyboards
 from services.queue_service import add_pending_request, process_queue
 import logging
 
-user_states = {}
-
+from services.state_adapter import UserStateDictLike
+user_states = UserStateDictLike()
 COMMISSION_PER_50000 = 1500
 
 # ===== مظهر الرسائل + /cancel =====
