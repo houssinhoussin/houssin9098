@@ -257,13 +257,6 @@ def register(bot, history):
         name = _name_of(call.from_user)
 
         # منع ازدواج الطلبات
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            return bot.edit_message_text(
-                f"⏳ يا {name}، عندك طلب شغال بالفعل. استنى نخلّصه وبعدين ابعت الجديد.",
-                call.message.chat.id, call.message.message_id
-            )
-
         data = user_states.get(user_id, {}) or {}
         number = data.get("number")
         cash_type = data.get("cash_type")
@@ -272,15 +265,15 @@ def register(bot, history):
         total = int(data.get('total') or 0)
 
         # فحص الرصيد
-        balance = get_balance(user_id)
-        if balance is None:
+        available = get_available_balance(user_id)
+        if available is None:
             return bot.edit_message_text("❌ حصل خطأ في جلب الرصيد. جرّب تاني.", call.message.chat.id, call.message.message_id)
 
-        if balance < total:
+        if available < total:
             shortage = total - balance
             kb = make_inline_buttons(("💳 شحن المحفظة", "recharge_wallet"), ("⬅️ رجوع", "commission_cancel"))
             return bot.edit_message_text(
-                f"❌ يا {name}، رصيدك الحالي {_fmt(balance)} والمطلوب {_fmt(total)}.\n"
+                f"❌ يا {name}، متاحك الحالي {_fmt(available)} والمطلوب {_fmt(total)}.\n"
                 f"نقصك {_fmt(shortage)} — كمّل شحن ونمشي الطلب سِكة سريعة 😉",
                 call.message.chat.id, call.message.message_id,
                 reply_markup=kb
@@ -293,7 +286,8 @@ def register(bot, history):
             logging.error(f"[CASH][{user_id}] create_hold failed: {getattr(r, 'error', r)}")
             return bot.edit_message_text("❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.", call.message.chat.id, call.message.message_id)
 
-        hold_id = r.data.get("id") or r.data.get("hold_id") or r.data.get("hold") or None
+        data = getattr(r, "data", None)
+        hold_id = (data if isinstance(data, str) else (data.get("id") if isinstance(data, dict) else None))
         # رصيد بعد الحجز (لو متوفر)
         try:
             balance_after = get_balance(user_id)
@@ -339,7 +333,7 @@ def register(bot, history):
         bot.edit_message_text(
             f"📨 تمام يا {name}! تم إرسال طلبك للإدارة.\n"
             f"⏱️ التنفيذ عادةً خلال 1–4 دقايق.\n"
-            f"ℹ️ ملاحظة: مش هتقدر تبعت طلب جديد لحد ما نخلّص الحالي.",
+            f"ℹ️ ملاحظة: تقدر تبعت طلب جديد لحد ما نخلّص الحالي.",
             call.message.chat.id, call.message.message_id
         )
         user_states[user_id]["step"] = "waiting_admin"
