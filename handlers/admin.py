@@ -272,8 +272,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"🎉 تمام يا {name}! تم تحويل {product_name} لآيدي «{_safe(player_id)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮",
+                    "━━━━━━━━━━━━━━━━\n" + f"🎉 تمام يا {name}! تم تحويل {product_name} لآيدي «{_safe(player_id)}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮" + "\n━━━━━━━━━━━━━━━━",
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -281,7 +281,27 @@ def register(bot, history):
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
 
-            elif typ in ("syr_unit", "mtn_unit"):
+            
+            elif typ == "media":
+                amt   = int(amt or payload.get("price", 0) or 0)
+                service = _safe(payload.get("service"), dash="").strip() or "خدمة ميديا"
+                _insert_purchase_row(user_id, None, service, amt, "")
+                try:
+                    add_ads_purchase(user_id, ad_name=service, price=amt, channel_username=None)
+                except Exception:
+                    pass
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"🎭 تمام يا {name}! تم تنفيذ «{service}» "
+                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.",
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
+                queue_cooldown_start(bot)
+                _prompt_admin_note(bot, call.from_user.id, user_id)
+                return
+elif typ in ("syr_unit", "mtn_unit"):
                 price = int(payload.get("price", 0) or amt or 0)
                 num   = payload.get("number")
                 unit_name = payload.get("unit_name") or "وحدات"
