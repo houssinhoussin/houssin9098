@@ -9,6 +9,7 @@ from services.validators import parse_amount
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
 import logging
+from validators import parse_amount
 
 recharge_requests = {}
 recharge_pending = set()
@@ -195,7 +196,7 @@ def register(bot, history):
             )
             return
 
-        amount = int(amount_text)
+        amount = parse_amount(amount_text, min_value=MIN_RECHARGE)
         # ✅ رفض مبكر قبل إرسال الطلب للأدمن/الطابور
         if amount < MIN_RECHARGE:
             bot.send_message(
