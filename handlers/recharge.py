@@ -269,7 +269,7 @@ def register(bot, history):
             register_user_if_not_exist(user_id, name)
             balance = 0
             try:
-                balance = int(get_balance(user_id))
+                balance = int(get_available_balance(user_id))
             except Exception:
                 pass
 
