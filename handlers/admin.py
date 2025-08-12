@@ -10,7 +10,7 @@ from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
 from services.state_service import purge_state
-from services.products_admin import set_product_active, get_product_active
+from services.products_admin import set_product_active, get_product_active, bulk_ensure_products
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
 from services.activity_logger import log_action
@@ -46,6 +46,9 @@ from handlers import cash_transfer, companies_transfer
 
 # لقراءة المجموعات/الملفات والمنتجات المعروضة للمستخدمين
 from handlers.products import PRODUCTS
+
+# لوحة المزايا (المحفظة وطرق الشحن…)
+from services.feature_flags import ensure_seed, list_features, set_feature_active
 
 # محاولة استيراد منظّم الشحن لإزالة القفل المحلي بعد القبول/الإلغاء (استيراد كسول وآمن)
 try:
@@ -201,12 +204,40 @@ def _admin_product_actions_markup(pid: int):
     return kb
 
 # ─────────────────────────────────────
+#   لوحة المزايا (Feature Flags)
+# ─────────────────────────────────────
+def _features_markup():
+    items = list_features()
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if not items:
+        kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
+        return kb
+    for it in items:
+        k, label = it.get("key"), it.get("label")
+        active = bool(it.get("active", True))
+        lamp = "🟢" if active else "🔴"
+        to = 0 if active else 1
+        kb.add(
+            types.InlineKeyboardButton(
+                text=f"{lamp} {label}",
+                callback_data=f"adm_feat_t:{k}:{to}"
+            )
+        )
+    return kb
+
+# ─────────────────────────────────────
 #   التسجيل
 # ─────────────────────────────────────
 def register(bot, history):
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
+
+    # زرع مزايا افتراضية (مرة عند الإقلاع)
+    try:
+        ensure_seed()
+    except Exception:
+        pass
 
     # إلغاء لأي وضع إدخال للأدمن (/cancel)
     @bot.message_handler(commands=['cancel'])
@@ -644,7 +675,8 @@ def register(bot, history):
         if msg.from_user.id not in ADMINS:
             return bot.reply_to(msg, "صلاحية الأدمن فقط.")
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.row("🛒 إدارة المنتجات", "📊 تقارير سريعة", "⏳ طابور الانتظار")
+        kb.row("🛒 إدارة المنتجات", "🧩 تشغيل/إيقاف المزايا")
+        kb.row("📊 تقارير سريعة", "⏳ طابور الانتظار")
         kb.row("⚙️ النظام", "⬅️ رجوع")
         bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
 
@@ -652,6 +684,7 @@ def register(bot, history):
     def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.row("🚫 إيقاف منتج", "✅ تشغيل منتج")
+        kb.row("🔄 مزامنة المنتجات (DB)")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
 
@@ -659,6 +692,20 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and m.from_user.id in ADMINS)
     def admin_products_browser(m):
         bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
+
+    # 🔄 مزامنة كل المنتجات المعرفة في PRODUCTS إلى جدول products
+    @bot.message_handler(func=lambda m: m.text == "🔄 مزامنة المنتجات (DB)" and m.from_user.id in ADMINS)
+    def seed_products(m):
+        try:
+            items = []
+            for group, arr in PRODUCTS.items():
+                for p in arr:
+                    items.append((p.product_id, p.name, group))
+            created = bulk_ensure_products(items)
+            bot.reply_to(m, f"✅ تمت المزامنة.\nأُنشئ/تأكّد {created} صف(ًا).")
+        except Exception as e:
+            logging.exception("[ADMIN] bulk ensure products failed: %s", e)
+            bot.reply_to(m, "❌ فشلت المزامنة. تفقد السجلات.")
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_g:") and c.from_user.id in ADMINS)
     def adm_group_open(call: types.CallbackQuery):
@@ -711,6 +758,24 @@ def register(bot, history):
         except Exception:
             bot.send_message(call.message.chat.id, txt, reply_markup=_admin_product_actions_markup(pid))
         bot.answer_callback_query(call.id, "تم التحديث.")
+
+    # ===== لوحة المزايا (Feature Flags) =====
+    @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and m.from_user.id in ADMINS)
+    def features_menu(m):
+        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup())
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
+    def adm_feature_toggle(call: types.CallbackQuery):
+        _, key, to = call.data.split(":")
+        ok = set_feature_active(key, bool(int(to)))
+        if not ok:
+            return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
+        # تحديث اللوحة الحالية
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=_features_markup())
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
     def quick_reports(m):
