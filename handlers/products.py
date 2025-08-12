@@ -5,7 +5,12 @@ import logging
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
-from services.wallet_service import register_user_if_not_exist, get_balance, get_available_balance, create_hold
+from services.wallet_service import (
+    register_user_if_not_exist,
+    get_balance,
+    get_available_balance,
+    create_hold,   # ✅ حجز ذرّي
+)
 from config import BOT_NAME
 from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
@@ -25,11 +30,11 @@ def _fmt_syp(n: int) -> str:
 
 ETA_TEXT = "من 1 إلى 4 دقائق"
 
-# حالة الطلبات لكل مستخدم
+# حالة الطلبات لكل مستخدم (للخطوات فقط، مش منع تعدد الطلبات)
 user_orders = {}
 
 def has_pending_request(user_id: int) -> bool:
-    """ترجع True إذا كان لدى المستخدم طلب قيد الانتظار."""
+    """ترجع True إذا كان لدى المستخدم طلب قيد الانتظار (موجودة للتوافق؛ مش بنمنع تعدد الطلبات)."""
     res = (
         get_table("pending_requests")
         .select("id")
@@ -74,11 +79,12 @@ def convert_price_usd_to_syp(usd):
         return int(usd * 11300)
     return int(usd * 11000)
 
-def _fmt_usd(x):
+def _button_label(p: Product) -> str:
+    # اسم الزر + السعر بالدولار
     try:
-        return f"${float(x):.2f}"
+        return f"{p.name} — ${float(p.price):.2f}"
     except Exception:
-        return f"${x}"
+        return f"{p.name}"
 
 # ================= واجهات العرض =================
 
@@ -93,11 +99,9 @@ def show_game_categories(bot, message):
 def show_product_options(bot, message, category):
     options = PRODUCTS.get(category, [])
     keyboard = types.InlineKeyboardMarkup(row_width=2)
-    # اسم الزر = اسم المنتج + السعر بالدولار
+    # اسم الزر = اسم المنتج + سعره بالدولار
     for p in options:
-        usd = f"{p.price:.2f}".rstrip("0").rstrip(".")
-        label = f"{p.name} — {usd}$"
-        keyboard.add(types.InlineKeyboardButton(label, callback_data=f"select_{p.product_id}"))
+        keyboard.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
     keyboard.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
     bot.send_message(message.chat.id, f"📦 منتجات {category}: اختار اللي على مزاجك 😎", reply_markup=keyboard)
 
@@ -132,8 +136,8 @@ def handle_player_id(message, bot):
             f"• الفئة: {product.category}\n"
             f"• السعر: {_fmt_syp(price_syp)}\n"
             f"• آيدي اللاعب: {player_id}\n\n"
-            f"هنبعت الطلب للإدارة والخصم هيتم بعد الموافقة.\n"
-            f"بعد التأكيد مش هتقدر تبعت طلب جديد غير لما نخلّص الحالي."
+            f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.\n"
+            f"تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
         ),
         reply_markup=keyboard
     )
@@ -263,6 +267,7 @@ def setup_inline_handlers(bot, admin_ids):
         if not order or "product" not in order or "player_id" not in order:
             return bot.answer_callback_query(call.id, f"❌ {name}، الطلب مش كامل. كمّل البيانات الأول.")
 
+        # ❌ (تم إزالة منع تعدد الطلبات)
         product   = order["product"]
         player_id = order["player_id"]
         price_syp = convert_price_usd_to_syp(product.price)
@@ -283,10 +288,11 @@ def setup_inline_handlers(bot, admin_ids):
             )
             return
 
-        # ✅ حجز المبلغ فعليًا عبر RPC
+        # ✅ حجز المبلغ فعليًا (HOLD)
         hold_id = None
         try:
-            resp = create_hold(user_id, price_syp)  # TTL الافتراضي
+            # لو دالتك بتقبل وصف، هنمرّر وصف واضح؛ لو لا، البارامتر الزائد يتجاهَل حسب تنفيذك
+            resp = create_hold(user_id, price_syp, f"حجز شراء — {product.name} — آيدي {player_id}")
             if getattr(resp, "error", None):
                 err_msg = str(resp.error).lower()
                 if "insufficient_funds" in err_msg or "amount must be > 0" in err_msg:
@@ -300,7 +306,13 @@ def setup_inline_handlers(bot, admin_ids):
                 logging.error("create_hold RPC error: %s", resp.error)
                 bot.send_message(user_id, f"❌ يا {name}، حصل خطأ بسيط أثناء الحجز. جرّب كمان شوية.")
                 return
-            hold_id = resp.data  # UUID
+            data = getattr(resp, "data", None)
+            if isinstance(data, dict):
+                hold_id = data.get("id") or data.get("hold_id")
+            elif isinstance(data, (list, tuple)) and data:
+                hold_id = data[0].get("id") if isinstance(data[0], dict) else data[0]
+            else:
+                hold_id = data
             if not hold_id:
                 bot.send_message(user_id, f"❌ يا {name}، مش قادرين ننشئ الحجز دلوقتي. حاول تاني.")
                 return
@@ -312,9 +324,7 @@ def setup_inline_handlers(bot, admin_ids):
         # عرض الرصيد الحالي في رسالة الأدمن
         balance = get_balance(user_id)
 
-        BANNER_TOP = "━━━━━━━━━━━━━━━━\n"
-BANNER_BOT = "\n━━━━━━━━━━━━━━━━"
-admin_msg = (BANNER_TOP + 
+        admin_msg = (
             f"💰 رصيد المستخدم: {balance:,} ل.س\n"
             f"🆕 طلب جديد\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
@@ -327,7 +337,7 @@ admin_msg = (BANNER_TOP +
             f"(select_{product.product_id})"
         )
 
-        # تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
+        # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
@@ -335,7 +345,7 @@ admin_msg = (BANNER_TOP +
             payload={
                 "type": "order",
                 "product_id": product.product_id,
-                "product_name": product.name,   # ✅ مهم لرسالة التنفيذ
+                "product_name": product.name,   # مهم لرسالة التنفيذ باسم المنتج
                 "player_id": player_id,
                 "price": price_syp,
                 "reserved": price_syp,
@@ -347,8 +357,8 @@ admin_msg = (BANNER_TOP +
         bot.send_message(
             user_id,
             f"✅ تمام يا {name}! بعتنا طلبك للإدارة.\n"
-            f"⏱️ سيتم تنفيذ الطلب {ETA_TEXT}.\n"
-            f"ℹ️ لو حابب تطلب كمان، خد راحتك — بنشتغل كل طلب لوحده 😉\n"
+            f"⏱️ التنفيذ {ETA_TEXT}.\n"
+            f"ℹ️ تقدر تبعت طلبات تانية — بنسحب من المتاح بس.\n"
             f"📦 تفاصيل سريعة: حجزنا {_fmt_syp(price_syp)} لطلب «{product.name}» لآيدي اللاعب «{player_id}».",
         )
         process_queue(bot)
@@ -356,7 +366,5 @@ admin_msg = (BANNER_TOP +
 # ================= نقطة التسجيل من main.py =================
 
 def register(bot, history, admin_ids=None):
-    global _MAINTENANCE_NOTICE
-    _MAINTENANCE_NOTICE = True
     register_message_handlers(bot, history)
     setup_inline_handlers(bot, admin_ids=admin_ids or [])
