@@ -21,6 +21,14 @@ from services.wallet_service import (
     get_available_balance,       # ✅ المتاح = balance - held
 )
 from services.queue_service import add_pending_request
+
+# --- تنسيقات كروت العرض ---
+def _card_header(title: str) -> str:
+    return f"🔥 <b>{title}</b>
+━━━━━━━━━━━━━━━━"
+def _card_footer() -> str:
+    return "━━━━━━━━━━━━━━━━"
+
 import logging
 
 transfer_steps = {}
