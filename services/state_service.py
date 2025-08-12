@@ -1,26 +1,14 @@
 # services/state_service.py
+# -*- coding: utf-8 -*-
+
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from database.db import get_table
 
 TABLE = "user_state"
+DEFAULT_STATE_KEY = "global"  # مهم لتفادي NULL
 
 # ===================== Helpers =====================
-
-def _ensure_row(user_id: int):
-    # upsert صف للمستخدم إن لم يوجد
-    get_table(TABLE).upsert(
-        {"user_id": user_id, "history": [], "vars": {}},
-        on_conflict="user_id"
-    ).execute()
-
-def _get_vars(user_id: int) -> Dict[str, Any]:
-    res = get_table(TABLE).select("vars").eq("user_id", user_id).limit(1).execute()
-    return (res.data[0].get("vars") if res.data else {}) or {}
-
-def _set_vars(user_id: int, vars_dict: Dict[str, Any]):
-    _ensure_row(user_id)
-    get_table(TABLE).update({"vars": vars_dict}).eq("user_id", user_id).execute()
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -29,10 +17,28 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
     if not ts:
         return None
     try:
-        # نقبل 'YYYY-MM-DDTHH:MM:SS' ونتجاهل أجزاء الميلي ثانية/المنطقة وقت المقارنة
-        return datetime.fromisoformat(ts[:19])
+        # نقبل 'YYYY-MM-DDTHH:MM:SS' ونقص أي زيادات
+        return datetime.fromisoformat(str(ts)[:19])
     except Exception:
         return None
+
+def _ensure_row(user_id: int, state_key: str = DEFAULT_STATE_KEY):
+    """
+    upsert صف للمستخدم إن لم يوجد مع state_key افتراضي (غير NULL).
+    مهم: on_conflict="user_id" لأننا بنحافظ على صف واحد لكل مستخدم.
+    """
+    get_table(TABLE).upsert(
+        {"user_id": user_id, "state_key": state_key, "history": [], "vars": {}},
+        on_conflict="user_id"
+    ).execute()
+
+def _get_vars(user_id: int) -> Dict[str, Any]:
+    res = get_table(TABLE).select("vars").eq("user_id", user_id).limit(1).execute()
+    return (res.data[0].get("vars") if res.data else {}) or {}
+
+def _set_vars(user_id: int, vars_dict: Dict[str, Any], state_key: str = DEFAULT_STATE_KEY):
+    _ensure_row(user_id, state_key)
+    get_table(TABLE).update({"vars": vars_dict, "state_key": state_key}).eq("user_id", user_id).execute()
 
 # ===================== History =====================
 
@@ -53,10 +59,10 @@ def clear_history(user_id: int):
 
 # ===================== Generic vars =====================
 
-def set_var(user_id: int, key: str, value: Any):
+def set_var(user_id: int, key: str, value: Any, *, state_key: str = DEFAULT_STATE_KEY):
     vars_dict = _get_vars(user_id)
     vars_dict[key] = value
-    _set_vars(user_id, vars_dict)
+    _set_vars(user_id, vars_dict, state_key=state_key)
 
 def get_var(user_id: int, key: str, default=None):
     vars_dict = _get_vars(user_id)
@@ -64,30 +70,29 @@ def get_var(user_id: int, key: str, default=None):
 
 # ===================== Flows (named steps) =====================
 
-def set_step(user_id: int, flow: str, step: str, payload: Optional[Dict[str, Any]] = None):
+def set_step(user_id: int, flow: str, step: str, payload: Optional[Dict[str, Any]] = None, *, state_key: str = DEFAULT_STATE_KEY):
     vars_dict = _get_vars(user_id)
     flows = vars_dict.get("flows") or {}
     flows[flow] = {"step": step, "payload": payload or {}, "updated_at": _now_iso()}
     vars_dict["flows"] = flows
-    _set_vars(user_id, vars_dict)
+    _set_vars(user_id, vars_dict, state_key=state_key)
 
 def get_step(user_id: int, flow: str) -> Dict[str, Any]:
     vars_dict = _get_vars(user_id)
     flows = vars_dict.get("flows") or {}
     return flows.get(flow) or {}
 
-def clear_step(user_id: int, flow: str):
+def clear_step(user_id: int, flow: str, *, state_key: str = DEFAULT_STATE_KEY):
     vars_dict = _get_vars(user_id)
     flows = vars_dict.get("flows") or {}
     if flow in flows:
         flows.pop(flow, None)
         vars_dict["flows"] = flows
-        _set_vars(user_id, vars_dict)
+        _set_vars(user_id, vars_dict, state_key=state_key)
 
 # ===================== Compatibility API =====================
-# تدعم النمطين:
 # 1) قديم: set_state(user_id, key, value)
-# 2) جديد: set_state(user_id, value, ttl_minutes=120)  ← هذا المطلوب من state_adapter
+# 2) جديد: set_state(user_id, value, ttl_minutes=120)
 
 def get_state_key(user_id: int, key: str, default=None):
     """أعد القيمة المخزنة في vars[key] أو default إن لم توجد."""
@@ -96,9 +101,8 @@ def get_state_key(user_id: int, key: str, default=None):
 def set_state(*args, **kwargs):
     """
     استعمالان:
-      - set_state(user_id, key, value)        → يحفظ في vars[key]
-      - set_state(user_id, value, ttl_minutes=120)
-        → يحفظ الحالة العامة في vars['__state'] مع انتهاء صلاحية اختياري في vars['__state_exp']
+      - set_state(user_id, key, value)
+      - set_state(user_id, value, ttl_minutes=120, state_key="global")
     """
     if not args:
         raise TypeError("set_state: missing arguments")
@@ -106,22 +110,23 @@ def set_state(*args, **kwargs):
     # نمط قديم: user_id, key, value
     if len(args) >= 3 and isinstance(args[1], str):
         user_id, key, value = args[0], args[1], args[2]
-        set_var(user_id, key, value)
+        state_key = kwargs.get("state_key", DEFAULT_STATE_KEY)
+        set_var(user_id, key, value, state_key=state_key)
         return
 
     # نمط جديد: user_id, value, ttl_minutes=...
     if len(args) >= 2:
         user_id, value = args[0], args[1]
         ttl_minutes = kwargs.get("ttl_minutes")
+        state_key = kwargs.get("state_key", DEFAULT_STATE_KEY)
         vars_dict = _get_vars(user_id)
         vars_dict["__state"] = value
         if ttl_minutes and isinstance(ttl_minutes, (int, float)) and ttl_minutes > 0:
             exp = datetime.utcnow() + timedelta(minutes=int(ttl_minutes))
             vars_dict["__state_exp"] = exp.isoformat()
         else:
-            # لا يوجد TTL → احذف أي تاريخ سابق
             vars_dict.pop("__state_exp", None)
-        _set_vars(user_id, vars_dict)
+        _set_vars(user_id, vars_dict, state_key=state_key)
         return
 
     raise TypeError("set_state: unsupported arguments signature")
@@ -138,7 +143,7 @@ def get_state(user_id: int):
         return None
     return val
 
-def clear_state(user_id: int, key: Optional[str] = None):
+def clear_state(user_id: int, key: Optional[str] = None, *, state_key: str = DEFAULT_STATE_KEY):
     """
     لو key=None:
         يحذف الحالة العامة (__state / __state_exp) ولا يلمس باقي vars.
@@ -151,4 +156,4 @@ def clear_state(user_id: int, key: Optional[str] = None):
         vars_dict.pop("__state_exp", None)
     else:
         vars_dict.pop(key, None)
-    _set_vars(user_id, vars_dict)
+    _set_vars(user_id, vars_dict, state_key=state_key)
