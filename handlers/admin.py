@@ -43,6 +43,12 @@ from services.wallet_service import (
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
 
+# محاولة استيراد منظّم الشحن لإزالة القفل المحلي بعد القبول/الإلغاء (استيراد كسول وآمن)
+try:
+    from handlers import recharge as recharge_handlers
+except Exception:
+    recharge_handlers = None
+
 # ─────────────────────────────────────
 #   حالة داخلية
 # ─────────────────────────────────────
@@ -107,6 +113,14 @@ def _prompt_admin_note(bot, admin_id: int, user_id: int):
         )
     except Exception:
         pass
+
+# NEW: تنظيف قفل الشحن المحلي بعد إنهاء الطلب من طرف الأدمن
+def _clear_recharge_local_lock_safe(user_id: int):
+    try:
+        if recharge_handlers and hasattr(recharge_handlers, "clear_pending_request"):
+            recharge_handlers.clear_pending_request(user_id)
+    except Exception as e:
+        logging.exception("[ADMIN] clear recharge local lock failed: %s", e)
 
 # ─────────────────────────────────────
 #   التسجيل
@@ -220,6 +234,7 @@ def register(bot, history):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             hold_id  = payload.get("hold_id")
             reserved = int(payload.get("reserved", 0) or 0)
+            typ      = (payload.get("type") or "").strip()
 
             if hold_id:
                 try:
@@ -239,6 +254,10 @@ def register(bot, history):
                 bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
+
+            # NEW: لو طلب شحن — نظّف قفل الشحن المحلي
+            if typ in ("recharge", "wallet_recharge", "deposit"):
+                _clear_recharge_local_lock_safe(user_id)
 
             _prompt_admin_note(bot, call.from_user.id, user_id)
             return
@@ -314,15 +333,12 @@ def register(bot, history):
 
                 delete_pending_request(request_id)
 
-                # إرسال تأكيد للمستخدم
                 bot.send_message(
                     user_id,
                     f"{BAND}\n📣 تمام يا {name}! وتم تأكيد باقة الإعلان ({title}). "
                     f"اتخصم {_fmt_syp(amt)} من محفظتك، وحننشرها حسب الجدولة.\n{BAND}",
                     parse_mode="HTML"
                 )
-                # (اختياري) لو عايز تنشر تلقائيًا استخدم add_channel_ad هنا
-
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
@@ -488,6 +504,10 @@ def register(bot, history):
                 bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
+
+                # NEW: نظّف قفل الشحن المحلي بعد القبول
+                _clear_recharge_local_lock_safe(user_id)
+
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
 
