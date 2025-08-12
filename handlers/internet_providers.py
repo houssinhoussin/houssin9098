@@ -12,6 +12,8 @@ from services.wallet_service import (
     create_hold,             # ✅ إنشاء الحجز الذرّي
 )
 from services.queue_service import add_pending_request, process_queue
+from services.telegram_safety import remove_inline_keyboard
+from services.anti_spam import too_soon
 
 # =====================================
 #       إعدادات عامة / ثوابت
