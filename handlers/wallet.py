@@ -1,4 +1,6 @@
+# -*- coding: utf-8 -*-
 # handlers/wallet.py
+
 from telebot import types
 from config import BOT_NAME
 from handlers import keyboards
@@ -22,6 +24,16 @@ from services.wallet_service import (
 )
 from services.queue_service import add_pending_request
 
+# --- حارس منع الدبل-كليك (fallback آمن لو الموديول مش متاح) ---
+try:
+    from services.anti_spam import too_soon
+except Exception:
+    try:
+        from anti_spam import too_soon
+    except Exception:
+        def too_soon(_uid, _key, seconds=2):
+            return False  # fallback بسيط
+
 # --- تنسيقات كروت العرض ---
 def _card_header(title: str) -> str:
     return f"""🔥 <b>{title}</b>
@@ -33,6 +45,8 @@ def _card_footer() -> str:
 import logging
 
 transfer_steps = {}
+
+CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 
 # ==== Helpers للرسائل الموحّدة ====
 def _name_from_msg(msg) -> str:
@@ -195,8 +209,19 @@ def show_transfers(bot, message, history=None):
     footer = f"\n<b>الصافي (الفترة):</b> {_fmt_syp_signed(net)}"
     bot.send_message(message.chat.id, f"📑 السجل المالي\n{table}{footer}", parse_mode="HTML", reply_markup=keyboards.wallet_menu())
 
-# --- تسجيل هاندلرات الأزرار داخل register ---
+# --- تسجيل هاندلر /cancel عام لإلغاء أي خطوة جارية ---
 def register(bot, history=None):
+
+    @bot.message_handler(commands=['cancel'])
+    def _wallet_cancel_any(msg):
+        uid = msg.from_user.id
+        transfer_steps.pop(uid, None)
+        bot.send_message(
+            msg.chat.id,
+            "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.",
+            reply_markup=keyboards.wallet_menu()
+        )
+
     @bot.message_handler(func=lambda msg: msg.text == "💰 محفظتي")
     def handle_wallet(msg):
         show_wallet(bot, msg, history)
@@ -219,6 +244,7 @@ def register(bot, history=None):
         warning = (
             f"⚠️ يا {name}، تنبيه مهم:\n"
             "الخدمة دي تحويل مباشر بين العملاء. رجاءً راجع البيانات كويس قبل التأكيد.\n\n"
+            f"{CANCEL_HINT}\n\n"
             "اضغط (✅ موافق) للمتابعة أو (⬅️ رجوع) للعودة."
         )
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -229,7 +255,7 @@ def register(bot, history=None):
     def ask_for_target_id(msg):
         bot.send_message(
             msg.chat.id,
-            "🔢 ابعت رقم حساب (ID) العميل المستلم:",
+            f"🔢 ابعت رقم حساب (ID) العميل المستلم:\n{CANCEL_HINT}",
             reply_markup=keyboards.hide_keyboard()
         )
         transfer_steps[msg.from_user.id] = {"step": "awaiting_id"}
@@ -240,7 +266,12 @@ def register(bot, history=None):
         try:
             target_id = int(msg.text.strip())
         except Exception:
-            bot.send_message(msg.chat.id, f"❌ يا {name}، ادخل ID صحيح لو سمحت.")
+            bot.send_message(msg.chat.id, f"❌ يا {name}، ادخل ID صحيح لو سمحت.\n{CANCEL_HINT}")
+            return
+
+        # منع التحويل لنفسك
+        if target_id == msg.from_user.id:
+            bot.send_message(msg.chat.id, "❌ ما ينفعش تحوّل لنفسك.\nحدّد حساب تاني.\n" + CANCEL_HINT)
             return
 
         # تحقق من أنّه عميل مسجّل
@@ -250,14 +281,14 @@ def register(bot, history=None):
                 msg.chat.id,
                 f"❌ يا {name}، الرقم ده مش لعميل مسجّل عندنا.\n"
                 "الخدمة خاصة بعملاء المتجر. تقدر تدعو صاحبك للاشتراك في البوت 😉\n"
-                "https://t.me/my_fast_shop_bot",
+                "https://t.me/my_fast_shop_bot\n" + CANCEL_HINT,
                 reply_markup=keyboards.wallet_menu()
             )
             transfer_steps.pop(msg.from_user.id, None)
             return
 
         transfer_steps[msg.from_user.id].update({"step": "awaiting_amount", "target_id": target_id})
-        bot.send_message(msg.chat.id, "💵 اكتب المبلغ اللي عايز تحوّله:")
+        bot.send_message(msg.chat.id, "💵 اكتب المبلغ اللي عايز تحوّله:\n" + CANCEL_HINT)
 
     @bot.message_handler(func=lambda msg: transfer_steps.get(msg.from_user.id, {}).get("step") == "awaiting_amount")
     def receive_amount(msg):
@@ -266,15 +297,31 @@ def register(bot, history=None):
         try:
             amount = int(msg.text.strip())
         except Exception:
-            bot.send_message(msg.chat.id, f"❌ يا {name}، ادخل مبلغ صحيح.")
+            bot.send_message(msg.chat.id, f"❌ يا {name}، ادخل مبلغ صحيح.\n{CANCEL_HINT}")
             return
 
         if amount <= 0:
-            bot.send_message(msg.chat.id, f"❌ يا {name}، ما ينفعش تحويل بصفر أو أقل.")
+            bot.send_message(msg.chat.id, f"❌ يا {name}، ما ينفعش تحويل بصفر أو أقل.\n{CANCEL_HINT}")
             return
 
         # ✅ استخدم الرصيد المتاح (يحترم الحجز)
-        current_available = get_available_balance(user_id)
+        current_available = get_available_balance(user_id) or 0
+
+        # تحقق أولاً أن المبلغ لا يتجاوز المتاح
+        if amount > current_available:
+            kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            kb.add("✏️ تعديل المبلغ", "❌ إلغاء")
+            bot.send_message(
+                msg.chat.id,
+                (f"❌ يا {name}، المبلغ أكبر من متاحك الحالي.\n"
+                 f"متاحك: <b>{_fmt_syp(current_available)}</b>\n{CANCEL_HINT}"),
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+            transfer_steps[user_id]["step"] = "awaiting_amount"
+            return
+
+        # شرط حد أدنى يبقى بعد العملية
         min_left = 6000
         if current_available - amount < min_left:
             short = amount - (current_available - min_left)
@@ -282,10 +329,10 @@ def register(bot, history=None):
             kb.add("✏️ تعديل المبلغ", "❌ إلغاء")
             bot.send_message(
                 msg.chat.id,
-                f"❌ آسفين يا {name}!\n"
-                f"لازم يفضل في محفظتك على الأقل <b>{_fmt_syp(min_left)}</b> بعد التحويل.\n"
-                f"متاحك الحالي: <b>{_fmt_syp(current_available)}</b>\n"
-                f"لو عايز تحوّل {_fmt_syp(amount)}, محتاج تشحن حوالي <b>{_fmt_syp(short)}</b>.",
+                (f"❌ آسفين يا {name}!\n"
+                 f"لازم يفضل في محفظتك على الأقل <b>{_fmt_syp(min_left)}</b> بعد التحويل.\n"
+                 f"متاحك الحالي: <b>{_fmt_syp(current_available)}</b>\n"
+                 f"لو عايز تحوّل {_fmt_syp(amount)}, محتاج تشحن حوالي <b>{_fmt_syp(short)}</b>.\n{CANCEL_HINT}"),
                 parse_mode="HTML",
                 reply_markup=kb
             )
@@ -299,7 +346,7 @@ def register(bot, history=None):
         kb.add("✅ تأكيد التحويل", "⬅️ رجوع", "🔄 ابدأ من جديد")
         bot.send_message(
             msg.chat.id,
-            f"📤 يا {name}، تؤكد تحويل <b>{_fmt_syp(amount)}</b> إلى الحساب <code>{target_id}</code>؟",
+            f"📤 يا {name}، تؤكد تحويل <b>{_fmt_syp(amount)}</b> إلى الحساب <code>{target_id}</code>؟\n{CANCEL_HINT}",
             parse_mode="HTML",
             reply_markup=kb
         )
@@ -310,7 +357,7 @@ def register(bot, history=None):
         if transfer_steps.get(user_id, {}).get("step") == "awaiting_amount":
             bot.send_message(
                 msg.chat.id,
-                "💵 اكتب المبلغ الجديد:",
+                "💵 اكتب المبلغ الجديد:\n" + CANCEL_HINT,
                 reply_markup=keyboards.hide_keyboard()
             )
         else:
@@ -335,6 +382,12 @@ def register(bot, history=None):
     @bot.message_handler(func=lambda msg: msg.text == "✅ تأكيد التحويل")
     def confirm_transfer(msg):
         user_id = msg.from_user.id
+
+        # منع الدبل-كليك
+        if too_soon(user_id, "wallet_confirm_transfer", seconds=2):
+            bot.send_message(msg.chat.id, "⏱️ تم استلام طلبك..")
+            return
+
         name = _name_from_msg(msg)
         step = transfer_steps.get(user_id)
         if not step or step.get("step") != "awaiting_confirm":
@@ -349,7 +402,7 @@ def register(bot, history=None):
         # ✅ تنفيذ التحويل مباشرة بين العملاء (آمن عبر RPC ويحترم المتاح)
         success = transfer_balance(user_id, target_id, amount)
         if not success:
-            bot.send_message(msg.chat.id, f"❌ يا {name}، فشل التحويل. راجع رصيدك وجرب تاني.")
+            bot.send_message(msg.chat.id, f"❌ يا {name}، فشل التحويل. راجع رصيدك وجرب تاني.\n{CANCEL_HINT}")
             return
 
         # رسالة للمرسِل بتفاصيل واضحة (موحّدة الأسلوب)
@@ -366,7 +419,7 @@ def register(bot, history=None):
             sender_name = msg.from_user.full_name
             bot.send_message(
                 target_id,
-                f"💰 يا {sender_name} بعتلك <b>{_fmt_syp(amount)}</b> على محفظتك (من الحساب <code>{user_id}</code>).\n"
+                f"💰 {sender_name} بعتلك <b>{_fmt_syp(amount)}</b> على محفظتك (من الحساب <code>{user_id}</code>).\n"
                 f"استخدمها براحتك 😉",
                 parse_mode="HTML",
                 reply_markup=keyboards.wallet_menu()
