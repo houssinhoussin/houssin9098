@@ -23,11 +23,18 @@ from services.queue_service import add_pending_request, process_queue
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
 
+# حارس التأكيد الموحّد (يحذف الكيبورد + Debounce)
+try:
+    from services.ui_guards import confirm_guard
+except Exception:
+    from ui_guards import confirm_guard
+
 # =====================================
 #       إعدادات عامة / ثوابت
 # =====================================
 BAND = "━━━━━━━━━━━━━━━━"
 COMMISSION_PER_5000 = 600
+CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 
 INTERNET_PROVIDERS = [
     "تراسل", "أم تي أن", "سيرياتيل", "آية", "سوا", "رن نت", "سما نت", "أمنية",
@@ -74,12 +81,16 @@ def _fmt_syp(n) -> str:
 def _commission(amount: int) -> int:
     if amount <= 0:
         return 0
+    # سقف لأعلى (كل 5000 عليها 600): بدون أعداد عشرية
     blocks = (amount + 5000 - 1) // 5000
     return blocks * COMMISSION_PER_5000
 
 def _client_card(title: str, lines: list[str]) -> str:
     body = "\n".join(lines)
     return f"{BAND}\n{title}\n{body}\n{BAND}"
+
+def _with_cancel(text: str) -> str:
+    return f"{text}\n\n{CANCEL_HINT}"
 
 def _admin_card(lines: list[str]) -> str:
     return "\n".join(lines)
@@ -130,6 +141,14 @@ def _confirm_inline_kb() -> types.InlineKeyboardMarkup:
 #   التسجيل
 # =====================================
 def register(bot):
+    # /cancel — إلغاء سريع من أي خطوة
+    @bot.message_handler(commands=['cancel'])
+    def _cancel_all(msg):
+        uid = msg.from_user.id
+        user_net_state.pop(uid, None)
+        txt = _client_card("✅ تم الإلغاء", [f"يا {_name(bot, uid)}، رجعناك لقائمة المزودين."])
+        bot.send_message(msg.chat.id, _with_cancel(txt), reply_markup=_provider_inline_kb())
+
     # فتح القائمة الرئيسية
     @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
     def open_net_menu(msg):
@@ -146,14 +165,14 @@ def register(bot):
             return bot.answer_callback_query(call.id, "❌ خيار غير صالح.", show_alert=True)
 
         user_net_state[uid] = {"step": "choose_speed", "provider": provider}
-        txt = _client_card(
+        txt_raw = _client_card(
             f"⚡ يا {nm}، اختار السرعة المطلوبة",
             [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=txt,
+            text=_with_cancel(txt_raw),
             reply_markup=_speeds_inline_kb()
         )
 
@@ -163,14 +182,14 @@ def register(bot):
         uid = call.from_user.id
         nm = _name(bot, uid)
         user_net_state[uid] = {"step": "choose_provider"}
-        txt = _client_card(
+        txt_raw = _client_card(
             f"⚠️ يا {nm}، اختار مزوّد الإنترنت",
             [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=txt,
+            text=_with_cancel(txt_raw),
             reply_markup=_provider_inline_kb()
         )
 
@@ -193,11 +212,11 @@ def register(bot):
             "price": speed["price"]
         })
         bot.answer_callback_query(call.id)
-        txt = _client_card(
+        txt_raw = _client_card(
             f"📱 يا {nm}، ابعت رقم الهاتف/الحساب المطلوب شحنه",
-            ["يُفضّل مع رمز المحافظة (مثال: 011XXXXXXX)", "اكتب /cancel للإلغاء."]
+            ["يُفضّل مع رمز المحافظة (مثال: 011XXXXXXX)"]
         )
-        bot.send_message(call.message.chat.id, txt)
+        bot.send_message(call.message.chat.id, _with_cancel(txt_raw))
 
     # رجوع لشاشة السرعات
     @bot.callback_query_handler(func=lambda c: c.data == CB_BACK_SPEED)
@@ -208,29 +227,29 @@ def register(bot):
         if "provider" not in st:
             return cb_back_to_prov(call)
         st["step"] = "choose_speed"
-        txt = _client_card(
+        txt_raw = _client_card(
             f"⚡ يا {nm}، اختار السرعة المطلوبة",
             [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=txt,
+            text=_with_cancel(txt_raw),
             reply_markup=_speeds_inline_kb()
         )
 
-    # إلغاء من المستخدم
+    # إلغاء من المستخدم (زر)
     @bot.callback_query_handler(func=lambda c: c.data == CB_CANCEL)
     def cb_cancel(call):
         uid = call.from_user.id
         nm = _name(bot, uid)
         user_net_state.pop(uid, None)
-        txt = _client_card("✅ اتلغت العملية", [f"يا {nm}، ابعت /start عشان ترجع للقائمة الرئيسية."])
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=txt
-        )
+        try:
+            remove_inline_keyboard(bot, call.message)
+        except Exception:
+            pass
+        txt = _client_card("✅ اتلغت العملية", [f"يا {nm}، اكتب /start للرجوع للقائمة الرئيسية."])
+        bot.send_message(call.message.chat.id, _with_cancel(txt))
 
     # إدخال رقم الهاتف
     @bot.message_handler(func=lambda m: user_net_state.get(m.from_user.id, {}).get("step") == "enter_phone")
@@ -239,7 +258,7 @@ def register(bot):
         nm = _name(bot, uid)
         phone = _normalize_phone(msg.text)
         if not phone or len(phone) < 5:
-            return bot.reply_to(msg, _client_card("⚠️ الرقم مش واضح", [f"يا {nm}، ابعته تاني بشكل صحيح."]))
+            return bot.reply_to(msg, _with_cancel(_client_card("⚠️ الرقم مش واضح", [f"يا {nm}، ابعته تاني بشكل صحيح."])))
 
         st = user_net_state[uid]
         st["phone"] = phone
@@ -260,13 +279,18 @@ def register(bot):
             "",
             "لو تمام، اضغط (✅ تأكيد) عشان نبعت الطلب للإدارة."
         ]
-        bot.send_message(msg.chat.id, _client_card(f"📦 تفاصيل الطلب — يا {nm}", lines), reply_markup=_confirm_inline_kb())
+        bot.send_message(msg.chat.id, _with_cancel(_client_card(f"📦 تفاصيل الطلب — يا {nm}", lines)), reply_markup=_confirm_inline_kb())
 
     # تأكيد وإرسال إلى طابور الأدمن + إنشاء HOLD
     @bot.callback_query_handler(func=lambda c: c.data == CB_CONFIRM)
     def cb_confirm(call):
         uid = call.from_user.id
         nm = _name(bot, uid)
+
+        # ✅ عند التأكيد — احذف الكيبورد فقط + Debounce
+        if confirm_guard(bot, call, "internet_confirm"):
+            return
+
         st = user_net_state.get(uid)
         if not st or st.get("step") != "confirm":
             return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)
@@ -283,7 +307,9 @@ def register(bot):
                 "❌ رصيدك مش مكفّي",
                 [f"المتاح الحالي: {_fmt_syp(available)}", f"المطلوب: {_fmt_syp(total)}", f"الناقص: {_fmt_syp(missing)}", "اشحن محفظتك وجرب تاني 😉"]
             )
-            return bot.answer_callback_query(call.id, msg_txt, show_alert=True)
+            # نرسل رسالة بدل Alert علشان التنسيق
+            bot.send_message(call.message.chat.id, _with_cancel(msg_txt))
+            return
 
         # ✅ إنشاء حجز ذري بدل الخصم الفوري
         hold_id = None
@@ -301,7 +327,8 @@ def register(bot):
             logging.exception(f"[INET][{uid}] create_hold failed: {e}")
 
         if not hold_id:
-            return bot.answer_callback_query(call.id, "⚠️ حصلت مشكلة بسيطة وإحنا بنثبت قيمة العملية. جرّب تاني بعد شوية.", show_alert=True)
+            bot.send_message(call.message.chat.id, _with_cancel("⚠️ حصلت مشكلة بسيطة وإحنا بنثبت قيمة العملية. جرّب تاني بعد شوية."))
+            return
 
         # رسالة للإدارة (موحّدة)
         balance_now = get_balance(uid)
@@ -338,26 +365,21 @@ def register(bot):
         )
         process_queue(bot)
 
-        # تأكيد للعميل (موحّد)
+        # تأكيد للعميل (موحّد) — رسالة جديدة (مش تعديل نفس الرسالة)
         ok_txt = _client_card(
             f"✅ تمام يا {nm} — طلبك في السكة 🚀",
             ["بعتنا الطلب للإدارة، التنفيذ عادةً من 1 إلى 4 دقايق (وغالبًا أسرع 😉).",
              "تقدر تبعت طلبات تانية في نفس الوقت — إحنا بنحجز من المتاح بس."]
         )
-        bot.answer_callback_query(call.id, "تم الإرسال ✅")
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=ok_txt
-        )
+        bot.send_message(call.message.chat.id, _with_cancel(ok_txt))
         st["step"] = "wait_admin"
 
 # شاشة بدء المزودين
 def start_internet_provider_menu(bot, message):
     nm = _name(bot, message.from_user.id)
-    txt = _client_card(
+    txt_raw = _client_card(
         f"🌐 يا {nm}، اختار مزوّد الإنترنت",
         [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
     )
-    bot.send_message(message.chat.id, txt, reply_markup=_provider_inline_kb())
+    bot.send_message(message.chat.id, _with_cancel(txt_raw), reply_markup=_provider_inline_kb())
     user_net_state[message.from_user.id] = {"step": "choose_provider"}
