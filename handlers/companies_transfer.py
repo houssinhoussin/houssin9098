@@ -86,11 +86,6 @@ def register_companies_transfer(bot, history):
         name = _user_name(bot, user_id)
 
         # طلب قديم لسه في الطابور؟
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.answer_callback_query(call.id, f"❌ يا {name}، عندك طلب شغّال دلوقتي. استنى لما يخلص.", show_alert=True)
-            return
-
         company_map = {
             "company_alharam": "شركة الهرم",
             "company_alfouad": "شركة الفؤاد",
@@ -227,11 +222,6 @@ def register_companies_transfer(bot, history):
         user_states[user_id]["total"] = total
 
         # تأكد مفيش طلب قديم في الطابور
-        existing = get_table("pending_requests").select("id").eq("user_id", user_id).execute()
-        if existing.data:
-            bot.send_message(msg.chat.id, f"❌ يا {name}، عندك طلب شغّال بالفعل. استنى لما يخلص.")
-            return
-
         user_states[user_id]["step"] = "confirming_transfer"
         kb = make_inline_buttons(
             ("❌ إلغاء", "company_commission_cancel"),
@@ -265,7 +255,7 @@ def register_companies_transfer(bot, history):
         amount = data.get('amount')
         commission = data.get('commission')
         total = data.get('total')
-        balance = get_balance(user_id)
+        available = get_available_balance(user_id)
 
         if balance < total:
             shortage = total - balance
@@ -277,7 +267,7 @@ def register_companies_transfer(bot, history):
             bot.edit_message_text(
                 f"❌ يا {name}، رصيدك مش مكفي.\n"
                 f"المطلوب: {total:,} ل.س\n"
-                f"رصيدك الحالي: {balance:,} ل.س\n"
+                f"متاحك الحالي: {balance:,} ل.س\n"
                 f"الناقص: {shortage:,} ل.س\n"
                 "اشحن محفظتك أو ارجع خطوة وغيّر المبلغ.",
                 call.message.chat.id, call.message.message_id,
