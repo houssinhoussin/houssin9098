@@ -144,3 +144,13 @@ def pop_state(user_id: int, default=None, *, state_key: str = DEFAULT_STATE_KEY)
     val = get_state_key(user_id, default, state_key=state_key)
     clear_state(user_id, state_key=state_key)
     return val
+
+
+# ==== توافق خلفي مع anti_spam وغيره ====
+def get_var(user_id: int, key: str, default=None, *, state_key: str = DEFAULT_STATE_KEY):
+    """Alias لـ get_kv لأغراض التوافق."""
+    return get_kv(user_id, key, default, state_key=state_key)
+
+def set_var(user_id: int, key: str, value, *, state_key: str = DEFAULT_STATE_KEY, ttl_minutes: int = 120) -> None:
+    """Alias لـ set_kv لأغراض التوافق."""
+    return set_kv(user_id, key, value, state_key=state_key, ttl_minutes=ttl_minutes)
