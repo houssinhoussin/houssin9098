@@ -13,6 +13,8 @@ from services.wallet_service import (
 )
 
 from services.queue_service import add_pending_request, process_queue
+from services.telegram_safety import remove_inline_keyboard
+from services.anti_spam import too_soon
 from database.db import get_table  # موجود للتوافق لو احتجته
 
 # ========== إعدادات عامة ==========
@@ -290,6 +292,10 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "syr_unit_final_confirm")
     def syr_unit_final_confirm(call):
         user_id = call.from_user.id
+        remove_inline_keyboard(bot, call.message)
+        if too_soon(user_id, 'syr_unit_final_confirm', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
+        user_id = call.from_user.id
         name = _user_name(call)
 
         state = user_states.get(user_id, {})
@@ -391,6 +397,10 @@ def register_bill_and_units(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "mtn_unit_final_confirm")
     def mtn_unit_final_confirm(call):
+        user_id = call.from_user.id
+        remove_inline_keyboard(bot, call.message)
+        if too_soon(user_id, 'mtn_unit_final_confirm', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(call)
 
@@ -524,6 +534,10 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "final_confirm_syr_bill")
     def final_confirm_syr_bill(call):
         user_id = call.from_user.id
+        remove_inline_keyboard(bot, call.message)
+        if too_soon(user_id, 'final_confirm_syr_bill', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
+        user_id = call.from_user.id
         name = _user_name(call)
 
         state = user_states.get(user_id, {})
@@ -654,6 +668,10 @@ def register_bill_and_units(bot, history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "final_confirm_mtn_bill")
     def final_confirm_mtn_bill(call):
+        user_id = call.from_user.id
+        remove_inline_keyboard(bot, call.message)
+        if too_soon(user_id, 'final_confirm_mtn_bill', seconds=2):
+            return bot.answer_callback_query(call.id, '⏱️ تم استلام طلبك..')
         user_id = call.from_user.id
         name = _user_name(call)
 
