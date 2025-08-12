@@ -29,6 +29,26 @@ try:
 except Exception:
     from ui_guards import confirm_guard
 
+# (اختياري) حارس الصيانة/الإتاحة + ميزة إيقاف/تشغيل الخدمة
+try:
+    from services.system_service import is_maintenance, maintenance_message
+except Exception:
+    def is_maintenance(): return False
+    def maintenance_message(): return "🔧 النظام تحت الصيانة مؤقتًا. جرّب لاحقًا."
+
+try:
+    # flag: "internet_adsl" أو "internet"
+    from services.feature_flags import block_if_disabled
+except Exception:
+    def block_if_disabled(bot, chat_id, flag_key, nice_name):
+        return False
+
+# (اختياري) فتح قائمة الشحن عند الحاجة
+try:
+    from handlers import keyboards
+except Exception:
+    keyboards = None
+
 # =====================================
 #       إعدادات عامة / ثوابت
 # =====================================
@@ -95,6 +115,18 @@ def _with_cancel(text: str) -> str:
 def _admin_card(lines: list[str]) -> str:
     return "\n".join(lines)
 
+def _service_unavailable_guard(bot, chat_id) -> bool:
+    """يرجع True إذا الخدمة غير متاحة (صيانة/Flag)."""
+    if is_maintenance():
+        bot.send_message(chat_id, maintenance_message())
+        return True
+    # استخدم أي مفتاح يناسب نظام الـ Feature Flags لديك
+    if block_if_disabled(bot, chat_id, "internet_adsl", "دفع مزودات الإنترنت"):
+        return True
+    if block_if_disabled(bot, chat_id, "internet", "دفع مزودات الإنترنت"):
+        return True
+    return False
+
 # =====================================
 #   مفاتيح callback
 # =====================================
@@ -104,6 +136,7 @@ CB_BACK_PROV     = "iback_prov"    # رجوع لقائمة المزودين
 CB_BACK_SPEED    = "iback_speed"   # رجوع لقائمة السرعات
 CB_CONFIRM       = "iconfirm"      # تأكيد الطلب
 CB_CANCEL        = "icancel"       # إلغاء
+CB_RECHARGE      = "irecharge"     # شحن المحفظة (اختياري)
 
 # =====================================
 #   لوحات أزرار Inline
@@ -137,6 +170,15 @@ def _confirm_inline_kb() -> types.InlineKeyboardMarkup:
     )
     return kb
 
+def _insufficient_kb() -> types.InlineKeyboardMarkup | None:
+    kb = types.InlineKeyboardMarkup()
+    if keyboards and hasattr(keyboards, "recharge_menu"):
+        kb.add(types.InlineKeyboardButton("💳 شحن المحفظة", callback_data=CB_RECHARGE))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=CB_BACK_SPEED))
+        return kb
+    # بدون قائمة شحن — نرجع None ونكتفي برسالة
+    return None
+
 # =====================================
 #   التسجيل
 # =====================================
@@ -152,12 +194,18 @@ def register(bot):
     # فتح القائمة الرئيسية
     @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
     def open_net_menu(msg):
+        if too_soon(msg.from_user.id, "internet_open", 1.2):
+            return
+        if _service_unavailable_guard(bot, msg.chat.id):
+            return
         register_user_if_not_exist(msg.from_user.id, msg.from_user.full_name)
         start_internet_provider_menu(bot, msg)
 
     # اختيار مزوّد
     @bot.callback_query_handler(func=lambda c: c.data.startswith(f"{CB_PROV_PREFIX}:"))
     def cb_choose_provider(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         uid = call.from_user.id
         nm = _name(bot, uid)
         provider = call.data.split(":", 1)[1]
@@ -175,10 +223,13 @@ def register(bot):
             text=_with_cancel(txt_raw),
             reply_markup=_speeds_inline_kb()
         )
+        bot.answer_callback_query(call.id)
 
     # رجوع لقائمة المزوّدين
     @bot.callback_query_handler(func=lambda c: c.data == CB_BACK_PROV)
     def cb_back_to_prov(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         uid = call.from_user.id
         nm = _name(bot, uid)
         user_net_state[uid] = {"step": "choose_provider"}
@@ -192,10 +243,13 @@ def register(bot):
             text=_with_cancel(txt_raw),
             reply_markup=_provider_inline_kb()
         )
+        bot.answer_callback_query(call.id)
 
     # اختيار سرعة
     @bot.callback_query_handler(func=lambda c: c.data.startswith(f"{CB_SPEED_PREFIX}:"))
     def cb_choose_speed(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         uid = call.from_user.id
         nm = _name(bot, uid)
         try:
@@ -221,6 +275,8 @@ def register(bot):
     # رجوع لشاشة السرعات
     @bot.callback_query_handler(func=lambda c: c.data == CB_BACK_SPEED)
     def cb_back_to_speed(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         uid = call.from_user.id
         nm = _name(bot, uid)
         st = user_net_state.get(uid, {})
@@ -231,12 +287,16 @@ def register(bot):
             f"⚡ يا {nm}، اختار السرعة المطلوبة",
             [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
         )
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=_with_cancel(txt_raw),
-            reply_markup=_speeds_inline_kb()
-        )
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=_with_cancel(txt_raw),
+                reply_markup=_speeds_inline_kb()
+            )
+        except Exception:
+            bot.send_message(call.message.chat.id, _with_cancel(txt_raw), reply_markup=_speeds_inline_kb())
+        bot.answer_callback_query(call.id)
 
     # إلغاء من المستخدم (زر)
     @bot.callback_query_handler(func=lambda c: c.data == CB_CANCEL)
@@ -250,6 +310,10 @@ def register(bot):
             pass
         txt = _client_card("✅ اتلغت العملية", [f"يا {nm}، اكتب /start للرجوع للقائمة الرئيسية."])
         bot.send_message(call.message.chat.id, _with_cancel(txt))
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
 
     # إدخال رقم الهاتف
     @bot.message_handler(func=lambda m: user_net_state.get(m.from_user.id, {}).get("step") == "enter_phone")
@@ -284,6 +348,8 @@ def register(bot):
     # تأكيد وإرسال إلى طابور الأدمن + إنشاء HOLD
     @bot.callback_query_handler(func=lambda c: c.data == CB_CONFIRM)
     def cb_confirm(call):
+        if _service_unavailable_guard(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
         uid = call.from_user.id
         nm = _name(bot, uid)
 
@@ -307,8 +373,11 @@ def register(bot):
                 "❌ رصيدك مش مكفّي",
                 [f"المتاح الحالي: {_fmt_syp(available)}", f"المطلوب: {_fmt_syp(total)}", f"الناقص: {_fmt_syp(missing)}", "اشحن محفظتك وجرب تاني 😉"]
             )
-            # نرسل رسالة بدل Alert علشان التنسيق
-            bot.send_message(call.message.chat.id, _with_cancel(msg_txt))
+            kb = _insufficient_kb()
+            if kb:
+                bot.send_message(call.message.chat.id, _with_cancel(msg_txt), reply_markup=kb)
+            else:
+                bot.send_message(call.message.chat.id, _with_cancel(msg_txt))
             return
 
         # ✅ إنشاء حجز ذري بدل الخصم الفوري
@@ -374,8 +443,22 @@ def register(bot):
         bot.send_message(call.message.chat.id, _with_cancel(ok_txt))
         st["step"] = "wait_admin"
 
+    # زر شحن المحفظة (اختياري)
+    @bot.callback_query_handler(func=lambda c: c.data == CB_RECHARGE)
+    def cb_recharge(call):
+        if keyboards and hasattr(keyboards, "recharge_menu"):
+            bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
+        else:
+            bot.send_message(call.message.chat.id, "💳 لتعبئة المحفظة: تواصل مع الإدارة أو استخدم قائمة الشحن.")
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+
 # شاشة بدء المزودين
 def start_internet_provider_menu(bot, message):
+    if _service_unavailable_guard(bot, message.chat.id):
+        return
     nm = _name(bot, message.from_user.id)
     txt_raw = _client_card(
         f"🌐 يا {nm}، اختار مزوّد الإنترنت",
