@@ -222,9 +222,9 @@ def register(bot, history):
         name = _name_from_user(msg.from_user)
         amount_text = (msg.text or "").strip()
 
-        # ✅ validator الآمن — ملاحظة: الدالة توقّع min وليس min_value
+        # ✅ validator الآمن — استخدم الوسيط الصحيح min_value
         try:
-            amount = parse_amount(amount_text, min=MIN_RECHARGE)
+            amount = parse_amount(amount_text, min_value=MIN_RECHARGE)
         except Exception:
             logging.warning(f"[RECHARGE][{user_id}] محاولة إدخال مبلغ شحن غير صالح: {amount_text}")
             bot.send_message(
