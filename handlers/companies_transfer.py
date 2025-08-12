@@ -9,6 +9,7 @@ from services.wallet_service import (
     create_hold,              # ✅ حجز
     capture_hold,             # ✅ تصفية الحجز
     release_hold,             # ✅ فكّ الحجز
+    get_available_balance,    # ✅ المتاح = balance - held
 )
 from database.db import get_table
 from config import ADMIN_MAIN_ID
@@ -59,10 +60,8 @@ def get_balance(user_id):
     from services.wallet_service import get_balance as get_bal
     return get_bal(user_id)
 
-def # (removed) الخصم يتم عبر capture_hold في لوحة الأدمن
-:
-    from services.wallet_service import deduct_balance as deduct_bal
-    deduct_bal(user_id, amount)
+# تم حذف دالة خاطئة كانت سبب الـ SyntaxError:
+# (مُلغى) الخصم المباشر اتشال — دلوقتي بنستخدم capture_hold في لوحة الأدمن.
 
 def register_companies_transfer(bot, history):
 
@@ -86,7 +85,6 @@ def register_companies_transfer(bot, history):
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
 
-        # طلب قديم لسه في الطابور؟
         company_map = {
             "company_alharam": "شركة الهرم",
             "company_alfouad": "شركة الفؤاد",
@@ -222,7 +220,6 @@ def register_companies_transfer(bot, history):
         user_states[user_id]["commission"] = commission
         user_states[user_id]["total"] = total
 
-        # تأكد مفيش طلب قديم في الطابور
         user_states[user_id]["step"] = "confirming_transfer"
         kb = make_inline_buttons(
             ("❌ إلغاء", "company_commission_cancel"),
@@ -253,14 +250,14 @@ def register_companies_transfer(bot, history):
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
         data = user_states.get(user_id, {})
-        amount = data.get('amount')
-        commission = data.get('commission')
-        total = data.get('total')
+        amount = int(data.get('amount') or 0)
+        commission = int(data.get('commission') or 0)
+        total = int(data.get('total') or 0)
         available = get_available_balance(user_id)
 
         if available < total:
-            shortage = total - balance
-            logging.warning(f"[COMPANY][{user_id}] رصيد غير كافٍ (balance={balance}, total={total})")
+            shortage = total - available
+            logging.warning(f"[COMPANY][{user_id}] رصيد غير كافٍ (available={available}, total={total})")
             kb = make_inline_buttons(
                 ("💳 شحن المحفظة", "recharge_wallet"),
                 ("⬅️ رجوع", "company_commission_cancel")
@@ -268,7 +265,7 @@ def register_companies_transfer(bot, history):
             bot.edit_message_text(
                 f"❌ يا {name}، رصيدك مش مكفي.\n"
                 f"المطلوب: {total:,} ل.س\n"
-                f"متاحك الحالي: {balance:,} ل.س\n"
+                f"متاحك الحالي: {available:,} ل.س\n"
                 f"الناقص: {shortage:,} ل.س\n"
                 "اشحن محفظتك أو ارجع خطوة وغيّر المبلغ.",
                 call.message.chat.id, call.message.message_id,
@@ -383,15 +380,13 @@ def register_companies_transfer(bot, history):
                     bot.answer_callback_query(call.id, "❌ مشكلة أثناء تصفية الحجز. حاول تاني.")
                     return
             else:
-                # fallback قديم: خصم يدوي
-                if not has_sufficient_balance(user_id, reserved):
-                    logging.warning(f"[COMPANY][ADMIN][{user_id}] رصيد غير كافٍ")
-                    bot.send_message(user_id, "❌ فشل الحوالة: رصيدك مش مكفي.")
-                    bot.answer_callback_query(call.id, "❌ رصيد العميل مش مكفي.")
-                    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-                    return
-                # (removed) الخصم يتم عبر capture_hold في لوحة الأدمن
-# سجل عملية شراء
+                # ✋ بدون hold لا ننصح بالخصم اليدوي لتجنّب السباقات —
+                # نرفض العملية ونطلب من العميل إعادة الإرسال لتوليد hold صحيح.
+                bot.answer_callback_query(call.id, "⚠️ لا يوجد HOLD — ارفض الطلب واطلب إعادة الإرسال.")
+                bot.send_message(user_id, "⚠️ حصل تعارض بسيط. رجاءً أعد إرسال الطلب ليتم حجز المبلغ تلقائيًا.")
+                return
+
+            # سجل عملية شراء
             add_purchase(
                 user_id,
                 reserved,
