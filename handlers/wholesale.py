@@ -73,5 +73,6 @@ def register(bot, user_state):
         )
         process_queue(bot)
         bot.send_message(ADMIN_MAIN_ID, text)
-        bot.send_message(msg.chat.id, "✅ تم إرسال طلبك للإدارة، سيتم التواصل معك قريبًا.")
+        bot.send_message(msg.chat.id, "━━━━━━━━━━━━━━━━
+✅ تم إرسال طلبك للإدارة، سيتم التواصل معك قريبًا.")
         user_wholesale_state.pop(user_id, None)
