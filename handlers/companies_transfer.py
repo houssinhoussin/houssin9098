@@ -59,7 +59,8 @@ def get_balance(user_id):
     from services.wallet_service import get_balance as get_bal
     return get_bal(user_id)
 
-def deduct_balance(user_id, amount):
+def # (removed) الخصم يتم عبر capture_hold في لوحة الأدمن
+:
     from services.wallet_service import deduct_balance as deduct_bal
     deduct_bal(user_id, amount)
 
@@ -257,7 +258,7 @@ def register_companies_transfer(bot, history):
         total = data.get('total')
         available = get_available_balance(user_id)
 
-        if balance < total:
+        if available < total:
             shortage = total - balance
             logging.warning(f"[COMPANY][{user_id}] رصيد غير كافٍ (balance={balance}, total={total})")
             kb = make_inline_buttons(
@@ -389,9 +390,8 @@ def register_companies_transfer(bot, history):
                     bot.answer_callback_query(call.id, "❌ رصيد العميل مش مكفي.")
                     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                     return
-                deduct_balance(user_id, reserved)
-
-            # سجل عملية شراء
+                # (removed) الخصم يتم عبر capture_hold في لوحة الأدمن
+# سجل عملية شراء
             add_purchase(
                 user_id,
                 reserved,
