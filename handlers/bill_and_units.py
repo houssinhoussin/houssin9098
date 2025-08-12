@@ -18,6 +18,10 @@ from services.anti_spam import too_soon
 from services.ui_guards import confirm_guard  # ✅ حارس التأكيد الموحّد
 from database.db import get_table  # موجود للتوافق لو احتجته
 
+# جديد: فحص الصيانة + أعلام المزايا (Feature Flags)
+from services.system_service import is_maintenance, maintenance_message
+from services.feature_flags import block_if_disabled, is_feature_enabled
+
 # ========== إعدادات عامة ==========
 BAND = "━━━━━━━━━━━━━━━━"
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
@@ -53,6 +57,9 @@ def make_inline_buttons(*buttons):
 def _unit_label(unit: dict) -> str:
     return f"{unit['name']} • {unit['price']:,} ل.س"
 
+def _lamp(key: str) -> str:
+    return "🟢" if is_feature_enabled(key, True) else "🔴"
+
 # ========== قوائم الوحدات ==========
 SYRIATEL_UNITS = [
     {"name": "1000 وحدة", "price": 1200},
@@ -84,11 +91,12 @@ PAGE_SIZE_UNITS = 5
 
 # ========== كيبوردات رئيسية ==========
 def units_bills_menu_inline():
+    """قائمة إنلاين ديناميكية تُظهر حالة المزايا (🟢/🔴)."""
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔴 وحدات سيرياتيل", callback_data="ubm:syr_units"))
-    kb.add(types.InlineKeyboardButton("🔴 فاتورة سيرياتيل", callback_data="ubm:syr_bill"))
-    kb.add(types.InlineKeyboardButton("🟡 وحدات MTN", callback_data="ubm:mtn_units"))
-    kb.add(types.InlineKeyboardButton("🟡 فاتورة MTN", callback_data="ubm:mtn_bill"))
+    kb.add(types.InlineKeyboardButton(f"{_lamp('syr_unit')} وحدات سيرياتيل", callback_data="ubm:syr_units"))
+    kb.add(types.InlineKeyboardButton(f"{_lamp('syr_bill')} فاتورة سيرياتيل", callback_data="ubm:syr_bill"))
+    kb.add(types.InlineKeyboardButton(f"{_lamp('mtn_unit')} وحدات MTN", callback_data="ubm:mtn_units"))
+    kb.add(types.InlineKeyboardButton(f"{_lamp('mtn_bill')} فاتورة MTN", callback_data="ubm:mtn_bill"))
     kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="ubm:back"))
     return kb
 
@@ -136,6 +144,9 @@ def register_bill_and_units(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "💳 تحويل وحدات فاتورة سوري")
     def open_main_menu(msg):
+        # صيانة؟
+        if is_maintenance():
+            return bot.send_message(msg.chat.id, maintenance_message())
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
         history.setdefault(user_id, []).append("units_bills_menu")
@@ -149,16 +160,26 @@ def register_bill_and_units(bot, history):
     # راوتر القائمة الأساسية (Inline)
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ubm:"))
     def ubm_router(call):
+        # صيانة؟
+        if is_maintenance():
+            bot.answer_callback_query(call.id)
+            return bot.send_message(call.message.chat.id, maintenance_message())
+
         action = call.data.split(":", 1)[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
 
         if action == "syr_units":
+            # ميزة مفعّلة؟
+            if block_if_disabled(bot, chat_id, "syr_unit", "وحدات سيرياتيل"):
+                return bot.answer_callback_query(call.id)
             user_states[user_id] = {"step": "select_syr_unit"}
             _send_syr_units_page(chat_id, page=0, message_id=call.message.message_id)
             return bot.answer_callback_query(call.id)
 
         if action == "syr_bill":
+            if block_if_disabled(bot, chat_id, "syr_bill", "فاتورة سيرياتيل"):
+                return bot.answer_callback_query(call.id)
             user_states[user_id] = {"step": "syr_bill_number"}
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
             bot.edit_message_text(
@@ -168,11 +189,15 @@ def register_bill_and_units(bot, history):
             return bot.answer_callback_query(call.id)
 
         if action == "mtn_units":
+            if block_if_disabled(bot, chat_id, "mtn_unit", "وحدات MTN"):
+                return bot.answer_callback_query(call.id)
             user_states[user_id] = {"step": "select_mtn_unit"}
             _send_mtn_units_page(chat_id, page=0, message_id=call.message.message_id)
             return bot.answer_callback_query(call.id)
 
         if action == "mtn_bill":
+            if block_if_disabled(bot, chat_id, "mtn_bill", "فاتورة MTN"):
+                return bot.answer_callback_query(call.id)
             user_states[user_id] = {"step": "mtn_bill_number"}
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
             bot.edit_message_text(
@@ -294,6 +319,11 @@ def register_bill_and_units(bot, history):
     ########## وحدات سيرياتيل (Reply) ##########
     @bot.message_handler(func=lambda msg: msg.text == "🔴 وحدات سيرياتيل")
     def syr_units_menu(msg):
+        # صيانة أو إيقاف ميزة؟
+        if is_maintenance():
+            return bot.send_message(msg.chat.id, maintenance_message())
+        if block_if_disabled(bot, msg.chat.id, "syr_unit", "وحدات سيرياتيل"):
+            return
         user_id = msg.from_user.id
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         for u in SYRIATEL_UNITS:
@@ -335,6 +365,12 @@ def register_bill_and_units(bot, history):
         if confirm_guard(bot, call, "syr_unit_final_confirm"):
             return
         name = _user_name(call)
+
+        # صيانة أو إيقاف ميزة؟
+        if is_maintenance():
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "syr_unit", "وحدات سيرياتيل"):
+            return
 
         state = user_states.get(user_id, {})
         unit = state.get("unit") or {}
@@ -400,6 +436,10 @@ def register_bill_and_units(bot, history):
     ########## وحدات MTN (Reply) ##########
     @bot.message_handler(func=lambda msg: msg.text == "🟡 وحدات MTN")
     def mtn_units_menu(msg):
+        if is_maintenance():
+            return bot.send_message(msg.chat.id, maintenance_message())
+        if block_if_disabled(bot, msg.chat.id, "mtn_unit", "وحدات MTN"):
+            return
         user_id = msg.from_user.id
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         for u in MTN_UNITS:
@@ -439,6 +479,11 @@ def register_bill_and_units(bot, history):
         if confirm_guard(bot, call, "mtn_unit_final_confirm"):
             return
         name = _user_name(call)
+
+        if is_maintenance():
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "mtn_unit", "وحدات MTN"):
+            return
 
         state = user_states.get(user_id, {})
         unit = state.get("unit") or {}
@@ -502,6 +547,10 @@ def register_bill_and_units(bot, history):
     ########## فاتورة سيرياتيل ##########
     @bot.message_handler(func=lambda msg: msg.text == "🔴 فاتورة سيرياتيل")
     def syr_bill_entry(msg):
+        if is_maintenance():
+            return bot.send_message(msg.chat.id, maintenance_message())
+        if block_if_disabled(bot, msg.chat.id, "syr_bill", "فاتورة سيرياتيل"):
+            return
         user_id = msg.from_user.id
         user_states[user_id] = {"step": "syr_bill_number"}
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
@@ -575,6 +624,11 @@ def register_bill_and_units(bot, history):
             return
         name = _user_name(call)
 
+        if is_maintenance():
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "syr_bill", "فاتورة سيرياتيل"):
+            return
+
         state = user_states.get(user_id, {})
         number = state.get("number")
         amount = int(state.get("amount") or 0)
@@ -636,6 +690,10 @@ def register_bill_and_units(bot, history):
     ########## فاتورة MTN ##########
     @bot.message_handler(func=lambda msg: msg.text == "🟡 فاتورة MTN")
     def mtn_bill_entry(msg):
+        if is_maintenance():
+            return bot.send_message(msg.chat.id, maintenance_message())
+        if block_if_disabled(bot, msg.chat.id, "mtn_bill", "فاتورة MTN"):
+            return
         user_id = msg.from_user.id
         user_states[user_id] = {"step": "mtn_bill_number"}
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
@@ -707,6 +765,11 @@ def register_bill_and_units(bot, history):
         if confirm_guard(bot, call, "final_confirm_mtn_bill"):
             return
         name = _user_name(call)
+
+        if is_maintenance():
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "mtn_bill", "فاتورة MTN"):
+            return
 
         state = user_states.get(user_id, {})
         number = state.get("number")
