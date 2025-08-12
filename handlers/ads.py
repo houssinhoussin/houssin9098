@@ -4,11 +4,22 @@
 # • confirm_guard عند التأكيد (يحذف الكيبورد فقط + Debounce)
 # • رسائل محسّنة وإيموجي وبانر
 # • حجز المبلغ عبر create_hold مع وصف واضح
+# • فحص الصيانة + إمكانية إيقاف الخدمة عبر Feature Flag (ads)
 
 from telebot import types
-from services.wallet_service import get_balance, get_available_balance, create_hold
+
+from services.wallet_service import (
+    get_balance,
+    get_available_balance,
+    create_hold,
+    register_user_if_not_exist,
+)
 from services.queue_service import add_pending_request, process_queue
 from handlers.keyboards import main_menu
+
+# صيانة + أعلام المزايا
+from services.system_service import is_maintenance, maintenance_message
+from services.feature_flags import block_if_disabled  # requires flag key: "ads"
 
 # حارس التأكيد الموحّد (يحذف الكيبورد + يمنع الدبل-كليك)
 try:
@@ -76,6 +87,15 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.message_handler(func=lambda msg: msg.text == "📢 إعلاناتك")
     def ads_entry(msg):
+        # صيانة/إيقاف خدمة؟
+        if is_maintenance():
+            return bot.send_message(msg.chat.id, maintenance_message())
+        if block_if_disabled(bot, msg.chat.id, "ads", "خدمة الإعلانات"):
+            return
+
+        # تسجيل المستخدم (لإنشاء الحساب إن لم يوجد)
+        register_user_if_not_exist(msg.from_user.id, msg.from_user.full_name)
+
         name = _name_from_user(msg.from_user)
         promo = with_cancel_hint(
             "✨ <b>مساحة إعلانات متجرنا</b> ✨\n\n"
@@ -104,6 +124,12 @@ def register(bot, _history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "ads_start")
     def proceed_to_ads(call):
+        # صيانة/إيقاف خدمة؟
+        if is_maintenance():
+            bot.answer_callback_query(call.id)
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
+            return bot.answer_callback_query(call.id)
         bot.answer_callback_query(call.id)
         send_ads_menu(call.message.chat.id)
 
@@ -121,6 +147,13 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ads_") and call.data[4:].isdigit())
     def select_ad_type(call):
+        # صيانة/إيقاف خدمة؟
+        if is_maintenance():
+            bot.answer_callback_query(call.id)
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
+            return bot.answer_callback_query(call.id)
+
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         times = int(call.data.split("_")[1])
@@ -313,6 +346,12 @@ def register(bot, _history):
         if confirm_guard(bot, call, "ads_confirm_send"):
             return
 
+        # صيانة/إيقاف خدمة؟
+        if is_maintenance():
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
+            return
+
         data = user_ads_state.get(user_id)
 
         # التحقق من المرحلة
@@ -345,15 +384,28 @@ def register(bot, _history):
         hold_id = None
         try:
             hold_desc = f"حجز إعلان مدفوع × {times}"
-            # توقّعات التوقيع: create_hold(user_id, amount, description)
             hold_resp = create_hold(user_id, price, hold_desc)
-            if getattr(hold_resp, "error", None) or not getattr(hold_resp, "data", None):
+            if getattr(hold_resp, "error", None):
                 bot.send_message(
                     call.message.chat.id,
                     with_cancel_hint(f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية."),
                 )
                 return
-            hold_id = hold_resp.data  # غالبًا UUID
+            # استخراج hold_id بمرونة (dict/list/primitive)
+            data_attr = getattr(hold_resp, "data", None)
+            if isinstance(data_attr, dict):
+                hold_id = data_attr.get("id") or data_attr.get("hold_id") or data_attr
+            elif isinstance(data_attr, (list, tuple)) and data_attr:
+                first = data_attr[0]
+                hold_id = first.get("id") if isinstance(first, dict) else first
+            else:
+                hold_id = data_attr
+            if not hold_id:
+                bot.send_message(
+                    call.message.chat.id,
+                    with_cancel_hint(f"❌ يا {name}، فشل إنشاء الحجز. جرّب بعد دقيقة."),
+                )
+                return
         except Exception:
             bot.send_message(
                 call.message.chat.id,
