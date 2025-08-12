@@ -1,160 +1,178 @@
 # handlers/media_services.py
 from telebot import types
-from config import ADMIN_MAIN_ID
-from services.wallet_service import register_user_if_not_exist
-from services.wallet_service import add_purchase, get_balance, has_sufficient_balance,deduct_balance
+from services.wallet_service import register_user_if_not_exist, get_available_balance, get_balance, create_hold
+from services.queue_service import add_pending_request, process_queue
 from handlers.keyboards import media_services_menu
-from services.queue_service import add_pending_request
 import logging
+
+# 🎨 رسومات بسيطة
+BAND = "━━━━━━━━━━━━━━━━━━━━"
 
 # حالة المستخدم داخل سير عمل خدمات الإعلام
 user_media_state = {}
+
 USD_RATE = 11000  # سعر الصرف ليرة/دولار
 MEDIA_PRODUCTS = {
     "🖼️ تصميم لوغو احترافي": 300,
     "📱 إدارة ونشر يومي": 300,
     "📢 إطلاق حملة إعلانية": 300,
-    "🧾 باقة متكاملة شهرية": 300,
-    "✏️ طلب مخصص": 0,
+    "🎬 مونتاج فيديو قصير": 150,
+    "🧵 خيوط تويتر جاهزة": 80,
+    "🎙️ تعليق صوتي احترافي": 120,
+    "📰 كتابة محتوى تسويقي": 95,
 }
 
-def make_inline_buttons(*buttons):
-    kb = types.InlineKeyboardMarkup()
-    for text, data in buttons:
-        kb.add(types.InlineKeyboardButton(text, callback_data=data))
-    return kb
+def _name(u):
+    n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
+    n = (n or "").strip()
+    return n if n else "صديقنا"
 
-def register(bot, user_state):
-    @bot.message_handler(func=lambda msg: msg.text == "🖼️ خدمات إعلانية وتصميم")
-    def open_media_menu(msg):
+def _fmt_syp(n):
+    try:
+        return f"{int(n):,} ل.س"
+    except Exception:
+        return f"{n} ل.س"
+
+def _fmt_usd(x):
+    try:
+        return f"${float(x):.2f}"
+    except Exception:
+        return f"${x}"
+
+def register_media_services(bot, history):
+    @bot.message_handler(func=lambda msg: msg.text == "🎭 خدمات سوشيال/ميديا")
+    def open_media(msg):
         user_id = msg.from_user.id
-        # تعيين حالة القائمة الرئيسية إلى خدمات إعلامية
-        user_state[user_id] = "media_services"
-        # بداية سير العمل لاختيار الخدمة
-        user_media_state[user_id] = {"step": "choose_service"}
+        register_user_if_not_exist(user_id, _name(msg.from_user))
+        if history is not None:
+            history.setdefault(user_id, []).append("media_menu")
         bot.send_message(
             msg.chat.id,
-            "🎨 اختر الخدمة التي تريدها:",
+            f"🎯 يا {_name(msg.from_user)}، اختار الخدمة الإعلامية اللي تناسبك:
+{BAND}",
             reply_markup=media_services_menu()
         )
 
-    @bot.message_handler(func=lambda msg: user_media_state.get(msg.from_user.id, {}).get("step") == "choose_service" and msg.text in MEDIA_PRODUCTS)
+    @bot.message_handler(func=lambda msg: msg.text in MEDIA_PRODUCTS)
     def handle_selected_service(msg):
         user_id = msg.from_user.id
         service = msg.text
         price_usd = MEDIA_PRODUCTS[service]
-        if price_usd > 0:
-            price_syp = price_usd * USD_RATE
-            user_media_state[user_id] = {
-                "step": "confirm_service",
-                "service": service,
-                "price_usd": price_usd,
-                "price_syp": price_syp
-            }
-            text = (
-                f"💵 سعر الخدمة «{service}» هو {price_syp:,} ل.س\n"
-                f"(معدل التحويل {USD_RATE} ل.س/دولار)\n"
-                "هل تريد المتابعة؟"
-            )
-            kb = make_inline_buttons(
-                ("✅ موافق", "media_confirm"),
-                ("❌ إلغاء", "media_cancel")
-            )
-            bot.send_message(msg.chat.id, text, reply_markup=kb)
-        else:
-            # طلب مخصص
-            user_media_state[user_id] = {"step": "custom_details", "service": service}
-            bot.send_message(msg.chat.id, "📝 اكتب تفاصيل طلبك المخصص:")
-
-    @bot.message_handler(func=lambda msg: user_media_state.get(msg.from_user.id, {}).get("step") == "custom_details")
-    def handle_custom_details(msg):
-        user_id = msg.from_user.id
-        state = user_media_state[user_id]
-        state["details"] = msg.text
-        state["step"] = "custom_price"
-        bot.send_message(msg.chat.id, "💵 اكتب السعر بالدولار للخدمة المخصصة:")
-
-    @bot.message_handler(func=lambda msg: user_media_state.get(msg.from_user.id, {}).get("step") == "custom_price")
-    def handle_custom_price(msg):
-        user_id = msg.from_user.id
-        state = user_media_state[user_id]
-        try:
-            price_usd = float(msg.text)
-        except ValueError:
-            return bot.send_message(msg.chat.id, "⚠️ الرجاء إدخال سعر صحيح بالأرقام.")
         price_syp = int(price_usd * USD_RATE)
-        state.update({
+
+        user_media_state[user_id] = {
             "step": "confirm_service",
+            "service": service,
             "price_usd": price_usd,
             "price_syp": price_syp
-        })
-        details = state.get("details", "")
-        kb = make_inline_buttons(
-            ("✅ موافق", "media_confirm"),
-            ("❌ إلغاء", "media_cancel")
+        }
+        kb = types.InlineKeyboardMarkup()
+        kb.add(
+            types.InlineKeyboardButton("✅ تمام.. أكّد الطلب", callback_data="media_final_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء", callback_data="media_cancel")
         )
         bot.send_message(
             msg.chat.id,
-            f"📝 تفاصيل: {details}\n💵 السعر: {price_syp:,} ل.س\n"
-            "هل تريد المتابعة؟",
+            (
+                f"✨ اختيار هايل يا {_name(msg.from_user)}!
+"
+                f"• الخدمة: {service}
+"
+                f"• السعر: {_fmt_usd(price_usd)} ≈ {_fmt_syp(price_syp)}
+"
+                f"{BAND}
+"
+                "لو تمام، أكّد الطلب وهنبعته على طول للإدارة."
+            ),
             reply_markup=kb
         )
 
-    @bot.callback_query_handler(func=lambda call: call.data == "media_cancel")
-    def cancel_media(call):
-        user_id = call.from_user.id
-        bot.edit_message_text(
-            "❌ تم إلغاء العملية.",
-            call.message.chat.id,
-            call.message.message_id
-        )
-        user_media_state.pop(user_id, None)
+    @bot.callback_query_handler(func=lambda c: c.data == "media_cancel")
+    def media_cancel(c):
+        user_media_state.pop(c.from_user.id, None)
+        bot.answer_callback_query(c.id, "تم الإلغاء.")
+        bot.send_message(c.from_user.id, "❌ تم الإلغاء. رجّعنا للقائمة ✨", reply_markup=media_services_menu())
 
-    @bot.callback_query_handler(func=lambda call: call.data == "media_confirm")
-    def confirm_media(call):
-        user_id = call.from_user.id
-        state = user_media_state.pop(user_id, {})
+    @bot.callback_query_handler(func=lambda c: c.data == "media_final_confirm")
+    def media_final_confirm(c):
+        user_id = c.from_user.id
+        name = _name(c.from_user)
+        state = user_media_state.get(user_id) or {}
+
         service = state.get("service")
-        price_syp = state.get("price_syp", 0)
-        details = state.get("details", "")
+        price_syp = int(state.get("price_syp") or 0)
+        price_usd = state.get("price_usd")
 
-        # التحقق من الرصيد (إذا السعر > 0)
-        if price_syp > 0 and not has_sufficient_balance(user_id, price_syp):
-            bot.edit_message_text(
-                "❌ لا يوجد رصيد كافٍ في محفظتك لإتمام هذه الخدمة.",
-                call.message.chat.id,
-                call.message.message_id
+        if not service or price_syp <= 0:
+            return bot.answer_callback_query(c.id, "❌ الطلب ناقص. جرّب تاني.")
+
+        # ✅ الرصيد المتاح فقط
+        available = get_available_balance(user_id)
+        if available < price_syp:
+            return bot.send_message(
+                user_id,
+                (
+                    f"❌ يا {name}، رصيدك المتاح مش مكفّي.
+"
+                    f"المتاح: {_fmt_syp(available)}
+"
+                    f"السعر: {_fmt_syp(price_syp)}
+"
+                    "اشحن المحفظة وبعدين كمّل الطلب 😉"
+                )
             )
-            return
 
-        # خصم الرصيد إن وُجد سعر
-        if price_syp > 0:
-            deduct_balance(user_id, price_syp)
+        # ✅ إنشاء حجز (Hold) ذري
+        hold_id = None
+        try:
+            resp = create_hold(user_id, price_syp, f"حجز خدمة ميديا — {service}")
+            if getattr(resp, "error", None):
+                logging.error("create_hold (media) error: %s", resp.error)
+                return bot.send_message(user_id, "⚠️ حصل عطل بسيط أثناء الحجز. جرّب بعد دقيقة.")
+            hold_id = getattr(resp, "data", None) or (resp.get("id") if isinstance(resp, dict) else None)
+        except Exception as e:
+            logging.exception("create_hold (media) exception: %s", e)
+            return bot.send_message(user_id, "⚠️ حصل خطأ أثناء الحجز. جرّب بعد شوية.")
 
-        # بناء رسالة للإدارة
-        admin_msg = (
-            f"📢 طلب خدمة إعلانية/تصميم جديدة:\n"
-            f"👤 المستخدم: {user_id}\n"
-            f"🎨 الخدمة: {service}\n"
+        if not hold_id:
+            return bot.send_message(user_id, "⚠️ الحجز ما تمّش. حاول تاني لو سمحت.")
+
+        # رسالة موحّدة للإدارة + تفاصيل الحجز
+        balance_now = get_balance(user_id)
+        admin_text = (
+            f"💰 رصيد المستخدم: {balance_now:,} ل.س\n"
+            f"🆕 طلب ميديا\n"
+            f"👤 الاسم: <code>{c.from_user.full_name}</code>\n"
+            f"يوزر: <code>@{c.from_user.username or ''}</code>\n"
+            f"آيدي: <code>{user_id}</code>\n"
+            f"🎭 الخدمة: {service}\n"
+            f"💵 السعر: {price_syp:,} ل.س (≈ {_fmt_usd(price_usd)})\n"
+            f"(type=media)"
         )
-        if details:
-            admin_msg += f"📝 تفاصيل: {details}\n"
-        if price_syp > 0:
-            admin_msg += f"💵 السعر: {price_syp:,} ل.س"
 
-        # تأكيد للمستخدم
-        bot.edit_message_text(
-            "✅ تم إرسال طلبك بنجاح، بانتظار المعالجة من الإدارة.",
-            call.message.chat.id,
-            call.message.message_id
-        )
-        # إرسال للإدارة
         add_pending_request(
             user_id=user_id,
-            username=call.from_user.username,
-            request_text=admin_msg
+            username=c.from_user.username,
+            request_text=admin_text,
+            payload={
+                "type": "media",
+                "service": service,
+                "price": price_syp,
+                "reserved": price_syp,
+                "hold_id": hold_id
+            }
         )
-        bot.send_message(ADMIN_MAIN_ID, admin_msg)
+        process_queue(bot)
+        bot.answer_callback_query(c.id, "تم الإرسال 🚀")
+        bot.send_message(
+            user_id,
+            (
+                f"✅ تمام يا {name}! بعتنا طلب «{service}» للإدارة.\n"
+                f"⏱️ التنفيذ بيتم خلال 1–4 دقايق (غالبًا أسرع 😉).\n"
+                f"{BAND}\n"
+                "ممكن تطلب خدمة تانية في نفس الوقت — بنحجز من المتاح بس."
+            )
+        )
 
-        # إعادة المستخدم لقائمة المنتجات
-        user_state[user_id] = "products_menu"
+def register(bot, history):
+    register_media_services(bot, history)
