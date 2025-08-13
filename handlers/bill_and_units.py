@@ -60,6 +60,50 @@ def _unit_label(unit: dict) -> str:
 def _lamp(key: str) -> str:
     return "🟢" if is_feature_enabled(key, True) else "🔴"
 
+# ========== (جديد) تحكّم تفصيلي لكل كمية وحدات ==========
+# نستخدم نفس جدول features مع مفاتيح ديناميكية مثل:
+# units:syriatel:3068-وحدة  |  units:mtn:10000-وحدة
+_FEATURES_TABLE = "features"
+
+def _features_tbl():
+    return get_table(_FEATURES_TABLE)
+
+def key_units(carrier: str, unit_name: str) -> str:
+    slug = (unit_name or "").strip().replace(" ", "-")
+    carr = (carrier or "").strip().lower()
+    return f"units:{carr}:{slug}"
+
+def ensure_feature(key: str, label: str, default_active: bool = True) -> None:
+    """يزرع سطر في features إن لم يوجد (idempotent)."""
+    try:
+        r = _features_tbl().select("key").eq("key", key).limit(1).execute()
+        if not getattr(r, "data", None):
+            _features_tbl().insert({"key": key, "label": label, "active": bool(default_active)}).execute()
+        else:
+            # تحدّث الملصق لو تغيّر
+            _features_tbl().update({"label": label}).eq("key", key).execute()
+    except Exception as e:
+        logging.exception("[bill_and_units] ensure_feature failed: %s", e)
+
+def require_feature_or_alert(bot, chat_id: int, key: str, label: str) -> bool:
+    """
+    إن كانت الميزة مقفلة يرجّع True بعد إرسال اعتذار أنيق للعميل.
+    وإلا يرجّع False ويُسمح بالمتابعة.
+    """
+    if is_feature_enabled(key, True):
+        return False
+    try:
+        bot.send_message(
+            chat_id,
+            with_cancel_hint(
+                f"⛔ عذرًا، «{label}» غير متاح حاليًا (نفاد الكمية/صيانة).\n"
+                f"نعمل على إعادته بأسرع وقت. شكرًا لتفهمك 🤍"
+            )
+        )
+    except Exception:
+        pass
+    return True
+
 # ========== قوائم الوحدات ==========
 SYRIATEL_UNITS = [
     {"name": "1000 وحدة", "price": 1200},
@@ -215,6 +259,10 @@ def register_bill_and_units(bot, history):
 
     # ===== صفحات وحدات سيرياتيل/MTN =====
     def _send_syr_units_page(chat_id, page=0, message_id=None):
+        # 🔧 زرع مفاتيح كل كمية (idempotent)
+        for u in SYRIATEL_UNITS:
+            ensure_feature(key_units("Syriatel", u['name']), f"وحدات سيرياتيل — {u['name']}", default_active=True)
+
         items = [(idx, _unit_label(u)) for idx, u in enumerate(SYRIATEL_UNITS)]
         kb, pages = _build_paged_inline_keyboard(items, page=page, page_size=PAGE_SIZE_UNITS, prefix="syrunits", back_data="ubm:back")
         txt = with_cancel_hint(banner("🎯 اختار كمية الوحدات", [f"صفحة {page+1}/{pages}"]))
@@ -224,6 +272,10 @@ def register_bill_and_units(bot, history):
             bot.send_message(chat_id, txt, reply_markup=kb)
 
     def _send_mtn_units_page(chat_id, page=0, message_id=None):
+        # 🔧 زرع مفاتيح كل كمية (idempotent)
+        for u in MTN_UNITS:
+            ensure_feature(key_units("MTN", u['name']), f"وحدات MTN — {u['name']}", default_active=True)
+
         items = [(idx, _unit_label(u)) for idx, u in enumerate(MTN_UNITS)]
         kb, pages = _build_paged_inline_keyboard(items, page=page, page_size=PAGE_SIZE_UNITS, prefix="mtnunits", back_data="ubm:back")
         txt = with_cancel_hint(banner("🎯 اختار كمية الوحدات", [f"صفحة {page+1}/{pages}"]))
@@ -248,6 +300,11 @@ def register_bill_and_units(bot, history):
         if action == "sel":
             idx = int(parts[2])
             unit = SYRIATEL_UNITS[idx]
+
+            # 🔒 منع الاختيار إن كانت الكمية مقفلة
+            if require_feature_or_alert(bot, chat_id, key_units("Syriatel", unit['name']), f"وحدات سيرياتيل — {unit['name']}"):
+                return bot.answer_callback_query(call.id)
+
             user_states[user_id] = {"step": "syr_unit_number", "unit": unit}
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
             bot.edit_message_text(
@@ -278,6 +335,11 @@ def register_bill_and_units(bot, history):
         if action == "sel":
             idx = int(parts[2])
             unit = MTN_UNITS[idx]
+
+            # 🔒 منع الاختيار إن كانت الكمية مقفلة
+            if require_feature_or_alert(bot, chat_id, key_units("MTN", unit['name']), f"وحدات MTN — {unit['name']}"):
+                return bot.answer_callback_query(call.id)
+
             user_states[user_id] = {"step": "mtn_unit_number", "unit": unit}
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
             bot.edit_message_text(
@@ -325,6 +387,11 @@ def register_bill_and_units(bot, history):
         if block_if_disabled(bot, msg.chat.id, "syr_unit", "وحدات سيرياتيل"):
             return
         user_id = msg.from_user.id
+
+        # 🔧 زرع مفاتيح الكميات
+        for u in SYRIATEL_UNITS:
+            ensure_feature(key_units("Syriatel", u['name']), f"وحدات سيرياتيل — {u['name']}")
+
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         for u in SYRIATEL_UNITS:
             kb.add(types.KeyboardButton(_unit_label(u)))
@@ -338,6 +405,11 @@ def register_bill_and_units(bot, history):
         unit = next((u for u in SYRIATEL_UNITS if _unit_label(u) == msg.text), None)
         if not unit:
             return bot.send_message(msg.chat.id, "⚠️ اختار كمية من القائمة لو سمحت.\n\n" + CANCEL_HINT)
+
+        # 🔒 منع التقدّم إن كانت الكمية مقفلة
+        if require_feature_or_alert(bot, msg.chat.id, key_units("Syriatel", unit['name']), f"وحدات سيرياتيل — {unit['name']}"):
+            return
+
         user_states[user_id] = {"step": "syr_unit_number", "unit": unit}
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
         bot.send_message(msg.chat.id, with_cancel_hint("📱 ابعت الرقم/الكود اللي بيبدأ بـ 093 أو 098 أو 099:"), reply_markup=kb)
@@ -377,6 +449,10 @@ def register_bill_and_units(bot, history):
         number = state.get("number")
         price = int(unit.get("price") or 0)
         unit_name = unit.get("name") or "وحدات سيرياتيل"
+
+        # 🔒 فحص الكمية نفسها قبل التنفيذ
+        if require_feature_or_alert(bot, call.message.chat.id, key_units("Syriatel", unit_name), f"وحدات سيرياتيل — {unit_name}"):
+            return
 
         available = get_available_balance(user_id)
         if available < price:
@@ -441,6 +517,11 @@ def register_bill_and_units(bot, history):
         if block_if_disabled(bot, msg.chat.id, "mtn_unit", "وحدات MTN"):
             return
         user_id = msg.from_user.id
+
+        # 🔧 زرع مفاتيح الكميات
+        for u in MTN_UNITS:
+            ensure_feature(key_units("MTN", u['name']), f"وحدات MTN — {u['name']}")
+
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         for u in MTN_UNITS:
             kb.add(types.KeyboardButton(_unit_label(u)))
@@ -454,6 +535,11 @@ def register_bill_and_units(bot, history):
         unit = next((u for u in MTN_UNITS if _unit_label(u) == msg.text), None)
         if not unit:
             return bot.send_message(msg.chat.id, "⚠️ اختار كمية من القائمة لو سمحت.\n\n" + CANCEL_HINT)
+
+        # 🔒 منع التقدّم إن كانت الكمية مقفلة
+        if require_feature_or_alert(bot, msg.chat.id, key_units("MTN", unit['name']), f"وحدات MTN — {unit['name']}"):
+            return
+
         user_states[user_id] = {"step": "mtn_unit_number", "unit": unit}
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
         bot.send_message(msg.chat.id, with_cancel_hint("📱 ابعت الرقم/الكود اللي بيبدأ بـ 094 أو 095 أو 096:"), reply_markup=kb)
@@ -490,6 +576,10 @@ def register_bill_and_units(bot, history):
         number = state.get("number")
         price = int(unit.get("price") or 0)
         unit_name = unit.get("name") or "وحدات MTN"
+
+        # 🔒 فحص الكمية نفسها قبل التنفيذ
+        if require_feature_or_alert(bot, call.message.chat.id, key_units("MTN", unit_name), f"وحدات MTN — {unit_name}"):
+            return
 
         available = get_available_balance(user_id)
         if available < price:
