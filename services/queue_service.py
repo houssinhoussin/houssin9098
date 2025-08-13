@@ -11,7 +11,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedia
 QUEUE_TABLE = "pending_requests"
 _queue_lock = threading.Lock()
 _queue_cooldown = False
-        logging.info("[queue] cooldown release; re-processing queue")  # يمنع إظهار أكثر من طلب
 def _admin_targets():
     try:
         lst = list(ADMINS) if isinstance(ADMINS, (list, tuple, set)) else []
@@ -78,7 +77,6 @@ def update_request_admin_message_id(request_id: int, message_id: int):
     logging.debug(f"Skipping update_request_admin_message_id for request {request_id}")
 
 def postpone_request(request_id: int):
-    logging.info("[queue] postpone_request id=%s", request_id)
     try:
         now = datetime.utcnow().isoformat()
         get_table(QUEUE_TABLE) \
@@ -191,15 +189,12 @@ def process_queue(bot):
             )
 
 def queue_cooldown_start(bot=None):
-    logging.info("[queue] cooldown start")
     global _queue_cooldown
     _queue_cooldown = True
     def release():
-        logging.info("[queue] cooldown tick...")
         global _queue_cooldown
         time.sleep(30)
         _queue_cooldown = False
-        logging.info("[queue] cooldown release; re-processing queue")
         if bot is not None:
             process_queue(bot)
     threading.Thread(target=release, daemon=True).start()
