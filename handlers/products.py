@@ -17,6 +17,9 @@ from handlers import keyboards
 from services.queue_service import process_queue, add_pending_request
 from database.models.product import Product
 
+# (جديد) فلاغات المزايا للمنتجات الفردية
+from services.feature_flags import is_feature_enabled  # نستخدمه لتعطيل منتج معيّن (مثل 660 شدة)
+
 # حارس التأكيد الموحّد: يحذف الكيبورد + يعمل Debounce
 try:
     from services.ui_guards import confirm_guard
@@ -50,9 +53,57 @@ def _card(title: str, lines: list[str]) -> str:
 def _unavailable_short(product_name: str) -> str:
     # تنويه احترافي يظهر كـ Alert عندما يكون المنتج موقوفًا
     return (
-        f"⛔ عذرًا، «{product_name}» غير متاح حاليًا بسبب تحديثات/صيانة.\n"
-        f"سنُعيد فتحه للشراء في أقرب وقت. شكرًا لتفهّمك."
+        f"⛔ عذرًا، «{product_name}» غير متاح حاليًا بسبب صيانة أو نفاد الكمية.\n"
+        f"سنُعيد فتحه بأسرع وقت ممكن. شكرًا لتفهّمك 🤍"
     )
+
+# ================= (جديد) تحكّم تفصيلي ON/OFF لكل زر كمية =================
+# نستخدم جدول features نفسه بمفاتيح منسّقة لكل خيار (SKU)
+_FEATURES_TABLE = "features"
+
+def _features_tbl():
+    return get_table(_FEATURES_TABLE)
+
+def _slug(s: str) -> str:
+    return (s or "").strip().replace(" ", "-").replace("ـ", "-").lower()
+
+def key_product_option(category: str, product_name: str) -> str:
+    # مثال: product:pubg:60-شدة  /  product:freefire:310-جوهرة
+    return f"product:{_slug(category)}:{_slug(product_name)}"
+
+def ensure_feature(key: str, label: str, default_active: bool = True) -> None:
+    """يزرع السطر في features إن لم يوجد (idempotent)، ويحدّث label إن تغيّر."""
+    try:
+        r = _features_tbl().select("key").eq("key", key).limit(1).execute()
+        if not getattr(r, "data", None):
+            _features_tbl().insert({"key": key, "label": label, "active": bool(default_active)}).execute()
+        else:
+            _features_tbl().update({"label": label}).eq("key", key).execute()
+    except Exception as e:
+        logging.exception("[products] ensure_feature failed: %s", e)
+
+def is_option_enabled(category: str, product_name: str, default: bool = True) -> bool:
+    """يرجع حالة التفعيل لزر الكمية المحدّد."""
+    try:
+        return is_feature_enabled(key_product_option(category, product_name), default)
+    except Exception:
+        return default
+
+def require_option_or_alert(bot, chat_id: int, category: str, product_name: str) -> bool:
+    """إن كان الزر مقفول يرسل اعتذار ويرجع True (يعني قف)."""
+    if is_option_enabled(category, product_name, True):
+        return False
+    try:
+        bot.send_message(
+            chat_id,
+            _with_cancel(
+                f"⛔ عذرًا، «{product_name}» غير متاح حاليًا (نفاد الكمية/صيانة).\n"
+                f"نعمل على إعادته في أسرع وقت. شكرًا لتفهّمك 🤍"
+            )
+        )
+    except Exception:
+        pass
+    return True
 
 # حالة الطلبات لكل مستخدم (للخطوات فقط، مش منع تعدد الطلبات)
 user_orders = {}
@@ -112,9 +163,21 @@ def _button_label(p: Product) -> str:
         return f"{p.name}"
 
 def _build_products_keyboard(category: str, page: int = 0):
-    """لوحة منتجات مع صفحات + إبراز المنتجات الموقوفة."""
+    """لوحة منتجات مع صفحات + إبراز المنتجات الموقوفة + (جديد) فلاغ لكل كمية."""
     options = PRODUCTS.get(category, [])
     total = len(options)
+
+    # 🌱 زرع مفاتيح features لكل زر كمية (تظهر عند الإدمن لإيقاف خيار محدد)
+    for p in options:
+        try:
+            ensure_feature(
+                key_product_option(category, p.name),
+                f"{category} — {p.name}",
+                default_active=True
+            )
+        except Exception:
+            pass
+
     pages = max(1, math.ceil(total / PAGE_SIZE_PRODUCTS))
     page = max(0, min(page, pages - 1))
     start = page * PAGE_SIZE_PRODUCTS
@@ -124,16 +187,24 @@ def _build_products_keyboard(category: str, page: int = 0):
     kb = types.InlineKeyboardMarkup(row_width=2)
 
     for p in slice_items:
+        # فعال على مستوى المنتج العام + فعال على مستوى هذا الخيار؟
         try:
-            active = bool(get_product_active(p.product_id))
+            active_global = bool(get_product_active(p.product_id))
         except Exception:
-            active = True
+            active_global = True
+
+        active_option = is_option_enabled(category, p.name, True)
+        active = active_global and active_option
+
         if active:
             # زر عادي لاختيار المنتج
             kb.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
         else:
             # نعرضه لكن كموقوف — ويعطي Alert عند الضغط
-            label = f"🔴 {p.name} — ${float(p.price):.2f} (موقوف)"
+            try:
+                label = f"🔴 {p.name} — ${float(p.price):.2f} (موقوف)"
+            except Exception:
+                label = f"🔴 {p.name} (موقوف)"
             kb.add(types.InlineKeyboardButton(label, callback_data=f"prod_inactive:{p.product_id}"))
 
     # شريط تنقّل
@@ -184,8 +255,13 @@ def handle_player_id(message, bot):
         bot.send_message(user_id, f"❌ {name}، ما عندنا طلب شغّال دلوقتي. اختار المنتج وابدأ من جديد.")
         return
 
-    order["player_id"] = player_id
     product = order["product"]
+
+    # 🔒 تحقّق سريع: قد يكون الإدمن أوقف خيار الكمية بعد ما اخترته
+    if require_option_or_alert(bot, user_id, order.get("category", ""), product.name):
+        return
+
+    order["player_id"] = player_id
     price_syp = convert_price_usd_to_syp(product.price)
 
     keyboard = types.InlineKeyboardMarkup(row_width=2)
@@ -296,21 +372,25 @@ def setup_inline_handlers(bot, admin_ids):
 
         # ابحث عن المنتج
         selected = None
-        for items in PRODUCTS.values():
+        selected_category = None
+        for cat, items in PRODUCTS.items():
             for p in items:
                 if p.product_id == product_id:
                     selected = p
+                    selected_category = cat
                     break
             if selected:
                 break
         if not selected:
             return bot.answer_callback_query(call.id, f"❌ {name}، المنتج مش موجود. جرّب تاني.")
 
-        # ✅ منع اختيار منتج موقوف (Alert برسالة احترافية)
+        # ✅ منع اختيار منتج موقوف (عامًا أو كخيار محدّد)
         if not get_product_active(product_id):
             return bot.answer_callback_query(call.id, _unavailable_short(selected.name), show_alert=True)
+        if require_option_or_alert(bot, call.message.chat.id, selected_category or "", selected.name):
+            return bot.answer_callback_query(call.id)
 
-        user_orders[user_id] = {"category": selected.category, "product": selected}
+        user_orders[user_id] = {"category": selected_category or selected.category, "product": selected}
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
         msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
@@ -427,6 +507,10 @@ def setup_inline_handlers(bot, admin_ids):
         # المنتج ما زال فعّال؟ (Alert برسالة احترافية)
         if not get_product_active(product.product_id):
             return bot.answer_callback_query(call.id, _unavailable_short(product.name), show_alert=True)
+
+        # 🔒 الخيار نفسه ما زال مفعّل؟ (مثلاً: 660 شدة مقفلة)
+        if require_option_or_alert(bot, call.message.chat.id, order.get("category", ""), product.name):
+            return bot.answer_callback_query(call.id)
 
         # تحقق الرصيد (المتاح فقط)
         available = get_available_balance(user_id)
