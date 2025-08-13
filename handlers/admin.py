@@ -334,7 +334,7 @@ def register(bot, history):
 
         # === تأجيل الطلب ===
         if action == "postpone":
-            if not allowed(call.from_user.id, "queue:postpone"):
+            if not (call.from_user.id == ADMIN_MAIN_ID or call.from_user.id in ADMINS or allowed(call.from_user.id, "queue:postpone")):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             # إزالة الكيبورد لتجنُّب النقر المزدوج
             try:
