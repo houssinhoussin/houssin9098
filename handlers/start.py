@@ -13,7 +13,7 @@ CB_START = "cb_start_main"
 CB_CHECK_SUB = "cb_check_sub"
 
 _sub_status_cache = {}
-_sub_status_ttl = 60
+_sub_status_ttl = 3
 _user_start_limit = {}
 _rate_limit_seconds = 5
 
@@ -122,6 +122,7 @@ def register(bot, user_history):
     @bot.callback_query_handler(func=lambda c: c.data == CB_CHECK_SUB)
     def cb_check_subscription(call):
         user_id = call.from_user.id
+        _sub_status_cache.pop(user_id, None)  # force recheck now
         _reset_user_flows(user_id)
 
         if FORCE_SUB_CHANNEL_USERNAME:
