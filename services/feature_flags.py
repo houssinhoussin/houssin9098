@@ -1,13 +1,53 @@
 # services/feature_flags.py
 from __future__ import annotations
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from database.db import get_table
 
 FEATURES_TABLE = "features"
 
-# مفاتيح المزايا (زوّد/قلّل براحتك)
-# ✅ تحتوي على جميع الأزرار الرئيسية + الأزرار الفرعية المذكورة بالهاندلرز
+# ==============================
+# رسائل ونصوص مساعدة
+# ==============================
+UNAVAILABLE_MSG = "⛔ عذرًا، «{label}» غير متاح حاليًا (نفاد الكمية/صيانة). نعمل على إعادته بأسرع وقت. شكرًا لتفهمك 🤍"
+
+def slugify(s: str) -> str:
+    """
+    تبسيط نص للمفاتيح: حروف/أرقام عربية أو لاتينية + شرطات.
+    لا نحاول تحويل العربية، فقط نحذف الرموز ونوحّد الفراغات لشرطات.
+    """
+    if not s:
+        return ""
+    s = str(s).strip()
+    # حوّل الفراغات والواصلات المتعددة لواصلة واحدة
+    s = re.sub(r"[\s_]+", "-", s)
+    # اسمح بالحروف العربية واللاتينية والأرقام والواصلة
+    s = re.sub(r"[^0-9A-Za-z\u0600-\u06FF\-]+", "", s)
+    s = re.sub(r"-{2,}", "-", s)
+    return s.strip("-").lower()
+
+# ==============================
+# مفاتيح جاهزة للعناصر التفصيلية
+# ==============================
+def key_product(product_id: int, name: str) -> str:
+    """
+    مفتاح منتج مفرد (60 شدة/310 جوهرة/120000 توكنز..)
+    نستخدم ID لثبات المفتاح، ونخزّن label بالاسم الحالي.
+    """
+    return f"product:item:{int(product_id)}"
+
+def key_units(carrier: str, qty_label: str) -> str:
+    """
+    مفتاح باقة وحدات لمشغّل معيّن (MTN/Syriatel) بوسم الكمية.
+    مثال: units:mtn:2500-وحدة   —   units:syriatel:1000-وحدة
+    """
+    return f"units:{slugify(carrier)}:{slugify(qty_label)}"
+
+# ==============================
+# البذرة (Features Seed) — أزرار عامة
+# ==============================
+# ✅ تحتوي على الأزرار الرئيسية + الفرعية الثابتة.
 FEATURES_SEED: Dict[str, str] = {
     # ===== المحفظة & السجل =====
     "wallet": "المحفظة",
@@ -16,32 +56,32 @@ FEATURES_SEED: Dict[str, str] = {
     "wallet_p2p": "تحويل بين المحافظ",
 
     # ===== الشحن (القائمة الرئيسية) + الطرق =====
-    "wallet_recharge": "شحن المحفظة",      # موجود أصلاً — أبقيناه
+    "wallet_recharge": "شحن المحفظة",
     "recharge_syriatel": "شحن — سيرياتيل كاش",
     "recharge_mtn": "شحن — أم تي إن كاش",
     "recharge_sham": "شحن — شام كاش",
     "recharge_payeer": "شحن — Payeer",
 
     # ===== تحويل كاش (القائمة + الأنواع) =====
-    "cash_transfer": "تحويل كاش",          # موجود أصلاً — أبقيناه
+    "cash_transfer": "تحويل كاش",
     "cash_syriatel": "تحويل إلى سيرياتيل كاش",
     "cash_mtn": "تحويل إلى أم تي إن كاش",
     "cash_sham": "تحويل إلى شام كاش",
 
     # ===== حوالات شركات (القائمة + الشركات) =====
-    "companies_transfer": "حوالات شركات",  # موجود أصلاً — أبقيناه
+    "companies_transfer": "حوالات شركات",
     "company_alharam": "شركة الهرم",
     "company_alfouad": "شركة الفؤاد",
     "company_shakhashir": "شركة شخاشير",
 
-    # ===== الفواتير والوحدات =====
-    "mtn_unit": "وحدات MTN",               # موجود أصلاً — أبقيناه
-    "syr_unit": "وحدات Syriatel",          # موجود أصلاً — أبقيناه
-    "mtn_bill": "فواتير MTN",              # موجود أصلاً — أبقيناه
-    "syr_bill": "فواتير Syriatel",         # موجود أصلاً — أبقيناه
+    # ===== الفواتير والوحدات (مفاتيح عامة) =====
+    "mtn_unit": "وحدات MTN",
+    "syr_unit": "وحدات Syriatel",
+    "mtn_bill": "فواتير MTN",
+    "syr_bill": "فواتير Syriatel",
 
     # ===== الإنترنت (القائمة + المزودين) =====
-    "internet": "إنترنت",                   # موجود أصلاً — أبقيناه
+    "internet": "إنترنت",
     "internet_provider_tarassul": "مزود — تراسل",
     "internet_provider_mtn": "مزود — أم تي إن",
     "internet_provider_syriatel": "مزود — سيرياتيل",
@@ -58,10 +98,10 @@ FEATURES_SEED: Dict[str, str] = {
     "internet_provider_aint": "مزود — آينت",
 
     # ===== الإعلانات =====
-    "ads": "إعلانات",                       # موجود أصلاً — أبقيناه
+    "ads": "إعلانات",
 
     # ===== الرسوم الجامعية =====
-    "university_fees": "رسوم جامعية",       # موجود أصلاً — أبقيناه
+    "university_fees": "رسوم جامعية",
 
     # ===== الخدمات الإعلامية/السوشيال =====
     "media_services": "خدمات سوشيال/ميديا",
@@ -74,21 +114,23 @@ FEATURES_SEED: Dict[str, str] = {
     "media_copywriting": "خدمة — كتابة محتوى تسويقي",
 
     # ===== المنتجات/الألعاب (قائمة عليا + فئات) =====
-    # ملاحظة: عندك تعطيل على مستوى كل منتج بـ get_product_active،
-    # لكن نضيف أعلام عامة للأزرار الرئيسية لو حبيت توقف القائمة كلها مؤقتًا.
+    # (تعطيل منتج مفرد يتم عبر key_product الديناميكي)
     "products_menu": "المنتجات",
     "games_menu": "شحن ألعاب و تطبيقات",
     "product_pubg": "فئة — شدات ببجي",
     "product_freefire": "فئة — جواهر فري فاير",
     "product_jawaker": "فئة — جواكر",
 
-    # ===== جملة (لو موجود عندك زر بالقائمة) =====
+    # ===== جملة =====
     "wholesale": "شراء جملة",
 }
 
 def _tbl():
     return get_table(FEATURES_TABLE)
 
+# ==============================
+# إنشاء/تحديث المفاتيح
+# ==============================
 def ensure_seed() -> int:
     """يزرع المزايا الافتراضية إن لم تكن موجودة. يرجع عدد المُنشأ."""
     created = 0
@@ -105,6 +147,40 @@ def ensure_seed() -> int:
         logging.exception("[features] ensure_seed failed: %s", e)
     return created
 
+def ensure_feature(key: str, label: str, default_active: bool = True) -> bool:
+    """
+    يضمن وجود مفتاح مخصّص (منتج مفرد/باقة وحدات..). يرجّع True لو تم الإنشاء.
+    """
+    try:
+        r = _tbl().select("key").eq("key", key).limit(1).execute()
+        if not getattr(r, "data", None):
+            _tbl().insert({"key": key, "label": label, "active": bool(default_active)}).execute()
+            return True
+        else:
+            # حدّث الاسم إن تغيّر
+            _tbl().update({"label": label}).eq("key", key).execute()
+            return False
+    except Exception as e:
+        logging.exception("[features] ensure_feature failed (%s): %s", key, e)
+        return False
+
+def ensure_bulk(items: List[Dict[str, Any]]) -> int:
+    """
+    زرع جماعي: items = [{key, label, active?}, ...]
+    يرجّع عدد الجديد المُنشأ.
+    """
+    created = 0
+    for it in items:
+        k = it.get("key")
+        lbl = it.get("label", k)
+        act = it.get("active", True)
+        if ensure_feature(k, lbl, act):
+            created += 1
+    return created
+
+# ==============================
+# استعلامات الحالة
+# ==============================
 def list_features() -> List[Dict[str, Any]]:
     try:
         r = _tbl().select("key,label,active").order("label", desc=False).execute()
@@ -131,9 +207,11 @@ def is_feature_enabled(key: str, default: bool = True) -> bool:
     except Exception:
         return default
 
-# حارس بسيط للاستعمال داخل الهاندلرز
+# ==============================
+# حُرّاس للاستخدام داخل الهاندلرز
+# ==============================
 def block_if_disabled(bot, chat_id: int, feature_key: str, label: Optional[str] = None) -> bool:
-    """إن كانت الميزة مقفلة يرسل تنويه ويرجع True (يعني: قِف)."""
+    """إن كانت الميزة مقفلة يرسل تنويه عام ويرجع True (يعني: قِف)."""
     if is_feature_enabled(feature_key, default=True):
         return False
     lbl = label or FEATURES_SEED.get(feature_key, feature_key)
@@ -142,3 +220,78 @@ def block_if_disabled(bot, chat_id: int, feature_key: str, label: Optional[str] 
     except Exception:
         pass
     return True
+
+def require_feature_or_alert(bot, chat_id: int, key: str, label: str, default_active: bool = True) -> bool:
+    """
+    يضمن المفتاح + يفحص تفعيله.
+    يرجّع True لو يجب إيقاف الإجراء (غير متاح) بعد إرسال رسالة الاعتذار.
+    """
+    ensure_feature(key, label, default_active=default_active)
+    if is_feature_enabled(key, default=True):
+        return False
+    try:
+        bot.send_message(chat_id, UNAVAILABLE_MSG.format(label=label))
+    except Exception:
+        pass
+    return True
+
+# ==============================
+# تجميع/ترتيب للعرض الإداري (اختياري)
+# ==============================
+def _group_for(key: str, label: str) -> str:
+    if key.startswith("product:item:"):
+        return "المنتجات — عناصر مفردة"
+    if key.startswith("units:mtn:"):
+        return "وحدات MTN — باقات"
+    if key.startswith("units:syriatel:"):
+        return "وحدات Syriatel — باقات"
+    if key.startswith("internet_provider_"):
+        return "الإنترنت — المزودون"
+    if key.startswith("recharge_"):
+        return "الشحن — طرق"
+    if key.startswith("cash_"):
+        return "تحويل كاش — الأنواع"
+    if key.startswith("company_"):
+        return "حوالات شركات — الشركات"
+    # مفاتيح ثابتة شائعة:
+    fixed_groups = {
+        "wallet": "المحفظة",
+        "wallet_purchases": "المحفظة",
+        "wallet_transfers": "المحفظة",
+        "wallet_p2p": "المحفظة",
+        "mtn_unit": "الفواتير/الوحدات — عامة",
+        "syr_unit": "الفواتير/الوحدات — عامة",
+        "mtn_bill": "الفواتير/الوحدات — عامة",
+        "syr_bill": "الفواتير/الوحدات — عامة",
+        "internet": "الإنترنت — عام",
+        "ads": "الإعلانات",
+        "university_fees": "الرسوم الجامعية",
+        "media_services": "خدمات الميديا",
+        "media_logo": "خدمات الميديا",
+        "media_sm_daily": "خدمات الميديا",
+        "media_ads_launch": "خدمات الميديا",
+        "media_video_edit": "خدمات الميديا",
+        "media_twitter_threads": "خدمات الميديا",
+        "media_voiceover": "خدمات الميديا",
+        "media_copywriting": "خدمات الميديا",
+        "products_menu": "المنتجات — قوائم",
+        "games_menu": "المنتجات — قوائم",
+        "product_pubg": "المنتجات — قوائم",
+        "product_freefire": "المنتجات — قوائم",
+        "product_jawaker": "المنتجات — قوائم",
+        "wholesale": "شراء جملة",
+    }
+    return fixed_groups.get(key, "أخرى")
+
+def list_features_grouped() -> Dict[str, List[Dict[str, Any]]]:
+    """
+    يرجّع {اسم المجموعة: [features...]} بترتيب أبجدي حسب label داخل كل مجموعة.
+    """
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for row in list_features():
+        grp = _group_for(row["key"], row["label"])
+        out.setdefault(grp, []).append(row)
+    # فرز داخلي
+    for grp, items in out.items():
+        items.sort(key=lambda r: (str(r.get("label") or ""), str(r.get("key"))))
+    return out
