@@ -4,6 +4,8 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
+from zoneinfo import ZoneInfo
+
 from services.ads_service import (
     get_active_ads,
     refresh_daily_quota,
@@ -12,10 +14,12 @@ from services.ads_service import (
     expire_old_ads,
     purge_expired_ads,
     latest_global_post_at,
+    inside_window_now,
+    is_first_service_day_today,
+    allowed_times_today,
 )
-from zoneinfo import ZoneInfo
 
-GLOBAL_MIN_GAP_MINUTES = 10  # 👈 فاصل عالمي بين أي إعلانين
+GLOBAL_MIN_GAP_MINUTES = 10  # فاصل عالمي بين أي إعلانين
 SYRIA_TZ = ZoneInfo("Asia/Damascus")
 
 # نحاول استخدام دالة النشر من handlers/ads.py إن وُجدت
@@ -35,9 +39,7 @@ def _safe_publish(bot, ad_row) -> bool:
         return False
 
 def _global_gap_ok() -> bool:
-    """
-    يتحقق من مرور 10 دقائق على الأقل منذ آخر نشر عالمي لأي إعلان.
-    """
+    """يتحقق من مرور 10 دقائق على الأقل منذ آخر نشر عالمي لأي إعلان."""
     last = latest_global_post_at()
     if not last:
         return True
@@ -45,14 +47,12 @@ def _global_gap_ok() -> bool:
 
 def _pick_due_ad(now_utc: datetime, ads: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    يختار إعلانًا واحدًا “مستحقًا” للنشر الآن:
+    يختار إعلانًا واحدًا مستحقًا للنشر الآن (بعد معالجة نشرات اليوم الأول):
       - يُصفّر الحصة اليومية عند تغير اليوم المحلي.
-      - يتأكد أن posted_today < times_per_day.
-      - يتحقق من أن now >= next_allowed_at(ad).
-      - يمنع التطابق: نختار أول إعلان مؤهل فقط.
-    ترتيب الاختيار: الأقل نشرًا اليوم، ثم الأقدم إنشاءً.
+      - يتحقق من posted_today < allowed_times_today(ad).
+      - يتحقق أن now >= next_allowed_at(ad).
+      - ترتيب تفضيلي: الأقل نشرًا اليوم ثم الأقدم إنشاءً.
     """
-    # إعادة ترتيب: الأقل times_posted أولاً، ثم الأقدم
     def _key(ad):
         posted = int(ad.get("times_posted") or 0)
         created = ad.get("created_at") or ""
@@ -63,10 +63,79 @@ def _pick_due_ad(now_utc: datetime, ads: List[Dict[str, Any]]) -> Optional[Dict[
         if not ad_id:
             continue
 
-        # 1) تصفير الحصة اليومية عند تغيّر اليوم المحلي (داخل سوريا)
+        # تصفير حصة اليوم عند تغيّر اليوم المحلي
         refresh_daily_quota(int(ad_id), ad)
 
-        # 2) حدود الحصة اليومية
+        # حدود الحصة اليومية بحسب اليوم (الأول = 1)
         try:
-            times_per_day = max(1, int(ad.get("times_total") or 1))
-            posted_today = int(ad.get("times_posted")
+            allowed = allowed_times_today(ad)
+            posted_today = int(ad.get("times_posted") or 0)
+        except Exception:
+            continue
+        if posted_today >= allowed:
+            continue
+
+        # حساب السماح التالي داخل النافذة
+        na = next_allowed_at(ad)
+        if now_utc >= na:
+            return ad
+
+    return None
+
+def post_ads_task(bot=None, every_seconds: int = 60):
+    """
+    جدولة تعمل كل دقيقة تقريبًا:
+      1) تعليم المنتهي expired.
+      2) نشر كل الإعلانات ذات “النشرة الأولى لليوم الأول” فورًا إذا كنا داخل النافذة (بدون التقيد بفاصل 10 دقائق).
+      3) اختيار إعلان واحد مستحق الآن وفق الجدولة (مع فاصل 10 دقائق عالمي).
+      4) حذف الإعلانات المنتهية بعد 14 ساعة.
+    """
+    def _tick():
+        now_utc = datetime.now(timezone.utc)
+
+        # 1) تعليم الإعلانات المنتهية
+        try:
+            expire_old_ads()
+        except Exception as e:
+            print(f"[ads_task] expire_old_ads error: {e}")
+
+        try:
+            ads = get_active_ads(limit=400)
+
+            # 2) نشر اليوم الأول فورًا (مرة واحدة) إذا كنا داخل نافذة سوريا
+            if inside_window_now():
+                first_day_due = [
+                    a for a in ads
+                    if is_first_service_day_today(a) and int(a.get("times_posted") or 0) == 0
+                ]
+                # ننشرها جميعًا فورًا دون التقيد بفاصل 10 دقائق
+                for ad in first_day_due:
+                    ad_id = ad.get("id")
+                    if not ad_id:
+                        continue
+                    if _safe_publish(bot, ad):
+                        mark_posted(int(ad_id))
+
+            # 3) بعد ذلك نلتزم بالفاصل العالمي 10 دقائق وبالجدولة
+            if _global_gap_ok():
+                ad = _pick_due_ad(now_utc, ads)
+                if ad is not None:
+                    if _safe_publish(bot, ad):
+                        mark_posted(int(ad["id"]))
+
+        except Exception as e:
+            print(f"[ads_task] main loop error: {e}")
+
+        # 4) تنظيف الإعلانات المنتهية بعد 14 ساعة
+        try:
+            removed = purge_expired_ads(hours_after=14)
+            if removed:
+                print(f"[ads_task] purged expired channel ads: {removed}")
+        except Exception as e:
+            print(f"[ads_task] purge_expired_ads error: {e}")
+
+        # إعادة الجدولة
+        threading.Timer(every_seconds, _tick).start()
+
+    # أول تشغيل بعد 10 ثواني لإتاحة تهيئة البوت
+    threading.Timer(10, _tick).start()
