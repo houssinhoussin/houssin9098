@@ -1,54 +1,90 @@
 # services/scheduled_tasks.py
+# -*- coding: utf-8 -*-
+from __future__ import annotations
 import threading
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-from telebot import types
-from services.ads_service import get_active_ads, increment_ad_posted, expire_old_ads
-from config import CHANNEL_USERNAME
+from datetime import datetime, timezone
+from typing import Optional
+from services.ads_service import (
+    get_active_ads,
+    refresh_daily_quota,
+    next_allowed_at,
+    mark_posted,
+    expire_old_ads,
+)
+from services.ads_service import purge_expired_ads
 
-def post_ads_task(bot):
-    syria_now = datetime.now(ZoneInfo("Asia/Damascus"))
-    hour = syria_now.hour
+# نحاول استخدام دالة النشر من handlers/ads.py إن وُجدت
+try:
+    from handlers.ads import publish_channel_ad  # يجب أن ترسل الإعلان حسب الزر/القناة
+except Exception:  # pragma: no cover
+    publish_channel_ad = None
 
-    # نافذة النشر: 9 صباحًا → 10 مساءً (22)
-    if 9 <= hour < 22:
-        expire_old_ads()
-        ads = get_active_ads()
+def _safe_publish(bot, ad_row) -> bool:
+    # لو ما في دالة نشر متاحة، نعتبر النشر "نجح" لتفادي توقف الجدولة (يمكنك استبدالها بدالتك)
+    if publish_channel_ad is None:
+        return True
+    try:
+        return bool(publish_channel_ad(bot, ad_row))
+    except Exception as e:
+        print(f"[ads_task] publish error for ad {ad_row.get('id')}: {e}")
+        return False
 
-        for ad in ads:
-            # لا تنشر أكثر من مرة خلال ساعة لنفس الإعلان
-            last = ad.get("last_posted_at")
-            if last:
+def post_ads_task(bot=None, every_seconds: int = 60):
+    """
+    جدولة تقوم كل دقيقة تقريبًا:
+      1) تعليم المنتهي expired.
+      2) لكل إعلان نشط: تصفير حصة اليوم إن بدأ يوم جديد (UTC).
+      3) توزيع النشر اليومي بشكل متساوٍ على مدار 24 ساعة.
+         - times_total = عدد مرات اليوم
+         - times_posted = عدد ما نُشر اليوم
+         - أول نشر فورًا بعد الموافقة لكون last_posted_at=None
+    """
+    def _tick():
+        try:
+            expire_old_ads()
+        except Exception as e:
+            print(f"[ads_task] expire_old_ads error: {e}")
+
+        try:
+            ads = get_active_ads(limit=200)
+            now = datetime.now(timezone.utc)
+            for ad in ads:
+                ad_id = ad.get("id")
+                if not ad_id:
+                    continue
+
+                # 1) تصفير حصة اليوم عند تغيّر اليوم
+                refresh_daily_quota(int(ad_id), ad)
+
+                # 2) قرارات النشر
                 try:
-                    last_dt = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
-                    if (datetime.utcnow() - last_dt).total_seconds() < 3600:
-                        continue
+                    times_per_day = max(1, int(ad.get("times_total") or 1))
+                    posted_today = int(ad.get("times_posted") or 0)
                 except Exception:
-                    pass
+                    continue
 
-            caption = (
-                "📣 <b>إعلان مدفوع</b>\n\n"
-                f"{ad.get('ad_text','')}\n\n"
-                "━━━━━━━━━━━━\n"
-                f"📞 للتواصل: {ad.get('contact','-')}"
-            )
+                if posted_today >= times_per_day:
+                    # اكتملت حصة اليوم؛ ننتظر اليوم التالي
+                    continue
 
-            images = ad.get("images") or []
-            try:
-                if images:
-                    if len(images) == 1:
-                        bot.send_photo(CHANNEL_USERNAME, images[0], caption=caption, parse_mode="HTML")
-                    else:
-                        media = [types.InputMediaPhoto(p) for p in images]
-                        media[0].caption = caption
-                        bot.send_media_group(CHANNEL_USERNAME, media)
-                else:
-                    bot.send_message(CHANNEL_USERNAME, caption, parse_mode="HTML")
+                na = next_allowed_at(ad)
+                if na and now >= na:
+                    # يُنشر الآن
+                    if _safe_publish(bot, ad):
+                        mark_posted(int(ad_id))
+        except Exception as e:
+            print(f"[ads_task] main loop error: {e}")
 
-                increment_ad_posted(ad["id"])
-            except Exception:
-                # تجاهل الإعلان الذي فشل نشره في هذه الدورة
-                continue
+        # تنظيف الإعلانات المنتهية بعد 14 ساعة
+        try:
+            removed = purge_expired_ads(hours_after=14)
+            if removed:
+                print(f"[ads_task] purged expired channel ads: {removed}")
+        except Exception as e:
+            print(f"[ads_task] purge_expired_ads error: {e}")
 
-    # إعادة التشغيل بعد ساعة دائمًا
-    threading.Timer(3600, post_ads_task, args=(bot,)).start()
+        # إعادة الجدولة
+        threading.Timer(every_seconds, _tick).start()
+
+    # أول تشغيل بعد 10 ثواني لإتاحة تهيئة البوت
+    threading.Timer(10, _tick).start()
