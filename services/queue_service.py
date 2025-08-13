@@ -81,30 +81,61 @@ def get_next_request():
         return None
 
 def update_request_admin_message_id(request_id: int, message_id: int):
-    # يمكن لاحقًا حفظ message_id إن أردت التحكم في التكرار عبر DB
     logging.debug(f"Skipping update_request_admin_message_id for request {request_id}")
+
+def _payload_get(request_id: int):
+    try:
+        r = get_table(QUEUE_TABLE).select("payload").eq("id", request_id).single().execute()
+        return (r.data or {}).get("payload") or {}
+    except Exception:
+        return {}
+
+def _payload_update(request_id: int, patch: dict):
+    try:
+        old = _payload_get(request_id)
+        newp = dict(old)
+        newp.update(patch or {})
+        get_table(QUEUE_TABLE).update({"payload": newp}).eq("id", request_id).execute()
+    except Exception:
+        logging.exception("payload update failed for request %s", request_id)
 
 def postpone_request(request_id: int):
     """إرجاع الطلب لآخر الدور بتحديث created_at."""
     try:
         now = datetime.utcnow().isoformat()
         get_table(QUEUE_TABLE).update({"created_at": now}).eq("id", request_id).execute()
+        _payload_update(request_id, {"locked_by": None, "locked_by_username": None})
     except Exception:
         logging.exception(f"Error postponing request {request_id}")
 
 def _send_admin_with_photo(bot, photo_id: str, text: str, keyboard: InlineKeyboardMarkup):
+    """يرسل صورة/رسالة لكل الأدمن ويُعيد قائمة [(admin_id, message_id)] للرسائل ذات الأزرار."""
+    sent = []
     try:
         if text and len(text) <= _MAX_CAPTION:
             for admin_id in _admin_targets():
-                bot.send_photo(admin_id, photo_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
+                m = bot.send_photo(admin_id, photo_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
+                try:
+                    sent.append((admin_id, m.message_id))
+                except Exception:
+                    pass
         else:
             for admin_id in _admin_targets():
                 bot.send_photo(admin_id, photo_id, caption="🖼️ تفاصيل الطلب في الرسالة التالية ⬇️", parse_mode="HTML")
-                bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
+                m = bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
+                try:
+                    sent.append((admin_id, m.message_id))
+                except Exception:
+                    pass
     except Exception:
         logging.exception("Failed sending admin photo/message; falling back to text-only")
         for admin_id in _admin_targets():
-            bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
+            m = bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
+            try:
+                sent.append((admin_id, m.message_id))
+            except Exception:
+                pass
+    return sent
 
 def process_queue(bot):
     global _queue_cooldown
@@ -131,9 +162,10 @@ def process_queue(bot):
         text = req.get("request_text", "") or "طلب جديد"
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
-            InlineKeyboardButton("🔁 تأجيل", callback_data=f"admin_queue_postpone_{request_id}"),
-            InlineKeyboardButton("✅ تأكيد",  callback_data=f"admin_queue_accept_{request_id}"),
-            InlineKeyboardButton("🚫 إلغاء", callback_data=f"admin_queue_cancel_{request_id}"),
+            InlineKeyboardButton("📌 استلمت", callback_data=f"admin_queue_claim_{request_id}"),
+            InlineKeyboardButton("🔁 تأجيل",  callback_data=f"admin_queue_postpone_{request_id}"),
+            InlineKeyboardButton("✅ تأكيد",   callback_data=f"admin_queue_accept_{request_id}"),
+            InlineKeyboardButton("🚫 إلغاء",  callback_data=f"admin_queue_cancel_{request_id}"),
             InlineKeyboardButton("✉️ رسالة للعميل", callback_data=f"admin_queue_message_{request_id}"),
             InlineKeyboardButton("🖼️ صورة للعميل", callback_data=f"admin_queue_photo_{request_id}")
         )
@@ -142,18 +174,19 @@ def process_queue(bot):
         typ      = payload.get("type")
         photo_id = payload.get("photo")
 
+        sent_pairs = []  # [(admin_id, message_id)]
+
         # =========== فرع شحن المحفظة ===========
         if typ == "recharge" and photo_id:
-            _send_admin_with_photo(bot, photo_id, text, keyboard)
+            sent_pairs = _send_admin_with_photo(bot, photo_id, text, keyboard)
 
         # =========== فرع إعلانات القناة ===========
         elif typ == "ads":
             images = payload.get("images", [])
             if images:
                 if len(images) == 1:
-                    _send_admin_with_photo(bot, images[0], text, keyboard)
+                    sent_pairs = _send_admin_with_photo(bot, images[0], text, keyboard)
                 else:
-                    # مجموعة صور أولًا (بدون أزرار)، ثم رسالة التفاصيل مع الأزرار
                     try:
                         media = [InputMediaPhoto(fid) for fid in images]
                         for admin_id in _admin_targets():
@@ -161,16 +194,34 @@ def process_queue(bot):
                     except Exception:
                         logging.exception("Failed to send media group, fallback to message only")
                     for admin_id in _admin_targets():
-                        bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+                        m = bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+                        try:
+                            sent_pairs.append((admin_id, m.message_id))
+                        except Exception:
+                            pass
             else:
                 for admin_id in _admin_targets():
-                    bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+                    m = bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
+                    try:
+                        sent_pairs.append((admin_id, m.message_id))
+                    except Exception:
+                        pass
 
         # =========== الأنواع الأخرى ===========
         else:
             for admin_id in _admin_targets():
-                bot.send_message(admin_id, text, reply_markup=keyboard, parse_mode="HTML")
+                m = bot.send_message(admin_id, text, reply_markup=keyboard, parse_mode="HTML")
+                try:
+                    sent_pairs.append((admin_id, m.message_id))
+                except Exception:
+                    pass
 
+        # حفظ admin_msgs مع تفريغ القفل
+        try:
+            entries = [{'admin_id': aid, 'message_id': mid} for (aid, mid) in sent_pairs if aid and mid]
+            _payload_update(request_id, {'admin_msgs': entries, 'locked_by': None, 'locked_by_username': None})
+        except Exception:
+            logging.exception("Failed to persist admin message IDs for request %s", request_id)
 
 def queue_cooldown_start(bot=None):
     """إطلاق فترة خمول قصيرة ثم إعادة تشغيل الطابور."""
