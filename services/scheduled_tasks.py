@@ -2,16 +2,21 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import threading
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List, Dict, Any
 from services.ads_service import (
     get_active_ads,
     refresh_daily_quota,
     next_allowed_at,
     mark_posted,
     expire_old_ads,
+    purge_expired_ads,
+    latest_global_post_at,
 )
-from services.ads_service import purge_expired_ads
+from zoneinfo import ZoneInfo
+
+GLOBAL_MIN_GAP_MINUTES = 10  # 👈 فاصل عالمي بين أي إعلانين
+SYRIA_TZ = ZoneInfo("Asia/Damascus")
 
 # نحاول استخدام دالة النشر من handlers/ads.py إن وُجدت
 try:
@@ -20,7 +25,7 @@ except Exception:  # pragma: no cover
     publish_channel_ad = None
 
 def _safe_publish(bot, ad_row) -> bool:
-    # لو ما في دالة نشر متاحة، نعتبر النشر "نجح" لتفادي توقف الجدولة (يمكنك استبدالها بدالتك)
+    # لو ما في دالة نشر متاحة، نعتبر النشر "نجح" حتى لا تتوقف الجدولة
     if publish_channel_ad is None:
         return True
     try:
@@ -29,62 +34,39 @@ def _safe_publish(bot, ad_row) -> bool:
         print(f"[ads_task] publish error for ad {ad_row.get('id')}: {e}")
         return False
 
-def post_ads_task(bot=None, every_seconds: int = 60):
+def _global_gap_ok() -> bool:
     """
-    جدولة تقوم كل دقيقة تقريبًا:
-      1) تعليم المنتهي expired.
-      2) لكل إعلان نشط: تصفير حصة اليوم إن بدأ يوم جديد (UTC).
-      3) توزيع النشر اليومي بشكل متساوٍ على مدار 24 ساعة.
-         - times_total = عدد مرات اليوم
-         - times_posted = عدد ما نُشر اليوم
-         - أول نشر فورًا بعد الموافقة لكون last_posted_at=None
+    يتحقق من مرور 10 دقائق على الأقل منذ آخر نشر عالمي لأي إعلان.
     """
-    def _tick():
+    last = latest_global_post_at()
+    if not last:
+        return True
+    return (datetime.now(timezone.utc) - last) >= timedelta(minutes=GLOBAL_MIN_GAP_MINUTES)
+
+def _pick_due_ad(now_utc: datetime, ads: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    يختار إعلانًا واحدًا “مستحقًا” للنشر الآن:
+      - يُصفّر الحصة اليومية عند تغير اليوم المحلي.
+      - يتأكد أن posted_today < times_per_day.
+      - يتحقق من أن now >= next_allowed_at(ad).
+      - يمنع التطابق: نختار أول إعلان مؤهل فقط.
+    ترتيب الاختيار: الأقل نشرًا اليوم، ثم الأقدم إنشاءً.
+    """
+    # إعادة ترتيب: الأقل times_posted أولاً، ثم الأقدم
+    def _key(ad):
+        posted = int(ad.get("times_posted") or 0)
+        created = ad.get("created_at") or ""
+        return (posted, created)
+
+    for ad in sorted(ads, key=_key):
+        ad_id = ad.get("id")
+        if not ad_id:
+            continue
+
+        # 1) تصفير الحصة اليومية عند تغيّر اليوم المحلي (داخل سوريا)
+        refresh_daily_quota(int(ad_id), ad)
+
+        # 2) حدود الحصة اليومية
         try:
-            expire_old_ads()
-        except Exception as e:
-            print(f"[ads_task] expire_old_ads error: {e}")
-
-        try:
-            ads = get_active_ads(limit=200)
-            now = datetime.now(timezone.utc)
-            for ad in ads:
-                ad_id = ad.get("id")
-                if not ad_id:
-                    continue
-
-                # 1) تصفير حصة اليوم عند تغيّر اليوم
-                refresh_daily_quota(int(ad_id), ad)
-
-                # 2) قرارات النشر
-                try:
-                    times_per_day = max(1, int(ad.get("times_total") or 1))
-                    posted_today = int(ad.get("times_posted") or 0)
-                except Exception:
-                    continue
-
-                if posted_today >= times_per_day:
-                    # اكتملت حصة اليوم؛ ننتظر اليوم التالي
-                    continue
-
-                na = next_allowed_at(ad)
-                if na and now >= na:
-                    # يُنشر الآن
-                    if _safe_publish(bot, ad):
-                        mark_posted(int(ad_id))
-        except Exception as e:
-            print(f"[ads_task] main loop error: {e}")
-
-        # تنظيف الإعلانات المنتهية بعد 14 ساعة
-        try:
-            removed = purge_expired_ads(hours_after=14)
-            if removed:
-                print(f"[ads_task] purged expired channel ads: {removed}")
-        except Exception as e:
-            print(f"[ads_task] purge_expired_ads error: {e}")
-
-        # إعادة الجدولة
-        threading.Timer(every_seconds, _tick).start()
-
-    # أول تشغيل بعد 10 ثواني لإتاحة تهيئة البوت
-    threading.Timer(10, _tick).start()
+            times_per_day = max(1, int(ad.get("times_total") or 1))
+            posted_today = int(ad.get("times_posted")
