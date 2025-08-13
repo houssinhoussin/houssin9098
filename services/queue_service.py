@@ -1,34 +1,39 @@
+# -*- coding: utf-8 -*-
 # services/queue_service.py
+
 import time
 import logging
 from datetime import datetime
 import httpx
 import threading
+
 from database.db import get_table
 from config import ADMIN_MAIN_ID, ADMINS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 QUEUE_TABLE = "pending_requests"
+
 _queue_lock = threading.Lock()
 _queue_cooldown = False
-_recently_sent = {}
-_RECENT_TTL = 40  # seconds
+
+# منع التكرار ضمن نافذة قصيرة (حماية إضافية من تعدد الاستدعاءات)
+_recently_sent = {}        # {request_id: last_ts}
+_RECENT_TTL     = 40       # ثوانٍ
+
 def _admin_targets():
+    """إرجاع قائمة الإداريين (ADMINS + ADMIN_MAIN_ID) بدون تكرار، مع الحفاظ على الترتيب."""
     try:
         lst = list(ADMINS) if isinstance(ADMINS, (list, tuple, set)) else []
     except Exception:
         lst = []
     if ADMIN_MAIN_ID not in lst:
         lst.append(ADMIN_MAIN_ID)
-    # أزل التكرارات مع الحفاظ على الترتيب
-    seen = set()
-    out = []
+    seen, out = set(), []
     for a in lst:
         if a not in seen:
             out.append(a)
             seen.add(a)
     return out
-
 
 # حد أقصى آمن لكابتشن الصور في تليجرام (نخلّيه أقل من 1024 بهامش)
 _MAX_CAPTION = 900
@@ -62,7 +67,7 @@ def get_next_request():
         res = (
             get_table(QUEUE_TABLE)
             .select("*")
-            .order("created_at")
+            .order("created_at")  # تصاعديًا (متوافق مع نسختك من supabase-py)
             .limit(1)
             .execute()
         )
@@ -76,15 +81,14 @@ def get_next_request():
         return None
 
 def update_request_admin_message_id(request_id: int, message_id: int):
+    # يمكن لاحقًا حفظ message_id إن أردت التحكم في التكرار عبر DB
     logging.debug(f"Skipping update_request_admin_message_id for request {request_id}")
 
 def postpone_request(request_id: int):
+    """إرجاع الطلب لآخر الدور بتحديث created_at."""
     try:
         now = datetime.utcnow().isoformat()
-        get_table(QUEUE_TABLE) \
-            .update({"created_at": now}) \
-            .eq("id", request_id) \
-            .execute()
+        get_table(QUEUE_TABLE).update({"created_at": now}).eq("id", request_id).execute()
     except Exception:
         logging.exception(f"Error postponing request {request_id}")
 
@@ -103,7 +107,6 @@ def _send_admin_with_photo(bot, photo_id: str, text: str, keyboard: InlineKeyboa
             bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
 
 def process_queue(bot):
-(bot):
     global _queue_cooldown
     if _queue_cooldown:
         return
@@ -114,15 +117,17 @@ def process_queue(bot):
             return
 
         request_id = req.get("id")
-        # De-dup: avoid re-sending same request within TTL window
+
+        # منع تكرار إرسال نفس الطلب ضمن نافذة قصيرة
         try:
             now_ts = int(time.time())
-            last = _recently_sent.get(request_id)
+            last   = _recently_sent.get(request_id)
             if last and (now_ts - last) < _RECENT_TTL:
                 return
             _recently_sent[request_id] = now_ts
         except Exception:
             pass
+
         text = req.get("request_text", "") or "طلب جديد"
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
@@ -152,40 +157,33 @@ def process_queue(bot):
                     try:
                         media = [InputMediaPhoto(fid) for fid in images]
                         for admin_id in _admin_targets():
-                        bot.send_media_group(admin_id, media)
+                            bot.send_media_group(admin_id, media)
                     except Exception:
                         logging.exception("Failed to send media group, fallback to message only")
                     for admin_id in _admin_targets():
-            bot.send_message(admin_id, text,
-                        parse_mode="HTML",
-                        reply_markup=keyboard
-                    )
+                        bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
             else:
                 for admin_id in _admin_targets():
-            bot.send_message(admin_id, text,
-                    parse_mode="HTML",
-                    reply_markup=keyboard
-                )
+                    bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=keyboard)
 
         # =========== الأنواع الأخرى ===========
         else:
             for admin_id in _admin_targets():
-            bot.send_message(admin_id, text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
+                bot.send_message(admin_id, text, reply_markup=keyboard, parse_mode="HTML")
+
 
 def queue_cooldown_start(bot=None):
+    """إطلاق فترة خمول قصيرة ثم إعادة تشغيل الطابور."""
     global _queue_cooldown
     _queue_cooldown = True
+
     def release():
         global _queue_cooldown
-        time.sleep(30)
+        time.sleep(30)           # نصف دقيقة
         _queue_cooldown = False
-_recently_sent = {}
-_RECENT_TTL = 40  # seconds
         if bot is not None:
             process_queue(bot)
+
     threading.Thread(target=release, daemon=True).start()
 
-# نهاية ملف queue_service.py
+# نهاية الملف
