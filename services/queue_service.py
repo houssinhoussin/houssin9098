@@ -60,7 +60,7 @@ def get_next_request():
         res = (
             get_table(QUEUE_TABLE)
             .select("*")
-            .order("created_at", ascending=True)
+            .order("created_at")
             .limit(1)
             .execute()
         )
