@@ -329,12 +329,34 @@ def register(bot, history):
             pass
 
         # === تأجيل الطلب ===
-        if action == "postpone":
+                if action == "postpone":
             if not allowed(call.from_user.id, "queue:postpone"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
+            # إزالة الكيبورد لتجنُّب النقر المزدوج
+            try:
+                from services.telegram_safety import remove_inline_keyboard
+            except Exception:
+                from telegram_safety import remove_inline_keyboard
+            try:
+                remove_inline_keyboard(bot, call.message)
+            except Exception:
+                pass
+            # تأجيل الطلب بإرجاعه لآخر الدور
             postpone_request(request_id)
-            bot.send_message(user_id, f"⏳ عزيزي {name}، تم تنظيم دور طلبك مجددًا بسبب ضغط أو عُطل مؤقت. نعتذر عن التأخير، وسيتم تنفيذ طلبك قريبًا بإذن الله. شكرًا لتفهّمك.")
-            bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
+            # إبلاغ العميل برسالة اعتذار/تنظيم الدور
+            try:
+                bot.send_message(
+                    user_id,
+                    f"⏳ عزيزي {name}، تم تنظيم دور طلبك مجددًا بسبب ضغط أو عُطل مؤقت. "
+                    "نعتذر عن التأخير، وسيتم تنفيذ طلبك قريبًا بإذن الله. شكرًا لتفهّمك."
+                )
+            except Exception as e:
+                logging.error(f"[admin] postpone notify error: {e}", exc_info=True)
+            # تأكيد للأدمن + بدء فترة الخمول
+            try:
+                bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
+            except Exception:
+                pass
             queue_cooldown_start(bot)
             return
 
