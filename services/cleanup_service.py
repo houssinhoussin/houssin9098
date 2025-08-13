@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Iterable, Optional
 from database.db import get_table
 
+# جداول "نتائج عمليات" تُحذف بعد 14 ساعة (لا تلمس جدول catalog للمنتجات)
 EPHEMERAL_TABLES: List[str] = [
     "purchases",
     "game_purchases",
@@ -18,6 +19,7 @@ EPHEMERAL_TABLES: List[str] = [
     "wholesale_purchases",
 ]
 
+# جداول تُعدّ "نشاطًا" للمستخدم (تمنع حذف حسابه إن حصلت بعد cutoff)
 ACTIVITY_TABLES = {
     "transactions": "timestamp",
     "purchases": "created_at",
@@ -47,6 +49,11 @@ def _safe_delete_by(table_name: str, col: str, cutoff_iso: str) -> int:
         return 0
 
 def purge_ephemeral_after(hours: int = 14) -> Dict[str, int]:
+    """
+    يحذف سجلات الجداول المؤقتة:
+      - أولوية لـ expire_at <= الآن (لو العمود موجود)
+      - وإلا created_at <= now - 14h
+    """
     res: Dict[str, int] = {}
     now_iso = _iso(_utc_now())
     cutoff_iso = _iso(_cutoff(hours=hours))
@@ -69,6 +76,11 @@ def _has_activity_since(user_id: int, since_iso: str) -> bool:
     return False
 
 def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[str, Any]]:
+    """
+    يعرض المحافظ المرشّحة للحذف (لا يحذف):
+      - updated_at <= now - days (أو created_at إذا updated_at غير موجود)
+      - لا نشاط بعد تاريخ القطع
+    """
     cutoff_iso = _iso(_cutoff(days=days))
     rows: List[Dict[str, Any]] = []
     try:
@@ -91,6 +103,9 @@ def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[st
     return out
 
 def delete_inactive_users(days: int = 33, batch_size: int = 500) -> List[int]:
+    """
+    يحذف فعليًا محافظ houssin363 الخاملة 33 يومًا (حتى لو فيها رصيد) بشرط لا نشاط حديث.
+    """
     candidates = preview_inactive_users(days=days)
     ids = [int(r["user_id"]) for r in candidates if r.get("user_id") is not None]
     if not ids:
@@ -120,7 +135,11 @@ def _housekeeping_tick(bot=None):
         print(f"[cleanup] delete_inactive_users error: {e}")
 
 def schedule_housekeeping(bot=None, every_seconds: int = 3600):
+    """
+    يشغّل التنظيف كل ساعة بخيط منفصل.
+    """
     def _loop():
         _housekeeping_tick(bot)
         threading.Timer(every_seconds, _loop).start()
+    # أول تشغيل بعد 60 ثانية من إقلاع البوت
     threading.Timer(60, _loop).start()
