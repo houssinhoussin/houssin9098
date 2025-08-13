@@ -21,7 +21,7 @@ _recently_sent = {}        # {request_id: last_ts}
 _RECENT_TTL     = 40       # ثوانٍ
 
 def _admin_targets():
-    """إرجاع قائمة الإداريين (ADMINS + ADMIN_MAIN_ID) بدون تكرار، مع الحفاظ على الترتيب."""
+    # إرجاع قائمة الإداريين (ADMINS + ADMIN_MAIN_ID) بدون تكرار، مع الحفاظ على الترتيب.
     try:
         lst = list(ADMINS) if isinstance(ADMINS, (list, tuple, set)) else []
     except Exception:
@@ -35,7 +35,7 @@ def _admin_targets():
             seen.add(a)
     return out
 
-# حد أقصى آمن لكابتشن الصور في تليجرام (نخلّيه أقل من 1024 بهامش)
+# حد أقصى آمن لكابتشن الصور
 _MAX_CAPTION = 900
 
 def add_pending_request(user_id: int, username: str, request_text: str, payload=None):
@@ -67,7 +67,7 @@ def get_next_request():
         res = (
             get_table(QUEUE_TABLE)
             .select("*")
-            .order("created_at")  # تصاعديًا (متوافق مع نسختك من supabase-py)
+            .order("created_at")
             .limit(1)
             .execute()
         )
@@ -100,7 +100,7 @@ def _payload_update(request_id: int, patch: dict):
         logging.exception("payload update failed for request %s", request_id)
 
 def postpone_request(request_id: int):
-    """إرجاع الطلب لآخر الدور بتحديث created_at."""
+    # إرجاع الطلب لآخر الدور بتحديث created_at.
     try:
         now = datetime.utcnow().isoformat()
         get_table(QUEUE_TABLE).update({"created_at": now}).eq("id", request_id).execute()
@@ -109,7 +109,7 @@ def postpone_request(request_id: int):
         logging.exception(f"Error postponing request {request_id}")
 
 def _send_admin_with_photo(bot, photo_id: str, text: str, keyboard: InlineKeyboardMarkup):
-    """يرسل صورة/رسالة لكل الأدمن ويُعيد قائمة [(admin_id, message_id)] للرسائل ذات الأزرار."""
+    # يرسل صورة/رسالة لكل الأدمن ويُعيد قائمة [(admin_id, message_id)] للرسائل ذات الأزرار.
     sent = []
     try:
         if text and len(text) <= _MAX_CAPTION:
@@ -219,12 +219,17 @@ def process_queue(bot):
         # حفظ admin_msgs مع تفريغ القفل
         try:
             entries = [{'admin_id': aid, 'message_id': mid} for (aid, mid) in sent_pairs if aid and mid]
-            _payload_update(request_id, {'admin_msgs': entries, 'locked_by': None, 'locked_by_username': None})
+            # لاحظ: نبقي payload الأخرى كما هي ونضيف/نحدث admin_msgs والقفل
+            old = _payload_get(request_id)
+            old['admin_msgs'] = entries
+            old['locked_by'] = None
+            old['locked_by_username'] = None
+            get_table(QUEUE_TABLE).update({"payload": old}).eq("id", request_id).execute()
         except Exception:
             logging.exception("Failed to persist admin message IDs for request %s", request_id)
 
 def queue_cooldown_start(bot=None):
-    """إطلاق فترة خمول قصيرة ثم إعادة تشغيل الطابور."""
+    # إطلاق فترة خمول قصيرة ثم إعادة تشغيل الطابور.
     global _queue_cooldown
     _queue_cooldown = True
 
@@ -236,5 +241,3 @@ def queue_cooldown_start(bot=None):
             process_queue(bot)
 
     threading.Thread(target=release, daemon=True).start()
-
-# نهاية الملف
