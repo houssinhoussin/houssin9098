@@ -5,12 +5,29 @@ from datetime import datetime
 import httpx
 import threading
 from database.db import get_table
-from config import ADMIN_MAIN_ID
+from config import ADMIN_MAIN_ID, ADMINS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 QUEUE_TABLE = "pending_requests"
 _queue_lock = threading.Lock()
-_queue_cooldown = False  # يمنع إظهار أكثر من طلب
+_queue_cooldown = False
+        logging.info("[queue] cooldown release; re-processing queue")  # يمنع إظهار أكثر من طلب
+def _admin_targets():
+    try:
+        lst = list(ADMINS) if isinstance(ADMINS, (list, tuple, set)) else []
+    except Exception:
+        lst = []
+    if ADMIN_MAIN_ID not in lst:
+        lst.append(ADMIN_MAIN_ID)
+    # أزل التكرارات مع الحفاظ على الترتيب
+    seen = set()
+    out = []
+    for a in lst:
+        if a not in seen:
+            out.append(a)
+            seen.add(a)
+    return out
+
 
 # حد أقصى آمن لكابتشن الصور في تليجرام (نخلّيه أقل من 1024 بهامش)
 _MAX_CAPTION = 900
@@ -44,7 +61,7 @@ def get_next_request():
         res = (
             get_table(QUEUE_TABLE)
             .select("*")
-            .order("created_at")
+            .order("created_at", ascending=True)
             .limit(1)
             .execute()
         )
@@ -61,6 +78,7 @@ def update_request_admin_message_id(request_id: int, message_id: int):
     logging.debug(f"Skipping update_request_admin_message_id for request {request_id}")
 
 def postpone_request(request_id: int):
+    logging.info("[queue] postpone_request id=%s", request_id)
     try:
         now = datetime.utcnow().isoformat()
         get_table(QUEUE_TABLE) \
@@ -173,12 +191,15 @@ def process_queue(bot):
             )
 
 def queue_cooldown_start(bot=None):
+    logging.info("[queue] cooldown start")
     global _queue_cooldown
     _queue_cooldown = True
     def release():
+        logging.info("[queue] cooldown tick...")
         global _queue_cooldown
-        time.sleep(60)
+        time.sleep(30)
         _queue_cooldown = False
+        logging.info("[queue] cooldown release; re-processing queue")
         if bot is not None:
             process_queue(bot)
     threading.Thread(target=release, daemon=True).start()
