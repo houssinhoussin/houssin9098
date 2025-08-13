@@ -11,6 +11,8 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedia
 QUEUE_TABLE = "pending_requests"
 _queue_lock = threading.Lock()
 _queue_cooldown = False
+_recently_sent = {}
+_RECENT_TTL = 40  # seconds
 def _admin_targets():
     try:
         lst = list(ADMINS) if isinstance(ADMINS, (list, tuple, set)) else []
@@ -87,43 +89,21 @@ def postpone_request(request_id: int):
         logging.exception(f"Error postponing request {request_id}")
 
 def _send_admin_with_photo(bot, photo_id: str, text: str, keyboard: InlineKeyboardMarkup):
-    """
-    يرسل صورة + رسالة الإدمن.
-    لو النص أطول من حد الكابتشن، نرسل كابتشن قصير ثم رسالة كاملة مع الأزرار.
-    """
     try:
         if text and len(text) <= _MAX_CAPTION:
-            bot.send_photo(
-                ADMIN_MAIN_ID,
-                photo_id,
-                caption=text,
-                parse_mode="HTML",
-                reply_markup=keyboard
-            )
+            for admin_id in _admin_targets():
+                bot.send_photo(admin_id, photo_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
         else:
-            # كابتشن قصير + نص كامل بعده
-            bot.send_photo(
-                ADMIN_MAIN_ID,
-                photo_id,
-                caption="🖼️ تفاصيل الطلب في الرسالة التالية ⬇️",
-                parse_mode="HTML"
-            )
-            bot.send_message(
-                ADMIN_MAIN_ID,
-                text or "طلب جديد",
-                parse_mode="HTML",
-                reply_markup=keyboard
-            )
+            for admin_id in _admin_targets():
+                bot.send_photo(admin_id, photo_id, caption="🖼️ تفاصيل الطلب في الرسالة التالية ⬇️", parse_mode="HTML")
+                bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
     except Exception:
         logging.exception("Failed sending admin photo/message; falling back to text-only")
-        bot.send_message(
-            ADMIN_MAIN_ID,
-            text or "طلب جديد",
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        for admin_id in _admin_targets():
+            bot.send_message(admin_id, text or "طلب جديد", parse_mode="HTML", reply_markup=keyboard)
 
 def process_queue(bot):
+(bot):
     global _queue_cooldown
     if _queue_cooldown:
         return
@@ -134,6 +114,15 @@ def process_queue(bot):
             return
 
         request_id = req.get("id")
+        # De-dup: avoid re-sending same request within TTL window
+        try:
+            now_ts = int(time.time())
+            last = _recently_sent.get(request_id)
+            if last and (now_ts - last) < _RECENT_TTL:
+                return
+            _recently_sent[request_id] = now_ts
+        except Exception:
+            pass
         text = req.get("request_text", "") or "طلب جديد"
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
@@ -162,28 +151,26 @@ def process_queue(bot):
                     # مجموعة صور أولًا (بدون أزرار)، ثم رسالة التفاصيل مع الأزرار
                     try:
                         media = [InputMediaPhoto(fid) for fid in images]
-                        bot.send_media_group(ADMIN_MAIN_ID, media)
+                        for admin_id in _admin_targets():
+                        bot.send_media_group(admin_id, media)
                     except Exception:
                         logging.exception("Failed to send media group, fallback to message only")
-                    bot.send_message(
-                        ADMIN_MAIN_ID,
-                        text,
+                    for admin_id in _admin_targets():
+            bot.send_message(admin_id, text,
                         parse_mode="HTML",
                         reply_markup=keyboard
                     )
             else:
-                bot.send_message(
-                    ADMIN_MAIN_ID,
-                    text,
+                for admin_id in _admin_targets():
+            bot.send_message(admin_id, text,
                     parse_mode="HTML",
                     reply_markup=keyboard
                 )
 
         # =========== الأنواع الأخرى ===========
         else:
-            bot.send_message(
-                ADMIN_MAIN_ID,
-                text,
+            for admin_id in _admin_targets():
+            bot.send_message(admin_id, text,
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
@@ -195,6 +182,8 @@ def queue_cooldown_start(bot=None):
         global _queue_cooldown
         time.sleep(30)
         _queue_cooldown = False
+_recently_sent = {}
+_RECENT_TTL = 40  # seconds
         if bot is not None:
             process_queue(bot)
     threading.Thread(target=release, daemon=True).start()
