@@ -1,143 +1,135 @@
+# -*- coding: utf-8 -*-
 # services/maintenance_worker.py
+from __future__ import annotations
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, List
 from database.db import get_table
+from services.cleanup_service import purge_ephemeral_after, preview_inactive_users, delete_inactive_users
 
-OUTBOX = "notifications_outbox"
-WALLETS = "houssin363"
+OUTBOX_TABLE = "notifications_outbox"
 
-# الجداول القصيرة العمر (استثناء الإعلانات كما طلبت)
-SHORT_TABLES = [
-    "bill_and_units_purchases",
-    "cash_transfer_purchases",
-    "companies_transfer_purchases",
-    "game_purchases",
-    "internet_providers_purchases",
-    "university_fees_purchases",
-    "wholesale_purchases",
-    # "ads_purchases" ← مستثناة
-]
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
-def cleanup_short_lived_tables():
-    """حذف سجلات أقدم من 14 ساعة للجداول المحددة + استثناء pending_requests[type='ads']."""
-    threshold = (datetime.utcnow() - timedelta(hours=14)).isoformat()
-    for t in SHORT_TABLES:
-        try:
-            get_table(t).delete().lte("created_at", threshold).execute()
-        except Exception:
-            pass
+def _now_iso() -> str:
+    return _now().isoformat()
+
+def _insert_outbox_if_absent(user_id: int, message: str, kind: str, when_iso: str):
+    """
+    يمنع التكرار لنفس (user_id, kind) إذا كانت رسالة بنفس النوع غير مرسلة بعد.
+    """
     try:
-        get_table("pending_requests") \
-            .delete() \
-            .lte("created_at", threshold) \
-            .neq("type", "ads") \
+        exists = (
+            get_table(OUTBOX_TABLE)
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("kind", kind)
+            .is_("sent_at", None)
+            .limit(1)
             .execute()
+        )
+        if exists.data:
+            return
     except Exception:
-        pass
-
-def _iso_to_dt(s: str):
+        # لو الجدول لا يوجد، نتجاهل التنبيه بصمت
+        return
     try:
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-def _last_activity_for_user(user_id: int):
-    """أعلى طابع زمني لأي نشاط معروف للمستخدم."""
-    candidates = []
-    def bump(tbl, col="created_at"):
-        try:
-            r = get_table(tbl).select(col).eq("user_id", user_id).order(col, desc=True).limit(1).execute().data or []
-            if r and r[0].get(col):
-                dt = _iso_to_dt(r[0][col])
-                if dt: candidates.append(dt)
-        except Exception:
-            pass
-
-    # مصادر النشاط
-    for t in ["purchases","holds","ads_purchases","bill_and_units_purchases","cash_transfer_purchases",
-              "companies_transfer_purchases","internet_providers_purchases","university_fees_purchases",
-              "wholesale_purchases","pending_requests"]:
-        bump(t)
-    bump("transactions", col="timestamp")
-
-    # created_at/updated_at من جدول المحافظ نفسه
-    try:
-        u = get_table(WALLETS).select("created_at,updated_at").eq("user_id", user_id).single().execute().data or {}
-        for k in ("created_at","updated_at"):
-            dt = _iso_to_dt(u.get(k))
-            if dt: candidates.append(dt)
-    except Exception:
-        pass
-
-    return max(candidates) if candidates else None
-
-def _enqueue(user_id: int, template: str, payload: dict | None = None):
-    try:
-        get_table(OUTBOX).insert({
+        get_table(OUTBOX_TABLE).insert({
             "user_id": user_id,
-            "template": template,
-            "payload": payload or {},
-            "scheduled_at": datetime.utcnow().isoformat()
+            "message": message,
+            "kind": kind,
+            "scheduled_at": when_iso,
+            "created_at": _now_iso(),
+            "parse_mode": "HTML",
         }).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[maintenance] insert outbox failed: {e}")
 
-def wallet_notifications_and_cleanup():
-    """تنبيهات 6/3/0 أيام ثم حذف المحفظة بعد 33 يوم خمول — بلا أي خصم/إضافة أموال."""
+def _warn_text(days_left: int) -> str:
+    if days_left == 6:
+        return (
+            "⏰ <b>تنبيه</b>\n"
+            "سيتم حذف محفظتك بعد <b>6 أيام</b> بسبب عدم النشاط لمدة 33 يومًا.\n"
+            "✅ أي نشاط (عملية واحدة فقط) يعيد المهلة من جديد.\n"
+            "نوصيك بسحب/صرف رصيدك أو تنفيذ عملية بسيطة لتفادي الحذف."
+        )
+    if days_left == 3:
+        return (
+            "⏰ <b>تنبيه مهم</b>\n"
+            "يتبقى <b>3 أيام</b> قبل حذف محفظتك لعدم النشاط (33 يومًا).\n"
+            "✅ نفّذ أي عملية الآن لتجديد المهلة، أو اسحب رصيدك إن وُجد."
+        )
+    # اليوم الأخير
+    return (
+        "⚠️ <b>اليوم الأخير</b>\n"
+        "سيتم حذف محفظتك اليوم بسبب عدم النشاط لمدة 33 يومًا.\n"
+        "تنويه: لسنا مسؤولين عن أي مبلغ بعد انتهاء مدة التحذير.\n"
+        "من سياسة خدماتنا: حذف المحفظة عند وجود جمود لمدة 33 يومًا.\n"
+        "سارع بتنفيذ أي عملية لتجديد المهلة (حتى عملية واحدة تكفي)."
+    )
+
+def _process_wallet_warnings():
+    """
+    ينشئ تنبيهات 6 و3 واليوم الأخير للمحافظ الخاملة.
+    """
+    # مرشحو اليوم الأخير (33 يوم خمول)
+    final_candidates = preview_inactive_users(days=33)
+    for r in final_candidates:
+        uid = int(r["user_id"])
+        _insert_outbox_if_absent(uid, _warn_text(0), "wallet_delete_0d", _now_iso())
+
+    # مرشحو 3 أيام (30 يوم خمول)
+    in3_candidates = preview_inactive_users(days=30)
+    for r in in3_candidates:
+        uid = int(r["user_id"])
+        _insert_outbox_if_absent(uid, _warn_text(3), "wallet_delete_3d", _now_iso())
+
+    # مرشحو 6 أيام (27 يوم خمول)
+    in6_candidates = preview_inactive_users(days=27)
+    for r in in6_candidates:
+        uid = int(r["user_id"])
+        _insert_outbox_if_absent(uid, _warn_text(6), "wallet_delete_6d", _now_iso())
+
+def _housekeeping_once(bot=None):
     try:
-        users = get_table(WALLETS).select("user_id,created_at,updated_at").execute().data or []
-    except Exception:
-        users = []
+        # 1) تنظيف سجلات مؤقتة بعد 14 ساعة
+        purged = purge_ephemeral_after(hours=14)
+        print(f"[maintenance] purged_14h: {purged}")
+    except Exception as e:
+        print(f"[maintenance] purge_ephemeral_after error: {e}")
 
-    now = datetime.utcnow()
-    for u in users:
-        uid = u["user_id"]
-        last = _last_activity_for_user(uid)
-        if not last:
-            continue
-        days = int((now - last).total_seconds() // 86400)
-
-        if days == 27: _enqueue(uid, "wallet_delete_6d", {"days_left": 6})
-        elif days == 30: _enqueue(uid, "wallet_delete_3d", {"days_left": 3})
-        elif days == 32: _enqueue(uid, "wallet_delete_0d", {"days_left": 1})
-        elif days >= 33:
-            try:
-                get_table(WALLETS).delete().eq("user_id", uid).execute()
-            except Exception:
-                pass
-            _enqueue(uid, "wallet_deleted", {})
-
-def start_housekeeping(bot=None):
-    """ابدأ عاملين: تنظيف كل ساعة + فحص المحافظ يوميًا 06:00 بتوقيت دمشق."""
-    # 1) تنظيف كل ساعة
-    def hourly():
-        try:
-            cleanup_short_lived_tables()
-        finally:
-            threading.Timer(3600, hourly).start()
-    hourly()
-
-    # 2) فحص يومي عند 06:00 دمشق
     try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo("Asia/Damascus")
-    except Exception:
-        tz = None
+        # 2) إرسال تحذيرات 6/3/0 أيام
+        _process_wallet_warnings()
+    except Exception as e:
+        print(f"[maintenance] warn generation error: {e}")
 
-    def _daily():
-        try:
-            wallet_notifications_and_cleanup()
-        finally:
-            threading.Timer(24*3600, _daily).start()
+    try:
+        # 3) حذف المحافظ الخاملة 33 يومًا (بغض النظر عن الرصيد/المحجوز)
+        deleted = delete_inactive_users(days=33)
+        if deleted:
+            # أرسل إشعار "تم الحذف" (اختياري)
+            msg = (
+                "🗑️ <b>تم حذف محفظتك</b>\n"
+                "بسبب عدم النشاط لمدة 33 يومًا بعد إرسال التحذيرات.\n"
+                "لا يمكن مراجعتنا بهذا الخصوص وفق سياسة الخدمة."
+            )
+            for uid in deleted:
+                _insert_outbox_if_absent(int(uid), msg, "wallet_deleted", _now_iso())
+            print(f"[maintenance] deleted wallets: {len(deleted)}")
+    except Exception as e:
+        print(f"[maintenance] delete_inactive_users error: {e}")
 
-    # احسب تأخير أول تشغيل حتى 06:00 دمشق
-    if tz:
-        now = datetime.now(tz)
-        target = now.replace(hour=6, minute=0, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
-        delay = (target - now).total_seconds()
-        threading.Timer(delay, _daily).start()
-    else:
-        # لو مكتبة المنطقة غير متاحة، شغّل يوميًا اعتبارًا من الآن
-        threading.Timer(1, _daily).start()
+def start_housekeeping(bot=None, every_seconds: int = 3600):
+    """
+    عامل صيانة دوري داخل التطبيق (بديل pg_cron):
+     - تنظيف 14 ساعة
+     - تحذيرات حذف المحفظة (6/3/0)
+     - حذف المحافظ 33 يوم خمول
+    """
+    def loop():
+        _housekeeping_once(bot)
+        threading.Timer(every_seconds, loop).start()
+    # التشغيل الأول بعد دقيقة من الإقلاع
+    threading.Timer(60, loop).start()
