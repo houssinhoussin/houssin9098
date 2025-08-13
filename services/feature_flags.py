@@ -128,13 +128,79 @@ FEATURES_SEED: Dict[str, str] = {
 def _tbl():
     return get_table(FEATURES_TABLE)
 
+# ============================================
+# (جديد) قوائم معروفة تُزرع تلقائيًا في Startup
+# ============================================
+# منتجات الألعاب (مطابقة لتعريفاتك في handlers/products.py)
+KNOWN_PRODUCTS: List[Dict[str, Any]] = [
+    # PUBG
+    {"id": 1, "label": "PUBG — 60 شدة"},
+    {"id": 2, "label": "PUBG — 325 شدة"},
+    {"id": 3, "label": "PUBG — 660 شدة"},
+    {"id": 4, "label": "PUBG — 1800 شدة"},
+    {"id": 5, "label": "PUBG — 3850 شدة"},
+    {"id": 6, "label": "PUBG — 8100 شدة"},
+    # FreeFire
+    {"id": 7, "label": "FreeFire — 100 جوهرة"},
+    {"id": 8, "label": "FreeFire — 310 جوهرة"},
+    {"id": 9, "label": "FreeFire — 520 جوهرة"},
+    {"id": 10, "label": "FreeFire — 1060 جوهرة"},
+    {"id": 11, "label": "FreeFire — 2180 جوهرة"},
+    # Jawaker
+    {"id": 12, "label": "Jawaker — 10000 توكنز"},
+    {"id": 13, "label": "Jawaker — 15000 توكنز"},
+    {"id": 14, "label": "Jawaker — 20000 توكنز"},
+    {"id": 15, "label": "Jawaker — 30000 توكنز"},
+    {"id": 16, "label": "Jawaker — 60000 توكنز"},
+    {"id": 17, "label": "Jawaker — 120000 توكنز"},
+]
+
+# باقات الوحدات — نفس القوائم داخل handlers/bill_and_units.py
+SYRIATEL_UNIT_PACKS = [
+    "1000 وحدة", "1500 وحدة", "2013 وحدة", "3068 وحدة", "4506 وحدة",
+    "5273 وحدة", "7190 وحدة", "9587 وحدة", "13039 وحدة",
+]
+MTN_UNIT_PACKS = [
+    "1000 وحدة", "5000 وحدة", "7000 وحدة", "10000 وحدة", "15000 وحدة",
+    "20000 وحدة", "23000 وحدة", "30000 وحدة", "36000 وحدة",
+]
+
+def _seed_known_details() -> int:
+    """
+    زرع مفاتيح عناصر المنتجات وباقات الوحدات حتى تظهر في لوحة الأدمن
+    ويمكن إيقاف أي خيار بمفرده (660 شدة مثلًا).
+    """
+    created = 0
+    try:
+        # منتجات الألعاب
+        for item in KNOWN_PRODUCTS:
+            k = key_product(item["id"], item["label"])
+            if ensure_feature(k, item["label"], default_active=True):
+                created += 1
+
+        # وحدات سيرياتيل
+        for pack in SYRIATEL_UNIT_PACKS:
+            k = key_units("syriatel", pack)
+            if ensure_feature(k, f"وحدات Syriatel — {pack}", default_active=True):
+                created += 1
+
+        # وحدات MTN
+        for pack in MTN_UNIT_PACKS:
+            k = key_units("mtn", pack)
+            if ensure_feature(k, f"وحدات MTN — {pack}", default_active=True):
+                created += 1
+    except Exception as e:
+        logging.exception("[features] _seed_known_details failed: %s", e)
+    return created
+
 # ==============================
 # إنشاء/تحديث المفاتيح
 # ==============================
 def ensure_seed() -> int:
-    """يزرع المزايا الافتراضية إن لم تكن موجودة. يرجع عدد المُنشأ."""
+    """يزرع المزايا الافتراضية + المفاتيح التفصيلية المعروفة. يرجع عدد المُنشأ."""
     created = 0
     try:
+        # 1) الأساسيات
         for k, label in FEATURES_SEED.items():
             r = _tbl().select("key").eq("key", k).limit(1).execute()
             if not getattr(r, "data", None):
@@ -143,6 +209,9 @@ def ensure_seed() -> int:
             else:
                 # تحديث الملصق إن تغيّر
                 _tbl().update({"label": label}).eq("key", k).execute()
+
+        # 2) العناصر التفصيلية (الألعاب + الوحدات)
+        created += _seed_known_details()
     except Exception as e:
         logging.exception("[features] ensure_seed failed: %s", e)
     return created
