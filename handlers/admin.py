@@ -18,7 +18,7 @@ from services.products_admin import set_product_active, get_product_active, bulk
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
 from services.activity_logger import log_action
-from services.authz import allowed
+from services.authz import allowed as _allowed
 from services.queue_service import (
     add_pending_request,
     process_queue,
@@ -47,6 +47,12 @@ from services.wallet_service import (
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
+
+# ===== Override 'allowed' محليًا: ADMINS و ADMIN_MAIN_ID لديهم كل الصلاحيات مؤقتًا =====
+def allowed(user_id: int, perm: str) -> bool:
+    from config import ADMINS, ADMIN_MAIN_ID
+    return (user_id == ADMIN_MAIN_ID or user_id in ADMINS) or _allowed(user_id, perm)
+
 
 # لقراءة المجموعات/الملفات والمنتجات المعروضة للمستخدمين
 from handlers.products import PRODUCTS
@@ -87,6 +93,18 @@ def _user_name(bot, user_id: int) -> str:
         return name if name else "صديقنا"
     except Exception:
         return "صديقنا"
+
+def _admin_mention(bot, user_id: int) -> str:
+    try:
+        ch = bot.get_chat(user_id)
+        uname = getattr(ch, 'username', None)
+        if uname:
+            return f"@{uname}"
+        name = getattr(ch, 'first_name', None) or getattr(ch, 'full_name', None) or ''
+        name = (name or '').strip()
+        return name if name else str(user_id)
+    except Exception:
+        return str(user_id)
 
 def _safe(v, dash="—"):
     v = ("" if v is None else str(v)).strip()
@@ -305,7 +323,7 @@ def register(bot, history):
             bot.send_photo(uid, m.photo[-1].file_id, caption=f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{cap}\n{BAND}", parse_mode="HTML")
         bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
 
-    @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and call.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and (call.from_user.id in ADMINS or call.from_user.id == ADMIN_MAIN_ID))
     def handle_queue_action(call):
         parts      = call.data.split("_")
         action     = parts[2]
@@ -332,7 +350,56 @@ def register(bot, history):
             except Exception:
                 pass
 
-        # === تأجيل الطلب ===
+        
+        # ===== نظام القفل/الحجز بين الأدمنين =====
+        locked_by = payload.get('locked_by')
+        locked_by_username = payload.get('locked_by_username')
+        admin_msgs = payload.get('admin_msgs') or []
+
+        def _disable_others(except_aid=None, except_mid=None):
+            for entry in admin_msgs:
+                try:
+                    aid = entry.get('admin_id'); mid = entry.get('message_id')
+                    if not aid or not mid:
+                        continue
+                    if aid == except_aid and mid == except_mid:
+                        continue
+                    bot.edit_message_reply_markup(aid, mid, reply_markup=None)
+                except Exception:
+                    pass
+
+        def _mark_locked_here():
+            try:
+                lock_line = f"🔒 محجوز بواسطة {locked_by_username or _admin_mention(bot, call.from_user.id)}\n"
+                try:
+                    bot.edit_message_text(lock_line + req_text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=call.message.reply_markup)
+                except Exception:
+                    bot.edit_message_caption(lock_line + req_text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=call.message.reply_markup)
+            except Exception:
+                pass
+
+        if locked_by and int(locked_by) != int(call.from_user.id):
+            who = locked_by_username or _admin_mention(bot, locked_by)
+            return bot.answer_callback_query(call.id, f'🔒 محجوز بواسطة {who}')
+
+        if not locked_by:
+            try:
+                locked_by_username = _admin_mention(bot, call.from_user.id)
+                new_payload = dict(payload)
+                new_payload['locked_by'] = int(call.from_user.id)
+                new_payload['locked_by_username'] = locked_by_username
+                get_table('pending_requests').update({'payload': new_payload}).eq('id', request_id).execute()
+                _disable_others(except_aid=call.message.chat.id, except_mid=call.message.message_id)
+                _mark_locked_here()
+            except Exception as e:
+                logging.exception('[ADMIN] failed to set lock: %s', e)
+
+        # === زر الاستلام (📌 استلمت) ===
+        if action == 'claim':
+            bot.answer_callback_query(call.id, '✅ تم الاستلام — أنت المتحكم بهذا الطلب الآن.')
+            return
+
+# === تأجيل الطلب ===
         if action == "postpone":
             if not (call.from_user.id == ADMIN_MAIN_ID or call.from_user.id in ADMINS or allowed(call.from_user.id, "queue:postpone")):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
@@ -362,11 +429,6 @@ def register(bot, history):
             except Exception:
                 pass
             queue_cooldown_start(bot)
-            # Safety: schedule explicit re-kick after 31s
-            try:
-                threading.Timer(31, lambda: process_queue(bot)).start()
-            except Exception as e:
-                logging.error('[admin] safety timer error: %s', e)
             return
         # === إلغاء الطلب ===
         if action == "cancel":
