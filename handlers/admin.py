@@ -6,6 +6,10 @@ import logging
 from datetime import datetime, timedelta
 from telebot import types
 
+# التحكم في حذف رسالة الأدمن عند أي إجراء على الطابور
+DELETE_ADMIN_MESSAGE_ON_ACTION = False
+import threading
+
 from services.ads_service import add_channel_ad
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table
@@ -322,22 +326,48 @@ def register(bot, history):
         req_text = req.get("request_text") or ""
         name     = _user_name(bot, user_id)
 
-        # حذف رسالة الأدمن (لو أمكن)
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-            pass
+        if DELETE_ADMIN_MESSAGE_ON_ACTION:
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except Exception:
+                pass
 
         # === تأجيل الطلب ===
         if action == "postpone":
             if not allowed(call.from_user.id, "queue:postpone"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
+            # إزالة الكيبورد لتجنُّب النقر المزدوج
+            try:
+                from services.telegram_safety import remove_inline_keyboard
+            except Exception:
+                from telegram_safety import remove_inline_keyboard
+            try:
+                remove_inline_keyboard(bot, call.message)
+            except Exception:
+                pass
+            # تأجيل الطلب بإرجاعه لآخر الدور
             postpone_request(request_id)
-            bot.send_message(user_id, f"⏳ عزيزي {name}، تم تنظيم دور طلبك مجددًا بسبب ضغط أو عُطل مؤقت. نعتذر عن التأخير، وسيتم تنفيذ طلبك قريبًا بإذن الله. شكرًا لتفهّمك.")
-            bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
+            # إبلاغ العميل برسالة اعتذار/تنظيم الدور
+            try:
+                bot.send_message(
+                    user_id,
+                    f"⏳ عزيزي {name}، تم تنظيم دور طلبك مجددًا بسبب ضغط أو عُطل مؤقت. "
+                    "نعتذر عن التأخير، وسيتم تنفيذ طلبك قريبًا بإذن الله. شكرًا لتفهّمك."
+                )
+            except Exception as e:
+                logging.error(f"[admin] postpone notify error: {e}", exc_info=True)
+            # تأكيد للأدمن + بدء فترة الخمول
+            try:
+                bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
+            except Exception:
+                pass
             queue_cooldown_start(bot)
+            # Safety: schedule explicit re-kick after 31s
+            try:
+                threading.Timer(31, lambda: process_queue(bot)).start()
+            except Exception as e:
+                logging.error('[admin] safety timer error: %s', e)
             return
-
         # === إلغاء الطلب ===
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
