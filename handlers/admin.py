@@ -333,7 +333,7 @@ def register(bot, history):
             if not allowed(call.from_user.id, "queue:postpone"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             postpone_request(request_id)
-            bot.send_message(user_id, f"⏳ يا {name}، رجّعنا طلبك لآخر الطابور. هنكمله أول ما نيجي عليه.")
+            bot.send_message(user_id, f"⏳ عزيزي {name}، تم تنظيم دور طلبك مجددًا بسبب ضغط أو عُطل مؤقت. نعتذر عن التأخير، وسيتم تنفيذ طلبك قريبًا بإذن الله. شكرًا لتفهّمك.")
             bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
             queue_cooldown_start(bot)
             return
