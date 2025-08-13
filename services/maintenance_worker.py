@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
 from database.db import get_table
 from services.cleanup_service import purge_ephemeral_after, preview_inactive_users, delete_inactive_users
+from services.ads_service import purge_expired_ads  # ✅ جديد
 
 OUTBOX_TABLE = "notifications_outbox"
 
@@ -80,14 +81,14 @@ def _process_wallet_warnings():
         _insert_outbox_if_absent(uid, _warn_text(0), "wallet_delete_0d", _now_iso())
 
     # مرشحو 3 أيام (30 يوم خمول)
-    in3_candidates = preview_inactive_users(days=30)
-    for r in in3_candidates:
+    pre3 = preview_inactive_users(days=30)
+    for r in pre3:
         uid = int(r["user_id"])
         _insert_outbox_if_absent(uid, _warn_text(3), "wallet_delete_3d", _now_iso())
 
     # مرشحو 6 أيام (27 يوم خمول)
-    in6_candidates = preview_inactive_users(days=27)
-    for r in in6_candidates:
+    pre6 = preview_inactive_users(days=27)
+    for r in pre6:
         uid = int(r["user_id"])
         _insert_outbox_if_absent(uid, _warn_text(6), "wallet_delete_6d", _now_iso())
 
@@ -96,6 +97,13 @@ def _housekeeping_once(bot=None):
         # 1) تنظيف سجلات مؤقتة بعد 14 ساعة
         purged = purge_ephemeral_after(hours=14)
         print(f"[maintenance] purged_14h: {purged}")
+        # ✅ 1.1) حذف إعلانات القناة المنتهية بعد 14 ساعة
+        try:
+            removed_ads = purge_expired_ads(hours_after=14)
+            if removed_ads:
+                print(f"[maintenance] purged expired channel ads: {removed_ads}")
+        except Exception as e:
+            print(f"[maintenance] purge_expired_ads error: {e}")
     except Exception as e:
         print(f"[maintenance] purge_ephemeral_after error: {e}")
 
@@ -123,7 +131,7 @@ def _housekeeping_once(bot=None):
 
 def start_housekeeping(bot=None, every_seconds: int = 3600):
     """
-    عامل صيانة دوري داخل التطبيق (بديل pg_cron):
+    عامل صيانة دوري داخل التطبيق (بديل pg_crون):
      - تنظيف 14 ساعة
      - تحذيرات حذف المحفظة (6/3/0)
      - حذف المحافظ 33 يوم خمول
