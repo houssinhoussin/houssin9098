@@ -17,6 +17,9 @@ EPHEMERAL_TABLES: List[str] = [
     "internet_providers_purchases",
     "university_fees_purchases",
     "wholesale_purchases",
+    # ✅ المطلوب: حذف سجلات التحويل والمعاملات + سجلات المنتجات بعد 14 ساعة
+    "transactions",
+    "products",
 ]
 
 # جداول تُعدّ "نشاطًا" للمستخدم (تمنع حذف حسابه إن حصلت بعد cutoff)
@@ -48,19 +51,42 @@ def _safe_delete_by(table_name: str, col: str, cutoff_iso: str) -> int:
         print(f"[cleanup] delete error on {table_name}.{col}: {e}")
         return 0
 
+def _delete_with_fallbacks(table_name: str, cutoff_iso: str, now_iso: str) -> int:
+    """
+    يحذف من الجدول وفق الأعمدة الشائعة للوقت:
+      - يحاول أولاً expire_at <= الآن
+      - ثم created_at <= cutoff
+      - ثم timestamp <= cutoff  (للجدول transactions)
+      - ثم updated_at <= cutoff
+    يرجع عدد الصفوف المحذوفة (إن أمكن)، وإلا 0.
+    """
+    # 1) expire_at لو موجود
+    count = _safe_delete_by(table_name, "expire_at", now_iso)
+    if count != 0:  # نجح أو الجدول لا يملك أعمدة أخرى
+        return max(count, 0)
+    # 2) created_at المعتاد
+    count = _safe_delete_by(table_name, "created_at", cutoff_iso)
+    if count > 0:
+        return count
+    # 3) timestamp (transactions)
+    count = _safe_delete_by(table_name, "timestamp", cutoff_iso)
+    if count > 0:
+        return count
+    # 4) updated_at كخيار أخير
+    count = _safe_delete_by(table_name, "updated_at", cutoff_iso)
+    return max(count, 0)
+
 def purge_ephemeral_after(hours: int = 14) -> Dict[str, int]:
     """
     يحذف سجلات الجداول المؤقتة:
       - أولوية لـ expire_at <= الآن (لو العمود موجود)
-      - وإلا created_at <= now - 14h
+      - ثم أعمدة الوقت الشائعة بحسب المتاح
     """
     res: Dict[str, int] = {}
     now_iso = _iso(_utc_now())
     cutoff_iso = _iso(_cutoff(hours=hours))
     for tbl in EPHEMERAL_TABLES:
-        count = _safe_delete_by(tbl, "expire_at", now_iso)  # لو فيه expire_at
-        if count == 0:  # لا صفوف/أو العمود غير موجود
-            count = _safe_delete_by(tbl, "created_at", cutoff_iso)
+        count = _delete_with_fallbacks(tbl, cutoff_iso, now_iso)
         res[tbl] = max(count, 0)
     return res
 
@@ -84,6 +110,7 @@ def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[st
     cutoff_iso = _iso(_cutoff(days=days))
     rows: List[Dict[str, Any]] = []
     try:
+        # مبدئيًا نحاول updated_at ثم نرجع لـ created_at
         resp = get_table("houssin363").select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute()
         rows = getattr(resp, "data", None) or []
     except Exception:
@@ -127,6 +154,7 @@ def _housekeeping_tick(bot=None):
         print(f"[cleanup] purged (14h): {purged}")
     except Exception as e:
         print(f"[cleanup] purge_ephemeral_after error: {e}")
+
     try:
         deleted = delete_inactive_users(days=33)
         if deleted:
