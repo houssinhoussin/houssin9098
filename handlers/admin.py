@@ -274,7 +274,17 @@ def register(bot, history):
         bot.send_message(c.from_user.id, f"📝 اكتب رسالتك بصيغة HTML.\n{CANCEL_HINT_ADMIN}")
 
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and c.from_user.id in ADMINS)
-    def [... ELLIPSIZATION ...]
+    def cb_queue_photo(c: types.CallbackQuery):
+        if not allowed(c.from_user.id, 'queue:photo'):
+            return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
+        request_id = int(c.data.split("_")[3])
+        res = get_table("pending_requests").select("user_id").eq("id", request_id).execute()
+        if not res.data:
+            return bot.answer_callback_query(c.id, "❌ الطلب غير موجود.")
+        _msg_pending[c.from_user.id] = {"user_id": res.data[0]["user_id"], "mode": "photo"}
+        bot.answer_callback_query(c.id)
+        bot.send_message(c.from_user.id, f"📷 أرسل الصورة الآن (مع كابتشن HTML إن حبيت).\n{CANCEL_HINT_ADMIN}")
+
     @bot.message_handler(func=lambda m: m.from_user.id in _msg_pending,
                          content_types=["text", "photo"])
     def forward_to_client(m: types.Message):
