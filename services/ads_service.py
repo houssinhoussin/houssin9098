@@ -1,68 +1,60 @@
 # services/ads_service.py
+from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Any, Optional
 from database.db import get_table
 
-TBL = "channel_ads"
+CHANNEL_ADS_TABLE = "channel_ads"
 
-def _utc_now():
-    return datetime.now(timezone.utc)
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-def add_channel_ad(
-    user_id: int,
-    times_total: int,
-    price: int,
-    contact: str,
-    ad_text: str,
-    images: list[str] | None = None,
-    duration_days: int = 30,
-):
-    """إنشاء إعلان فعّال يلتقطه السكيجولر تلقائيًا."""
-    expire_at = _utc_now() + timedelta(days=duration_days or 30)
-    row = {
-        "user_id": user_id,
+def add_channel_ad(user_id: int, times_total: int, price: int, contact: Optional[str],
+                   ad_text: str, images: Optional[List[str]] = None, expire_days: int = 5):
+    now = datetime.now(timezone.utc)
+    payload = {
+        "user_id": int(user_id),
         "ad_text": ad_text or "",
         "images": images or [],
-        "contact": contact or "",
-        "times_total": int(times_total or 1),
+        "contact": (contact or "").strip() or None,
+        "times_total": int(times_total),
         "times_posted": 0,
-        "price": int(price or 0),
+        "price": int(price),
         "status": "active",
-        "expire_at": expire_at.isoformat(),
+        "created_at": now.isoformat(),
+        "last_posted_at": None,
+        "expire_at": (now + timedelta(days=expire_days)).isoformat(),
     }
-    res = get_table(TBL).insert(row).execute()
-    data = getattr(res, "data", None) or []
-    return data[0] if data else row
+    return get_table(CHANNEL_ADS_TABLE).insert(payload).execute()
 
-def get_active_ads(limit: int = 100):
-    """الإعلانات النشطة التي لم تستنفد مرات النشر."""
-    q = (
-        get_table(TBL)
-        .select("*")
-        .eq("status", "active")
-        .lt("times_posted", "times_total")
-        .order("last_posted_at", desc=False, nullsfirst=True)
-        .limit(limit)
-        .execute()
-    )
-    return getattr(q, "data", None) or []
+def get_active_ads(limit: int = 20):
+    now_iso = _now_iso()
+    resp = (get_table(CHANNEL_ADS_TABLE)
+            .select("*").eq("status", "active").gt("expire_at", now_iso)
+            .order("last_posted_at", desc=False, nullsfirst=True)
+            .order("created_at", desc=False).limit(limit).execute())
+    rows = getattr(resp, "data", None) or []
+    return [r for r in rows if int(r.get("times_posted") or 0) < int(r.get("times_total") or 0)]
 
 def increment_ad_posted(ad_id: int):
-    """زيادة العداد وتحديث حالة الانتهاء بأمان."""
-    # زيادة times_posted + وضع last_posted_at
-    row = get_table(TBL).select("times_posted,times_total").eq("id", ad_id).single().execute().data or {}
-    new_count = int(row.get("times_posted", 0)) + 1
-    get_table(TBL).update({
-        "times_posted": new_count,
-        "last_posted_at": _utc_now().isoformat()
+    resp = get_table(CHANNEL_ADS_TABLE).select("*").eq("id", ad_id).limit(1).execute()
+    data = getattr(resp, "data", None) or []
+    if not data: return
+    ad = data[0]
+    times_posted = int(ad.get("times_posted") or 0) + 1
+    times_total  = int(ad.get("times_total")  or 0)
+    status = "active"
+    if times_posted >= times_total: status = "expired"
+    try:
+        if ad.get("expire_at") and ad["expire_at"] <= _now_iso():
+            status = "expired"
+    except Exception: pass
+    get_table(CHANNEL_ADS_TABLE).update({
+        "times_posted": times_posted, "last_posted_at": _now_iso(), "status": status,
     }).eq("id", ad_id).execute()
 
-    # إن اكتمل العدد → Expire
-    if new_count >= int(row.get("times_total", 0)):
-        get_table(TBL).update({"status": "expired"}).eq("id", ad_id).execute()
-
-def expire_old_ads():
-    """تمييز المنتهية زمنياً كـ expired."""
-    get_table(TBL).update({"status": "expired"}) \
-        .lt("expire_at", _utc_now().isoformat()) \
-        .eq("status", "active") \
-        .execute()
+def expire_old_ads() -> int:
+    now_iso = _now_iso()
+    resp = get_table(CHANNEL_ADS_TABLE).update({"status": "expired"}).lt("expire_at", now_iso).execute()
+    data = getattr(resp, "data", None)
+    return len(data) if isinstance(data, list) else 0
