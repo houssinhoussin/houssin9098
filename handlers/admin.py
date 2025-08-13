@@ -744,7 +744,11 @@ def register(bot, history):
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and c.from_user.id in ADMINS)
     def adm_product_toggle(call: types.CallbackQuery):
-        _, pid, to = call.data.split(":")
+        # كان سابقًا: _, pid, to = call.data.split(":")
+        try:
+            _, pid, to = call.data.split(":", 2)  # آمن حتى لو زاد المحتوى مستقبلًا
+        except ValueError:
+            return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
         pid, to = int(pid), bool(int(to))
         ok = set_product_active(pid, to)
         if not ok:
@@ -766,7 +770,12 @@ def register(bot, history):
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     def adm_feature_toggle(call: types.CallbackQuery):
-        _, key, to = call.data.split(":")
+        # كان سابقًا: _, key, to = call.data.split(":")
+        try:
+            _, rest = call.data.split(":", 1)   # "adm_feat_t:<KEY>:<TO>"  => rest="<KEY>:<TO>"
+            key, to = rest.rsplit(":", 1)       # يسمح بوجود ":" داخل <KEY>
+        except ValueError:
+            return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
         ok = set_feature_active(key, bool(int(to)))
         if not ok:
             return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
