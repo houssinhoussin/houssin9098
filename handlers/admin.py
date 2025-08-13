@@ -19,7 +19,7 @@ from services.products_admin import set_product_active, get_product_active, bulk
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
 from services.activity_logger import log_action
-from services.authz import allowed as _allowed
+from services.authz import allowed
 from services.queue_service import (
     add_pending_request,
     process_queue,
@@ -49,11 +49,41 @@ from services.wallet_service import (
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
 
-# ===== Override 'allowed' محليًا: ADMINS و ADMIN_MAIN_ID لديهم كل الصلاحيات مؤقتًا =====
-def allowed(user_id: int, perm: str) -> bool:
-    from config import ADMINS, ADMIN_MAIN_ID
-    return (user_id == ADMIN_MAIN_ID or user_id in ADMINS) or _allowed(user_id, perm)
+# ─────────────────────────────────────
+#   Supabase RPC via HTTPX (atomic locking)
+# ─────────────────────────────────────
+try:
+    _SUPABASE_URL = os.environ.get("SUPABASE_URL")
+    _SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+except Exception:
+    _SUPABASE_URL = None
+    _SUPABASE_KEY = None
 
+_RPC_HEADERS = {
+    "apikey": _SUPABASE_KEY or "",
+    "Authorization": f"Bearer {_SUPABASE_KEY or ''}",
+    "Content-Type": "application/json",
+}
+
+def _rpc_bool(fn: str, payload: dict, timeout: int = 10) -> bool:
+    try:
+        if not _SUPABASE_URL or not _SUPABASE_KEY:
+            return False
+        r = httpx.post(f"{_SUPABASE_URL}/rest/v1/rpc/{fn}", headers=_RPC_HEADERS, json=payload, timeout=timeout)
+        return r.status_code == 200 and bool(r.json())
+    except Exception:
+        return False
+
+def _rpc_value(fn: str, payload: dict, default=None, timeout: int = 10):
+    try:
+        if not _SUPABASE_URL or not _SUPABASE_KEY:
+            return default
+        r = httpx.post(f"{_SUPABASE_URL}/rest/v1/rpc/{fn}", headers=_RPC_HEADERS, json=payload, timeout=timeout)
+        if r.status_code != 200:
+            return default
+        return r.json()
+    except Exception:
+        return default
 
 # لقراءة المجموعات/الملفات والمنتجات المعروضة للمستخدمين
 from handlers.products import PRODUCTS
@@ -94,18 +124,6 @@ def _user_name(bot, user_id: int) -> str:
         return name if name else "صديقنا"
     except Exception:
         return "صديقنا"
-
-def _admin_mention(bot, user_id: int) -> str:
-    try:
-        ch = bot.get_chat(user_id)
-        uname = getattr(ch, 'username', None)
-        if uname:
-            return f"@{uname}"
-        name = getattr(ch, 'first_name', None) or getattr(ch, 'full_name', None) or ''
-        name = (name or '').strip()
-        return name if name else str(user_id)
-    except Exception:
-        return str(user_id)
 
 def _safe(v, dash="—"):
     v = ("" if v is None else str(v)).strip()
@@ -324,10 +342,8 @@ def register(bot, history):
             bot.send_photo(uid, m.photo[-1].file_id, caption=f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{cap}\n{BAND}", parse_mode="HTML")
         bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
 
-    @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and (call.from_user.id in ADMINS or call.from_user.id == ADMIN_MAIN_ID))
+    @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and call.from_user.id in ADMINS)
     def handle_queue_action(call):
-        parts      = call.data.split("_")
-
         parts      = call.data.split("_")
         action     = parts[2]
         request_id = int(parts[3])
@@ -353,61 +369,6 @@ def register(bot, history):
             except Exception:
                 pass
 
-        # تحميل رسائل الإداريين من الحمولة
-        admin_msgs = payload.get('admin_msgs') or []
-
-        # أدوات لإغلاق أزرار الآخرين وتمييز رسالة الحالي
-        def _disable_others(except_aid=None, except_mid=None):
-            for entry in admin_msgs:
-                try:
-                    aid = entry.get('admin_id'); mid = entry.get('message_id')
-                    if not aid or not mid:
-                        continue
-                    if aid == except_aid and mid == except_mid:
-                        continue
-                    bot.edit_message_reply_markup(aid, mid, reply_markup=None)
-                except Exception:
-                    pass
-
-        def _mark_locked_here(by_username: str):
-            try:
-                lock_line = f"🔒 محجوز بواسطة {by_username}\n"
-                try:
-                    bot.edit_message_text(lock_line + req_text, call.message.chat.id, call.message.message_id,
-                                          parse_mode='HTML', reply_markup=call.message.reply_markup)
-                except Exception:
-                    bot.edit_message_caption(lock_line + req_text, call.message.chat.id, call.message.message_id,
-                                             parse_mode='HTML', reply_markup=call.message.reply_markup)
-            except Exception:
-                pass
-
-        # ===== الاستلام (📌 استلمت) — قفل ذري عبر RPC =====
-        if action == "claim":
-            username = _admin_mention(bot, call.from_user.id)
-            ok = _rpc_bool("claim_request", {
-                "p_request_id": request_id,
-                "p_admin_id": int(call.from_user.id),
-                "p_admin_username": username,
-            })
-            if ok:
-                _disable_others(except_aid=call.message.chat.id, except_mid=call.message.message_id)
-                _mark_locked_here(username)
-                return bot.answer_callback_query(call.id, "✅ تم الاستلام — أنت المتحكم بهذا الطلب الآن.")
-            else:
-                who = _rpc_value("locked_by_username_of", {"p_request_id": request_id}) or "أدمن آخر"
-                return bot.answer_callback_query(call.id, f"🔒 محجوز بواسطة {who}")
-
-        # من أجل أي إجراء آخر، احجز أولًا (لو غير محجوز) أو تأكد أنك المالك
-        username = _admin_mention(bot, call.from_user.id)
-        ok_claim = _rpc_bool("claim_request", {
-            "p_request_id": request_id,
-            "p_admin_id": int(call.from_user.id),
-            "p_admin_username": username,
-        })
-        if not ok_claim:
-            who = _rpc_value("locked_by_username_of", {"p_request_id": request_id}) or "أدمن آخر"
-            return bot.answer_callback_query(call.id, f"🔒 محجوز بواسطة {who}")
-
         # === تأجيل الطلب ===
         if action == "postpone":
             if not (call.from_user.id == ADMIN_MAIN_ID or call.from_user.id in ADMINS or allowed(call.from_user.id, "queue:postpone")):
@@ -416,47 +377,38 @@ def register(bot, history):
             try:
                 from services.telegram_safety import remove_inline_keyboard
             except Exception:
-                try:
-                    from telegram_safety import remove_inline_keyboard
-                except Exception:
-                    remove_inline_keyboard = None
+                from telegram_safety import remove_inline_keyboard
             try:
-                if remove_inline_keyboard:
-                    remove_inline_keyboard(bot, call.message)
+                remove_inline_keyboard(bot, call.message)
             except Exception:
                 pass
-
-            # تأجيل عبر RPC (يُحدّث created_at ويُنظف القفل)
-            ok = _rpc_bool("postpone_request_locked", {
-                "p_request_id": request_id,
-                "p_admin_id": int(call.from_user.id),
-            })
-            if not ok:
-                who = _rpc_value("locked_by_username_of", {"p_request_id": request_id}) or "أدمن آخر"
-                return bot.answer_callback_query(call.id, f"🔒 محجوز بواسطة {who}")
-
-            # تنويه العميل
+            # تأجيل الطلب بإرجاعه لآخر الدور
+            postpone_request(request_id)
+            # إبلاغ العميل برسالة اعتذار/تنظيم الدور
             try:
                 bot.send_message(
                     user_id,
                     f"⏳ عزيزي {name}، تم تنظيم دور طلبك مجددًا بسبب ضغط أو عُطل مؤقت. "
                     "نعتذر عن التأخير، وسيتم تنفيذ طلبك قريبًا بإذن الله. شكرًا لتفهّمك."
                 )
-            except Exception:
-                pass
-
+            except Exception as e:
+                logging.error(f"[admin] postpone notify error: {e}", exc_info=True)
+            # تأكيد للأدمن + بدء فترة الخمول
             try:
                 bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
             except Exception:
                 pass
             queue_cooldown_start(bot)
+            # Safety: schedule explicit re-kick after 31s
+            try:
+                threading.Timer(31, lambda: process_queue(bot)).start()
+            except Exception as e:
+                logging.error('[admin] safety timer error: %s', e)
             return
-
         # === إلغاء الطلب ===
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
-
             hold_id  = payload.get("hold_id")
             reserved = int(payload.get("reserved", 0) or 0)
             typ      = (payload.get("type") or "").strip()
@@ -472,51 +424,22 @@ def register(bot, history):
                 if reserved > 0:
                     add_balance(user_id, reserved, "إلغاء حجز (قديم)")
 
-            # حذف الصف عبر RPC بشرط الملكية
-            ok = _rpc_bool("ensure_owner_then_delete", {
-                "p_request_id": request_id,
-                "p_admin_id": int(call.from_user.id),
-            })
-            if not ok:
-                who = _rpc_value("locked_by_username_of", {"p_request_id": request_id}) or "أدمن آخر"
-                return bot.answer_callback_query(call.id, f"🔒 محجوز بواسطة {who}")
-
+            delete_pending_request(request_id)
             if reserved > 0:
-                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا { _fmt_syp(reserved) } من المبلغ المحجوز لمحفظتك — كله تمام 😎")
+                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
             else:
-                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
+                bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
+            # NEW: لو طلب شحن — نظّف قفل الشحن المحلي
             if typ in ("recharge", "wallet_recharge", "deposit"):
                 _clear_recharge_local_lock_safe(user_id)
 
             _prompt_admin_note(bot, call.from_user.id, user_id)
             return
 
-        # === قبول/تنفيذ الطلب ===
-        if action == "accept":
-            if not allowed(call.from_user.id, "queue:confirm"):
-                return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
-
-            typ      = (payload.get("type") or "").strip()
-            hold_id  = payload.get("hold_id")
-            amt      = _amount_from_payload(payload)
-
-            if hold_id:
-                try:
-                    r = capture_hold(hold_id)
-                    if getattr(r, "error", None) or not bool(getattr(r, "data", True)):
-                        logging.error("capture_hold failed: %s", getattr(r, "error", r))
-                        return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز. أعد المحاولة.")
-                except Exception as e:
-                    logging.exception("capture_hold exception: %s", e)
-                    return bot.answer_callback_query(call.id, "❌ فشل تصفية الحجز. أعد المحاولة.")
-
-            # ——— فروع التنفيذ كما هي (نحتفظ بكل الأوامر) ———
-            # سننفّذ نفس فروعك الأصلية تمامًا ثم نحذف الصف عبر RPC.
-
-            # الفروع الأصلية للتنفيذ (مُعدّلة ليكون الحذف عبر RPC):
+        # === قبول الطلب ===
         if action == "accept":
             # ✅ فحص صلاحية التأكيد (مهم)
             if not allowed(call.from_user.id, "queue:confirm"):
@@ -562,7 +485,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n🎉 تمام يا {name}! تم تحويل «{product_name}» لآيدي «{_safe(player_id)}» "
@@ -593,7 +516,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
 
                 # NEW: أنشئ إعلانًا فعّالًا لبدء النشر الآلي ضمن نافذة 9→22 بتوقيت دمشق
                 try:
@@ -633,7 +556,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n✅ تمام يا {name}! تم تحويل {unit_name} للرقم «{_safe(num)}» "
@@ -660,7 +583,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n🧾 تمام يا {name}! تم دفع {label} للرقم «{_safe(num)}» "
@@ -689,7 +612,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n🌐 تمام يا {name}! تم دفع فاتورة الإنترنت ({name_lbl}) للرقم «{_safe(phone)}» "
@@ -713,7 +636,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n💸 تمام يا {name}! تم تنفيذ {name_lbl} للرقم «{_safe(number)}» "
@@ -741,7 +664,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n🏢 تمام يا {name}! تم تنفيذ {name_lbl} للمستفيد «{_safe(beneficiary_number)}» "
@@ -769,7 +692,7 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
                     f"{BAND}\n🎓 تمام يا {name}! تم دفع {name_lbl} للرقم الجامعي «{_safe(university_id)}» "
@@ -793,7 +716,7 @@ def register(bot, history):
                     pass
 
                 add_balance(user_id, amount, "شحن محفظة — من الإدارة")
-                _ = _rpc_bool("ensure_owner_then_delete", {"p_request_id": request_id, "p_admin_id": int(call.from_user.id)})
+                delete_pending_request(request_id)
 
                 bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
@@ -809,6 +732,8 @@ def register(bot, history):
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
 
         bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
+
+    # === ملاحظة الإدمن بعد القبول/الإلغاء (اختياري) ===
     @bot.message_handler(func=lambda m: m.from_user.id in _accept_pending,
                          content_types=["text", "photo"])
     def handle_accept_message(msg: types.Message):
