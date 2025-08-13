@@ -5,12 +5,28 @@ from datetime import datetime
 import httpx
 import threading
 from database.db import get_table
-from config import ADMIN_MAIN_ID
+from config import ADMIN_MAIN_ID, ADMINS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 QUEUE_TABLE = "pending_requests"
 _queue_lock = threading.Lock()
 _queue_cooldown = False  # يمنع إظهار أكثر من طلب
+def _admin_targets():
+    try:
+        lst = list(ADMINS) if isinstance(ADMINS, (list, tuple, set)) else []
+    except Exception:
+        lst = []
+    if ADMIN_MAIN_ID not in lst:
+        lst.append(ADMIN_MAIN_ID)
+    # أزل التكرارات مع الحفاظ على الترتيب
+    seen = set()
+    out = []
+    for a in lst:
+        if a not in seen:
+            out.append(a)
+            seen.add(a)
+    return out
+
 
 # حد أقصى آمن لكابتشن الصور في تليجرام (نخلّيه أقل من 1024 بهامش)
 _MAX_CAPTION = 900
