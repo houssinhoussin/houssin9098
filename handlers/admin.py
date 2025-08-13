@@ -362,6 +362,11 @@ def register(bot, history):
             except Exception:
                 pass
             queue_cooldown_start(bot)
+            # Safety: schedule explicit re-kick after 31s
+            try:
+                threading.Timer(31, lambda: process_queue(bot)).start()
+            except Exception as e:
+                logging.error('[admin] safety timer error: %s', e)
             return
         # === إلغاء الطلب ===
         if action == "cancel":
