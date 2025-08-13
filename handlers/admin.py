@@ -329,7 +329,7 @@ def register(bot, history):
             pass
 
         # === تأجيل الطلب ===
-                if action == "postpone":
+        if action == "postpone":
             if not allowed(call.from_user.id, "queue:postpone"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
             # إزالة الكيبورد لتجنُّب النقر المزدوج
@@ -359,7 +359,6 @@ def register(bot, history):
                 pass
             queue_cooldown_start(bot)
             return
-
         # === إلغاء الطلب ===
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
