@@ -5,6 +5,7 @@ import re
 import logging
 from datetime import datetime, timedelta
 from telebot import types
+import os, httpx
 
 # التحكم في حذف رسالة الأدمن عند أي إجراء على الطابور
 DELETE_ADMIN_MESSAGE_ON_ACTION = False
@@ -481,11 +482,9 @@ def register(bot, history):
                 return bot.answer_callback_query(call.id, f"🔒 محجوز بواسطة {who}")
 
             if reserved > 0:
-                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.
-🔁 رجّعنا { _fmt_syp(reserved) } من المبلغ المحجوز لمحفظتك — كله تمام 😎")
+                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا { _fmt_syp(reserved) } من المبلغ المحجوز لمحفظتك — كله تمام 😎")
             else:
-                bot.send_message(user_id, "🚫 تم إلغاء طلبك.
-🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
+                bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
