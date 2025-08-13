@@ -13,6 +13,10 @@ from services.error_log_setup import install_global_error_logging
 from services.state_adapter import UserStateDictLike
 from services.commands_setup import setup_bot_commands
 
+# NEW: عُمّال الإشعارات والصيانة
+from services.outbox_worker import start_outbox_worker
+from services.maintenance_worker import start_housekeeping
+
 PORT = 8081
 
 def run_dummy_server():
@@ -137,6 +141,10 @@ setup_bot_commands(bot, list(ADMINS))
 
 # بعد اكتمال التسجيل وتشغيل البوت، شغّل مهمة الإعلانات المجدولة
 post_ads_task(bot)
+
+# NEW: تشغيل عامل الإشعارات من outbox وعامل الصيانة (بديل pg_cron داخل التطبيق)
+start_outbox_worker(bot)   # يمرّ على notifications_outbox ويُرسل الرسائل
+start_housekeeping(bot)    # تنظيف 14 ساعة + تنبيهات/حذف المحافظ بعد 33 يوم خمول
 
 # ---------------------------------------------------------
 # زر الرجوع الذكي (بدون تعديل)
