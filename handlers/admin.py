@@ -274,17 +274,7 @@ def register(bot, history):
         bot.send_message(c.from_user.id, f"📝 اكتب رسالتك بصيغة HTML.\n{CANCEL_HINT_ADMIN}")
 
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and c.from_user.id in ADMINS)
-    def cb_queue_photo(c: types.CallbackQuery):
-        if not allowed(c.from_user.id, 'queue:photo'):
-            return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
-        request_id = int(c.data.split("_")[3])
-        res = get_table("pending_requests").select("user_id").eq("id", request_id).execute()
-        if not res.data:
-            return bot.answer_callback_query(c.id, "❌ الطلب غير موجود.")
-        _msg_pending[c.from_user.id] = {"user_id": res.data[0]["user_id"], "mode": "photo"}
-        bot.answer_callback_query(c.id)
-        bot.send_message(c.from_user.id, f"📷 أرسل الصورة الآن (مع كابتشن HTML إن حبيت).\n{CANCEL_HINT_ADMIN}")
-
+    def [... ELLIPSIZATION ...]
     @bot.message_handler(func=lambda m: m.from_user.id in _msg_pending,
                          content_types=["text", "photo"])
     def forward_to_client(m: types.Message):
@@ -450,6 +440,22 @@ def register(bot, history):
                     pass
 
                 delete_pending_request(request_id)
+
+                # NEW: أنشئ إعلانًا فعّالًا لبدء النشر الآلي ضمن نافذة 9→22 بتوقيت دمشق
+                try:
+                    times_total = int(payload.get("times_total") or payload.get("count") or 1)
+                    duration_days = int(payload.get("duration_days") or 30)
+                    add_channel_ad(
+                        user_id=user_id,
+                        times_total=times_total,
+                        price=amt,
+                        contact=contact,
+                        ad_text=ad_text,
+                        images=images,
+                        duration_days=duration_days,
+                    )
+                except Exception as e:
+                    logging.exception("[ADMIN][ADS] add_channel_ad failed: %s", e)
 
                 bot.send_message(
                     user_id,
