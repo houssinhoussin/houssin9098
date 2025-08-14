@@ -1,4 +1,3 @@
-
 # services/admin_ledger.py
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -12,6 +11,9 @@ TRANSACTION_TABLE = "transactions"
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+# ────────────────────────────────────────────────────────────
+# سجلات دائمة لإقرار الإداريين (إيداع/صرف)
+# ────────────────────────────────────────────────────────────
 def log_admin_deposit(admin_id: int, user_id: int, amount: int, note: str = "") -> None:
     # يسجل إيداع وافق عليه الأدمن (مبلغ موجب)
     get_table(LEDGER_TABLE).insert({
@@ -35,25 +37,39 @@ def log_admin_spend(admin_id: int, user_id: int, amount: int, note: str = "") ->
     }).execute()
 
 def _fmt(amount: int) -> str:
-    return f"{int(amount):,} ل.س"
+    try:
+        return f"{int(amount):,} ل.س"
+    except Exception:
+        return f"{amount} ل.س"
 
+# ────────────────────────────────────────────────────────────
+# تقارير الإداريين
+# ────────────────────────────────────────────────────────────
 def summarize_assistants(days: int = 7) -> str:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     assistants = [a for a in ADMINS if a != ADMIN_MAIN_ID]
     if not assistants:
         return "لا يوجد أدمن مساعد لإظهار تقريره."
     # اجمع لكل أدمن
-    rows = get_table(LEDGER_TABLE).select("admin_id, action, amount, created_at").gte("created_at", since.isoformat()).execute()
+    rows = (
+        get_table(LEDGER_TABLE)
+        .select("admin_id, action, amount, created_at")
+        .gte("created_at", since.isoformat())
+        .execute()
+    )
     data = rows.data or []
     totals: Dict[int, Dict[str,int]] = {aid: {"deposit":0,"spend":0} for aid in assistants}
     for r in data:
-        aid = int(r.get("admin_id") or 0)
-        if aid not in totals: 
+        try:
+            aid = int(r.get("admin_id") or 0)
+        except Exception:
+            continue
+        if aid not in totals:
             continue
         act = (r.get("action") or "").strip()
         amt = int(r.get("amount") or 0)
         if act in ("deposit","spend"):
-            totals[aid][act]+=amt
+            totals[aid][act] += amt
     # صياغة
     lines = [f"<b>📈 تقرير الأدمن المساعد — آخر {days} يومًا</b>"]
     for aid in assistants:
@@ -65,13 +81,21 @@ def summarize_assistants(days: int = 7) -> str:
 
 def summarize_all_admins(days: int = 7) -> str:
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = get_table(LEDGER_TABLE).select("admin_id, action, amount, created_at").gte("created_at", since.isoformat()).execute()
+    rows = (
+        get_table(LEDGER_TABLE)
+        .select("admin_id, action, amount, created_at")
+        .gte("created_at", since.isoformat())
+        .execute()
+    )
     data = rows.data or []
     per_admin: Dict[int, Dict[str,int]] = {}
     grand_dep = 0
     grand_sp = 0
     for r in data:
-        aid = int(r.get("admin_id") or 0)
+        try:
+            aid = int(r.get("admin_id") or 0)
+        except Exception:
+            continue
         act = (r.get("action") or "").strip()
         amt = int(r.get("amount") or 0)
         d = per_admin.setdefault(aid, {"deposit":0,"spend":0})
@@ -86,27 +110,85 @@ def summarize_all_admins(days: int = 7) -> str:
     lines.append(f"<b>الإجمالي</b> — شحن: {_fmt(grand_dep)} | صرف: {_fmt(grand_sp)}")
     return "\n".join(lines)
 
+# ────────────────────────────────────────────────────────────
+# مساعد مرن لجلب أسماء/تسميات المستخدمين من جدول المستخدمين
+# دون افتراض وجود أعمدة محددة (first_name قد لا يكون موجودًا)
+# ────────────────────────────────────────────────────────────
+def _load_user_map(user_ids) -> Dict[int, str]:
+    user_ids = list({int(u) for u in user_ids if u is not None})
+    if not user_ids:
+        return {}
+    # نجرب عدة صيغ اختيار آمنة حتى لا تُرمى 400 من Supabase
+    candidates = [
+        ("user_id", "user_id,username"),
+        ("user_id", "user_id"),
+        ("id",      "id,username"),
+        ("id",      "id"),
+    ]
+    for key, sel in candidates:
+        try:
+            q = get_table(DEFAULT_TABLE).select(sel)
+            # بعض العملاء لديهم in_ في عميل Postgrest
+            if hasattr(q, "in_"):
+                q = q.in_(key, user_ids)
+            rows = q.execute().data or []
+            if rows:
+                m = {}
+                for r in rows:
+                    uid = r.get(key)
+                    try:
+                        uid = int(uid)
+                    except Exception:
+                        continue
+                    label = r.get("username") or f"مستخدم #{uid}"
+                    m[uid] = label
+                return m
+        except Exception:
+            # جرّب صيغة أخرى
+            continue
+    # لو فشلت كل المحاولات
+    return {int(uid): f"مستخدم #{int(uid)}" for uid in user_ids}
+
+# ────────────────────────────────────────────────────────────
+# أفضل ٥ عملاء أسبوعيًا
+# ────────────────────────────────────────────────────────────
 def top5_clients_week() -> List[Dict[str, Any]]:
-    """أفضل 5 عملاء خلال 7 أيام: لكل مستخدم مجموع الشحن (amount>0) والصرف (amount<0)"""
+    """
+    أفضل 5 عملاء خلال 7 أيام: لكل مستخدم مجموع الشحن (amount>0) والصرف (amount<0) من جدول transactions.
+    لا نفترض وجود عمود first_name في جدول المستخدمين، بل نستخدم username إن وُجد، أو تسمية افتراضية.
+    """
     since = datetime.now(timezone.utc) - timedelta(days=7)
-    tx = get_table(TRANSACTION_TABLE).select("user_id, amount, timestamp").gte("timestamp", since.isoformat()).execute()
+    tx = (
+        get_table(TRANSACTION_TABLE)
+        .select("user_id, amount, timestamp")
+        .gte("timestamp", since.isoformat())
+        .execute()
+    )
     data = tx.data or []
     agg: Dict[int, Dict[str,int]] = {}
     for r in data:
-        uid = int(r.get("user_id") or 0)
+        try:
+            uid = int(r.get("user_id") or 0)
+        except Exception:
+            continue
         amt = int(r.get("amount") or 0)
         a = agg.setdefault(uid, {"deposits":0,"spend":0})
         if amt > 0:
             a["deposits"] += amt
         elif amt < 0:
             a["spend"] += abs(amt)
-    # اجلب أسماء المستخدمين (إن وُجدت)
-    users = get_table(DEFAULT_TABLE).select("user_id, first_name, username").execute().data or []
-    names = {int(u["user_id"]): (u.get("first_name") or u.get("username") or str(u["user_id"])) for u in users}
-    rows = []
+
+    # اجلب أسماء المستخدمين (مرن)
+    name_map = _load_user_map(agg.keys())
+
+    rows: List[Dict[str, Any]] = []
     for uid, v in agg.items():
-        v["name"] = names.get(uid, str(uid))
-        v["user_id"] = uid
-        rows.append(v)
-    rows.sort(key=lambda r: (r["deposits"]+r["spend"]), reverse=True)
+        rows.append({
+            "user_id": uid,
+            "name": name_map.get(uid, str(uid)),
+            "deposits": int(v.get("deposits", 0)),
+            "spend": int(v.get("spend", 0)),
+        })
+
+    rows.sort(key=lambda r: (r["deposits"] + r["spend"]), reverse=True)
     return rows[:5]
