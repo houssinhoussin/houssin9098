@@ -912,40 +912,39 @@ def register(bot, history):
         bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup(page=0))
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
-def adm_feature_toggle(call: types.CallbackQuery):
-    # "adm_feat_t:<KEY>:<TO>[:<PAGE>]"
-    try:
-        _, rest = call.data.split(":", 1)
-        parts = rest.split(":")
-        key = parts[0]
-        to  = parts[1]
-        page = int(parts[2]) if len(parts) > 2 else 0
-    except Exception:
-        return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
-
-    ok = set_feature_active(key, bool(int(to)))
-    if not ok:
-        return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
-
-    try:
-        bot.edit_message_reply_markup(
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=_features_markup(page=page)
-        )
-    except Exception:
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
+    def adm_feature_toggle(call: types.CallbackQuery):
+        # "adm_feat_t:<KEY>:<TO>[:<PAGE>]"
         try:
-            bot.edit_message_text(
-                "بدّل حالة المزايا التالية:",
+            _, rest = call.data.split(":", 1)
+            parts = rest.split(":")
+            key = parts[0]
+            to  = parts[1]
+            page = int(parts[2]) if len(parts) > 2 else 0
+        except Exception:
+            return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+
+        ok = set_feature_active(key, bool(int(to)))
+        if not ok:
+            return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
+
+        try:
+            bot.edit_message_reply_markup(
                 call.message.chat.id,
                 call.message.message_id,
                 reply_markup=_features_markup(page=page)
             )
         except Exception:
-            pass
-    bot.answer_callback_query(call.id, "✅ تم التحديث.")
-
-
+            try:
+                bot.edit_message_text(
+                    "بدّل حالة المزايا التالية:",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=_features_markup(page=page)
+                )
+            except Exception:
+                pass
+        bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and c.from_user.id in ADMINS)
     def adm_feature_page(call: types.CallbackQuery):
