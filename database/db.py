@@ -10,7 +10,7 @@ load_dotenv()
 # ---------- إعداد Supabase ----------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_API_KEY")
-DEFAULT_TABLE = os.getenv("SUPABASE_TABLE_NAME")  # مثل: houssin363
+DEFAULT_TABLE = os.getenv("houssin363")  # مثل: houssin363
 
 if not SUPABASE_URL:
     raise RuntimeError("Missing SUPABASE_URL in environment (.env)")
