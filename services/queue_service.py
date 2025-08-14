@@ -100,13 +100,15 @@ def _payload_update(request_id: int, patch: dict):
         logging.exception("payload update failed for request %s", request_id)
 
 def postpone_request(request_id: int):
-    # إرجاع الطلب لآخر الدور بتحديث created_at.
+    # إرجاع الطلب لآخر الدور بتحديث created_at + إزالة القفل + مسح كاش التكرار.
     try:
         now = datetime.utcnow().isoformat()
         get_table(QUEUE_TABLE).update({"created_at": now}).eq("id", request_id).execute()
         _payload_update(request_id, {"locked_by": None, "locked_by_username": None})
+        reset_recent_silently(request_id)  # مهم: السماح بإعادة الإرسال بعد التأجيل
     except Exception:
         logging.exception(f"Error postponing request {request_id}")
+
 
 def _send_admin_with_photo(bot, photo_id: str, text: str, keyboard: InlineKeyboardMarkup):
     # يرسل صورة/رسالة لكل الأدمن ويُعيد قائمة [(admin_id, message_id)] للرسائل ذات الأزرار.
@@ -241,3 +243,14 @@ def queue_cooldown_start(bot=None):
             process_queue(bot)
 
     threading.Thread(target=release, daemon=True).start()
+
+
+def reset_recent_silently(request_id: int):
+    """
+    ينسف كاش منع التكرار لطلب معيّن حتى يُسمَح بإعادة إرساله فورًا عند التأجيل.
+    يستخدم داخل postpone_request.
+    """
+    try:
+        _recently_sent.pop(request_id, None)
+    except Exception:
+        pass
