@@ -1033,22 +1033,26 @@ def register(bot, history):
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
-    def _enqueue_broadcast(text: str) -> int:
-    # نسحب كل المستخدمين ونضيفهم لجدول outbox
-    try:
-        rs = get_table(DEFAULT_TABLE).select("user_id").execute()
-        rows = rs.data or []
-    except Exception:
-        rows = []
-        # نجمع المعرّفات بدون تكرار
-        ids = set()
-    for r in rows:
+    def _collect_all_user_ids() -> set[int]:
+        """
+        يرجع مجموعة بكل user_id المعروفين (من الجدول + الأدمن).
+        """
+        ids: set[int] = set()
+
+        # نسحب كل المستخدمين من الجدول
         try:
-            uid = int(r.get("user_id") or 0)
-            if uid:
-                ids.add(uid)
+            rs = get_table(DEFAULT_TABLE).select("user_id").execute()
+            rows = rs.data or []
         except Exception:
-            pass
+            rows = []
+
+        for r in rows:
+            try:
+                uid = int(r.get("user_id") or 0)
+                if uid:
+                    ids.add(uid)
+            except Exception:
+                pass
     # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
     try:
         ids.add(int(ADMIN_MAIN_ID))
