@@ -982,7 +982,23 @@ def register(bot, history):
         n = _enqueue_broadcast(text)
         bot.reply_to(m, f"✅ تم جدولة رسالة التقييم إلى {n} مستخدم.")
 
-    from services.state_service import set_state, get_state, clear_state, DEFAULT_STATE_KEY as _DEF_KEY
+    try:
+        import services.state_service as _ss
+        set_state = getattr(_ss, 'set_state', None)
+        get_state = getattr(_ss, 'get_state', None)
+        clear_state = getattr(_ss, 'clear_state', None)
+        _DEF_KEY = getattr(_ss, 'DEFAULT_STATE_KEY', 'state_default')
+        if set_state is None or get_state is None or clear_state is None:
+            raise AttributeError('missing state fns')
+    except Exception:
+        _TMP_STATE = {}
+        def set_state(uid, key, value, ttl_minutes=10):
+            _TMP_STATE[(uid, key)] = value
+        def get_state(uid, key):
+            return _TMP_STATE.get((uid, key))
+        def clear_state(uid, key):
+            _TMP_STATE.pop((uid, key), None)
+        _DEF_KEY = 'state_default'
     BROADCAST_KEY = "broadcast_free"
 
     @bot.message_handler(func=lambda m: m.text == "📝 رسالة حرة" and m.from_user.id == ADMIN_MAIN_ID)
