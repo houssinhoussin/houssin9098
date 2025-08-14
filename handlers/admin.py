@@ -915,98 +915,98 @@ def register(bot, history):
         bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
     
-@bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
-def quick_reports(m):
-    dep, pur, top = totals_deposits_and_purchases_syp()
-    lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
-    # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
-    try:
-        top5 = top5_clients_week()
-        if top5:
-            lines.append("🏅 أفضل ٥ عملاء (آخر 7 أيام):")
-            for u in top5:
-                lines.append(f" • {u['name']} — شحن: {u['deposits']:,} ل.س | صرف: {u['spend']:,} ل.س")
-    except Exception as _e:
-        logging.exception("[REPORTS] top5 weekly failed: %s", _e)
-    bot.send_message(m.chat.id, "\n".join(lines))
+    @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
+    def quick_reports(m):
+        dep, pur, top = totals_deposits_and_purchases_syp()
+        lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
+        # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
+        try:
+            top5 = top5_clients_week()
+            if top5:
+                lines.append("🏅 أفضل ٥ عملاء (آخر 7 أيام):")
+                for u in top5:
+                    lines.append(f" • {u['name']} — شحن: {u['deposits']:,} ل.س | صرف: {u['spend']:,} ل.س")
+        except Exception as _e:
+            logging.exception("[REPORTS] top5 weekly failed: %s", _e)
+        bot.send_message(m.chat.id, "\n".join(lines))
 
-@bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
-def assistants_daily_report(m):
-    txt = summarize_assistants(days=7)
-    bot.send_message(m.chat.id, txt, parse_mode="HTML")
+    @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
+    def assistants_daily_report(m):
+        txt = summarize_assistants(days=7)
+        bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
-def all_admins_report(m):
-    txt = summarize_all_admins(days=7)
-    bot.send_message(m.chat.id, txt, parse_mode="HTML")
+    @bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
+    def all_admins_report(m):
+        txt = summarize_all_admins(days=7)
+        bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
-# ==== بث للجميع ====
-@bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and m.from_user.id == ADMIN_MAIN_ID)
-def broadcast_menu(m):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("📬 ترحيب — نحن شغالين", "📢 رسالة تسويقية")
-    kb.row("⭐ تقييم منتج", "📝 رسالة حرة")
-    kb.row("⬅️ رجوع")
-    bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
+    # ==== بث للجميع ====
+    @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and m.from_user.id == ADMIN_MAIN_ID)
+    def broadcast_menu(m):
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        kb.row("📬 ترحيب — نحن شغالين", "📢 رسالة تسويقية")
+        kb.row("⭐ تقييم منتج", "📝 رسالة حرة")
+        kb.row("⬅️ رجوع")
+        bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
-def _enqueue_broadcast(text: str) -> int:
-    # نسحب كل المستخدمين ونضيفهم لجدول outbox
-    try:
-        rs = get_table(DEFAULT_TABLE).select("user_id, first_name, username").execute()
-        rows = rs.data or []
-    except Exception:
-        rows = []
-    count = 0
-    outbox = get_table("notifications_outbox")
-    for r in rows:
-        uid = int(r.get("user_id"))
-        outbox.insert({"user_id": uid, "message": text}).execute()
-        count += 1
-    return count
+    def _enqueue_broadcast(text: str) -> int:
+        # نسحب كل المستخدمين ونضيفهم لجدول outbox
+        try:
+            rs = get_table(DEFAULT_TABLE).select("user_id, first_name, username").execute()
+            rows = rs.data or []
+        except Exception:
+            rows = []
+        count = 0
+        outbox = get_table("notifications_outbox")
+        for r in rows:
+            uid = int(r.get("user_id"))
+            outbox.insert({"user_id": uid, "message": text}).execute()
+            count += 1
+        return count
 
-@bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and m.from_user.id == ADMIN_MAIN_ID)
-def bc_welcome(m):
-    text = "أهلًا في بوتنا 🤍 نحن شغالين الآن! جرّب الخدمات وخلينا نبهرك بالجودة والسرعة."
-    n = _enqueue_broadcast(text)
-    bot.reply_to(m, f"✅ تم جدولة رسالة الترحيب إلى {n} مستخدم.")
+    @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_welcome(m):
+        text = "أهلًا في بوتنا 🤍 نحن شغالين الآن! جرّب الخدمات وخلينا نبهرك بالجودة والسرعة."
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة رسالة الترحيب إلى {n} مستخدم.")
 
-@bot.message_handler(func=lambda m: m.text == "📢 رسالة تسويقية" and m.from_user.id == ADMIN_MAIN_ID)
-def bc_marketing(m):
-    text = "⚡ عروضنا الأقوى! شحن سريع، أسعار منافسة، وخدمة ممتازة. جرّبنا اليوم!"
-    n = _enqueue_broadcast(text)
-    bot.reply_to(m, f"✅ تم جدولة الرسالة التسويقية إلى {n} مستخدم.")
+    @bot.message_handler(func=lambda m: m.text == "📢 رسالة تسويقية" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_marketing(m):
+        text = "⚡ عروضنا الأقوى! شحن سريع، أسعار منافسة، وخدمة ممتازة. جرّبنا اليوم!"
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة الرسالة التسويقية إلى {n} مستخدم.")
 
-@bot.message_handler(func=lambda m: m.text == "⭐ تقييم منتج" and m.from_user.id == ADMIN_MAIN_ID)
-def bc_rating(m):
-    text = "قيّم تجربتك معنا ⭐️⭐️⭐️⭐️⭐️ — رد على هذه الرسالة بالتقييم والملاحظات لتدخل السحب الشهري!"
-    n = _enqueue_broadcast(text)
-    bot.reply_to(m, f"✅ تم جدولة رسالة التقييم إلى {n} مستخدم.")
+    @bot.message_handler(func=lambda m: m.text == "⭐ تقييم منتج" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_rating(m):
+        text = "قيّم تجربتك معنا ⭐️⭐️⭐️⭐️⭐️ — رد على هذه الرسالة بالتقييم والملاحظات لتدخل السحب الشهري!"
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة رسالة التقييم إلى {n} مستخدم.")
 
-from services.state_service import set_state, get_state, clear_state, DEFAULT_STATE_KEY as _DEF_KEY
-BROADCAST_KEY = "broadcast_free"
+    from services.state_service import set_state, get_state, clear_state, DEFAULT_STATE_KEY as _DEF_KEY
+    BROADCAST_KEY = "broadcast_free"
 
-@bot.message_handler(func=lambda m: m.text == "📝 رسالة حرة" and m.from_user.id == ADMIN_MAIN_ID)
-def bc_free_start(m):
-    set_state(m.from_user.id, BROADCAST_KEY, {"step": "await_text"}, ttl_minutes=10)
-    bot.reply_to(m, "أرسل النص الذي تريد بثه للجميع (خلال 10 دقائق).")
+    @bot.message_handler(func=lambda m: m.text == "📝 رسالة حرة" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_free_start(m):
+        set_state(m.from_user.id, BROADCAST_KEY, {"step": "await_text"}, ttl_minutes=10)
+        bot.reply_to(m, "أرسل النص الذي تريد بثه للجميع (خلال 10 دقائق).")
 
-@bot.message_handler(func=lambda m: get_state(m.from_user.id, BROADCAST_KEY) is not None, content_types=["text"])
-def bc_free_recv(m):
-    st = get_state(m.from_user.id, BROADCAST_KEY) or {}
-    if st.get("step") != "await_text":
-        return
-    clear_state(m.from_user.id, BROADCAST_KEY)
-    text = m.text.strip()
-    if not text:
-        return bot.reply_to(m, "❌ النص فارغ.")
-    n = _enqueue_broadcast(text)
-    bot.reply_to(m, f"✅ تم جدولة الرسالة إلى {n} مستخدم.")
+    @bot.message_handler(func=lambda m: get_state(m.from_user.id, BROADCAST_KEY) is not None, content_types=["text"])
+    def bc_free_recv(m):
+        st = get_state(m.from_user.id, BROADCAST_KEY) or {}
+        if st.get("step") != "await_text":
+            return
+        clear_state(m.from_user.id, BROADCAST_KEY)
+        text = m.text.strip()
+        if not text:
+            return bot.reply_to(m, "❌ النص فارغ.")
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة الرسالة إلى {n} مستخدم.")
 
-@bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
 
-def pending_count(m):
-    c = pending_queue_count()
-    bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
+    def pending_count(m):
+        c = pending_queue_count()
+        bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
 
     @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
     def system_menu(m):
