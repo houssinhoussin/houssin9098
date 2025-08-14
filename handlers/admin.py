@@ -1033,84 +1033,117 @@ def register(bot, history):
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
-    def _collect_broadcast_user_ids():
-    """
-    يجمع كل user_id الممكنة للإرسال:
-    - من جدول المستخدمين DEFAULT_TABLE إن وُجد
-    - احتياطيًا من transactions / purchases / user_state / pending_requests
-    - يضيف دائمًا الأدمن الرئيسي وجميع الأدمن
-    """
-    ids = set()
-    # المصدر الرئيسي
-    try:
-        rs = get_table(DEFAULT_TABLE).select("user_id").execute()
-        for r in (rs.data or []):
-            uid = int(r.get("user_id") or 0)
-            if uid:
-                ids.add(uid)
-    except Exception:
-        pass
-
-    # مصادر احتياط
-    for table, col in [("transactions","user_id"), ("purchases","user_id"), ("user_state","user_id"), ("pending_requests","user_id")]:
+    def _enqueue_broadcast(text: str) -> int:
+        # نسحب كل المستخدمين ونضيفهم لجدول outbox
         try:
-            rs = get_table(table).select(col).limit(200000).execute()
-            for r in (rs.data or []):
-                uid = int(r.get(col) or 0)
-                if uid:
-                    ids.add(uid)
+            rs = get_table(DEFAULT_TABLE).select("user_id, first_name, username").execute()
+            rows = rs.data or []
         except Exception:
-            pass
+            rows = []
+        count = 0
+        outbox = get_table("notifications_outbox")
+        for r in rows:
+            uid = int(r.get("user_id"))
+            outbox.insert({"user_id": uid, "message": text}).execute()
+            count += 1
+        return count
 
-    # أضِف الأدمن دائمًا
-    try:
-        ids.add(int(ADMIN_MAIN_ID))
-    except Exception:
-        pass
-    try:
-        for aid in ADMINS:
-            try:
-                ids.add(int(aid))
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return list(ids)
+    @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_welcome(m):
+        text = "أهلًا في بوتنا 🤍 نحن شغالين الآن! جرّب الخدمات وخلينا نبهرك بالجودة والسرعة."
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة رسالة الترحيب إلى {n} مستخدم.")
 
+    @bot.message_handler(func=lambda m: m.text == "📢 رسالة تسويقية" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_marketing(m):
+        text = "⚡ عروضنا الأقوى! شحن سريع، أسعار منافسة، وخدمة ممتازة. جرّبنا اليوم!"
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة الرسالة التسويقية إلى {n} مستخدم.")
 
-def _enqueue_broadcast(text: str) -> int:
-    # يجمع recipients من جدول المستخدمين الرئيسي فقط + يضيف الأدمنين دائمًا
+    @bot.message_handler(func=lambda m: m.text == "⭐ تقييم منتج" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_rating(m):
+        text = "قيّم تجربتك معنا ⭐️⭐️⭐️⭐️⭐️ — رد على هذه الرسالة بالتقييم والملاحظات لتدخل السحب الشهري!"
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة رسالة التقييم إلى {n} مستخدم.")
+
     try:
-        rows = get_table(DEFAULT_TABLE).select("user_id").execute().data or []
+        import services.state_service as _ss
+        set_state = getattr(_ss, 'set_state', None)
+        get_state = getattr(_ss, 'get_state', None)
+        clear_state = getattr(_ss, 'clear_state', None)
+        _DEF_KEY = getattr(_ss, 'DEFAULT_STATE_KEY', 'state_default')
+        if set_state is None or get_state is None or clear_state is None:
+            raise AttributeError('missing state fns')
     except Exception:
-        rows = []
-    ids = set()
-    for r in rows:
-        try:
-            uid = int(r.get("user_id") or 0)
-            if uid:
-                ids.add(uid)
-        except Exception:
-            pass
-    # أضف الأدمن لسهولة الاختبار
-    try:
-        ids.add(int(ADMIN_MAIN_ID))
-    except Exception:
-        pass
-    try:
-        for aid in ADMINS:
-            try:
-                ids.add(int(aid))
-            except Exception:
-                pass
-    except Exception:
-        pass
-    outbox = get_table("notifications_outbox")
-    n = 0
-    for uid in ids:
-        try:
-            outbox.insert({"user_id": int(uid), "message": text}).execute()
-            n += 1
-        except Exception:
-            pass
-    return n
+        _TMP_STATE = {}
+        def set_state(uid, key, value, ttl_minutes=10):
+            _TMP_STATE[(uid, key)] = value
+        def get_state(uid, key):
+            return _TMP_STATE.get((uid, key))
+        def clear_state(uid, key):
+            _TMP_STATE.pop((uid, key), None)
+        _DEF_KEY = 'state_default'
+    BROADCAST_KEY = "broadcast_free"
+
+    @bot.message_handler(func=lambda m: m.text == "📝 رسالة حرة" and m.from_user.id == ADMIN_MAIN_ID)
+    def bc_free_start(m):
+        set_state(m.from_user.id, BROADCAST_KEY, {"step": "await_text"}, ttl_minutes=10)
+        bot.reply_to(m, "أرسل النص الذي تريد بثه للجميع (خلال 10 دقائق).")
+
+    @bot.message_handler(func=lambda m: get_state(m.from_user.id, BROADCAST_KEY) is not None, content_types=["text"])
+    def bc_free_recv(m):
+        st = get_state(m.from_user.id, BROADCAST_KEY) or {}
+        if st.get("step") != "await_text":
+            return
+        clear_state(m.from_user.id, BROADCAST_KEY)
+        text = m.text.strip()
+        if not text:
+            return bot.reply_to(m, "❌ النص فارغ.")
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تم جدولة الرسالة إلى {n} مستخدم.")
+
+    @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
+    def pending_count(m):
+        c = pending_queue_count()
+        bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
+
+    @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
+    def system_menu(m):
+            state = "تشغيل" if not is_maintenance() else "إيقاف (صيانة)"
+            kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            kb.row("🛑 تفعيل وضع الصيانة", "▶️ إلغاء وضع الصيانة")
+            kb.row("🔁 إعادة التحقق من الاشتراك الآن")
+            kb.row("👥 صلاحيات الأدمن", "📜 Snapshot السجلات")
+            kb.row("⬅️ رجوع")
+            bot.send_message(m.chat.id, f"حالة النظام: {state}", reply_markup=kb)
+
+    @bot.message_handler(func=lambda m: m.text == "🛑 تفعيل وضع الصيانة" and m.from_user.id in ADMINS)
+    def enable_maint(m):
+            set_maintenance(True, "🛠️ نعمل على صيانة سريعة الآن. جرّب لاحقًا.")
+            log_action(m.from_user.id, "maintenance_on", "")
+            bot.reply_to(m, "تم تفعيل وضع الصيانة.")
+
+    @bot.message_handler(func=lambda m: m.text == "▶️ إلغاء وضع الصيانة" and m.from_user.id in ADMINS)
+    def disable_maint(m):
+            set_maintenance(False)
+            log_action(m.from_user.id, "maintenance_off", "")
+            bot.reply_to(m, "تم إلغاء وضع الصيانة.")
+
+    @bot.message_handler(func=lambda m: m.text == "🔁 إعادة التحقق من الاشتراك الآن" and m.from_user.id in ADMINS)
+    def force_sub(m):
+            epoch = force_sub_recheck()
+            log_action(m.from_user.id, "force_sub_recheck", str(epoch))
+            bot.reply_to(m, "تم مسح الكاش، سيُعاد التحقق للمستخدمين الجدد.")
+
+    @bot.message_handler(func=lambda m: m.text == "📜 Snapshot السجلات" and m.from_user.id in ADMINS)
+    def show_logs_snapshot(m):
+            tail = get_logs_tail(30)
+            if len(tail) > 3500:
+                tail = tail[-3500:]
+            bot.send_message(m.chat.id, "آخر السجلات:\n" + "```\n" + tail + "\n```", parse_mode="Markdown")
+
+    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
+    def admins_roles(m):
+            from config import ADMINS, ADMIN_MAIN_ID
+            ids = ", ".join(str(x) for x in ADMINS)
+            bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
