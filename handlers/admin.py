@@ -781,26 +781,53 @@ def register(bot, history):
                 amount = _amount_from_payload(payload) or payload.get("amount") or 0
                 amount = int(amount) if amount else 0
                 if amount <= 0:
-                    return bot.answer_callback_query(call.id, "❌ مبلغ الشحن غير صالح.")
+                    try:
+                        return bot.answer_callback_query(call.id, "❌ مبلغ الشحن غير صالح.")
+                    except Exception:
+                        return
 
+                # تأكد أن للمستخدم صفًّا في جدول المحفظة
                 try:
-                    logging.info(f"[ADMIN][RECHARGE][{user_id}] approve amount={amount} req_id={request_id}")
+                    register_user_if_not_exist(user_id, name)
                 except Exception:
                     pass
 
+                # ✅ الشحن الفعلي للمحفظة
                 try:
-                    log_admin_deposit(call.from_user.id if 'call' in locals() else m.from_user.id, user_id, int(amount), f"req={request_id}")
+                    r = add_balance(
+                        user_id,
+                        int(amount),
+                        f"شحن محفظة — طريقة: {payload.get('method') or 'غير محدد'} | ref={_safe(payload.get('ref'))} | req={request_id}"
+                    )
+                    if getattr(r, "error", None):
+                        logging.error("[ADMIN][RECHARGE] add_balance error: %s", r.error)
+                        try:
+                            return bot.answer_callback_query(call.id, "❌ فشل تحديث الرصيد. حاول مجددًا.")
+                        except Exception:
+                            return
+                except Exception as e:
+                    logging.exception("[ADMIN][RECHARGE] add_balance exception: %s", e)
+                    try:
+                        return bot.answer_callback_query(call.id, "❌ حدث خطأ أثناء تحديث الرصيد.")
+                    except Exception:
+                        return
+
+                # سجل العملية في دفتر الإداري اختيارياً
+                try:
+                    log_admin_deposit(call.from_user.id, user_id, int(amount), f"req={request_id}")
                 except Exception as _e:
                     logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
-                delete_pending_request(request_id)
 
-                bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
+                # نظّف الطلب من الطابور وأبلغ العميل
+                delete_pending_request(request_id)
+                bot.send_message(
+                    user_id,
+                    f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}"
+                )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
 
-                # NEW: نظّف قفل الشحن المحلي بعد القبول
                 _clear_recharge_local_lock_safe(user_id)
-
                 _prompt_admin_note(bot, call.from_user.id, user_id)
                 return
 
