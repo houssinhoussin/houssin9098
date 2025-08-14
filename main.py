@@ -188,7 +188,7 @@ def handle_transfers(msg):
 def handle_cash_transfer(msg):
     from handlers.cash_transfer import start_cash_transfer
     start_cash_transfer(bot, msg, history)
-    user_state[msg.from_user.id] = {**user_state.get(msg.from_user.id, {}), "screen": "cash_menu"}
+    user_state[msg.from_user.id]['step'] = "cash_menu"
 
 @bot.message_handler(func=lambda msg: msg.text == "حوالة مالية عبر شركات")
 def handle_companies_transfer(msg):
