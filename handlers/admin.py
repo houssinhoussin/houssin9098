@@ -1035,20 +1035,20 @@ def register(bot, history):
 
     def _enqueue_broadcast(text: str) -> int:
     # نسحب كل المستخدمين ونضيفهم لجدول outbox
-        try:
-            rs = get_table(DEFAULT_TABLE).select("user_id").execute()
-            rows = rs.data or []
-        except Exception:
-            rows = []
+    try:
+        rs = get_table(DEFAULT_TABLE).select("user_id").execute()
+        rows = rs.data or []
+    except Exception:
+        rows = []
         # نجمع المعرّفات بدون تكرار
         ids = set()
-        for r in rows:
-            try:
-                uid = int(r.get("user_id") or 0)
-                if uid:
-                    ids.add(uid)
-            except Exception:
-                pass
+    for r in rows:
+        try:
+            uid = int(r.get("user_id") or 0)
+            if uid:
+                ids.add(uid)
+        except Exception:
+            pass
     # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
     try:
         ids.add(int(ADMIN_MAIN_ID))
