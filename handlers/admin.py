@@ -454,14 +454,14 @@ def register(bot, history):
                 except Exception as e:
                     logging.exception("release_hold exception: %s", e)
             else:
-                    if reserved > 0:
-                        add_balance(user_id, reserved, "إلغاء حجز (قديم)")
+                if reserved > 0:
+                    add_balance(user_id, reserved, "إلغاء حجز (قديم)")
 
             delete_pending_request(request_id)
             if reserved > 0:
-                    bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
+                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
             else:
-                    bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
+                bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
@@ -519,254 +519,17 @@ def register(bot, history):
                     pass
 
                 delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n🎉 تمام يا {name}! تم تحويل «{product_name}» لآيدي «{_safe(player_id)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮\n{BAND}",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                try:
-                    purge_state(user_id)
-                except Exception:
-                    pass
-                return
+    bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
+    bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
+    queue_cooldown_start(bot)
 
-            # ——— إعلانات ———
-            elif typ in ("ads", "media"):
-                amt     = int(amt or payload.get("price", 0) or 0)
-                times   = payload.get("count")
-                contact = payload.get("contact") or "—"
-                ad_text = payload.get("ad_text") or ""
-                images  = payload.get("images", [])
+    # NEW: نظّف قفل الشحن المحلي بعد القبول
+    _clear_recharge_local_lock_safe(user_id)
 
-                title = f"إعلان مدفوع × {times}" if times else "إعلان مدفوع"
-                _insert_purchase_row(user_id, None, title, amt, _safe(contact))
-                try:
-                    add_ads_purchase(user_id, ad_name=title, price=amt, channel_username=None)
-                except Exception:
-                    pass
+    _prompt_admin_note(bot, call.from_user.id, user_id)
+    return
 
-                delete_pending_request(request_id)
-
-                # NEW: أنشئ إعلانًا فعّالًا لبدء النشر الآلي ضمن نافذة 9→22 بتوقيت دمشق
-                try:
-                    times_total = int(payload.get("times_total") or payload.get("count") or 1)
-                    duration_days = int(payload.get("duration_days") or 30)
-                    add_channel_ad(
-                        user_id=user_id,
-                        times_total=times_total,
-                        price=amt,
-                        contact=contact,
-                        ad_text=ad_text,
-                        images=images,
-                        duration_days=duration_days,
-                    )
-                except Exception as e:
-                    logging.exception("[ADMIN][ADS] add_channel_ad failed: %s", e)
-
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n📣 تمام يا {name}! وتم تأكيد باقة الإعلان ({title}). "
-                    f"اتخصم {_fmt_syp(amt)} من محفظتك، وحننشرها حسب الجدولة.\n{BAND}",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                return
-
-            elif typ in ("syr_unit", "mtn_unit"):
-                price = int(payload.get("price", 0) or amt or 0)
-                num   = _extract_identifier(payload, req_text, ["number","msisdn","phone"])
-                unit_name = payload.get("unit_name") or "وحدات"
-
-                _insert_purchase_row(user_id, None, unit_name, price, _safe(num))
-                try:
-                    add_bill_or_units_purchase(user_id, bill_name=unit_name, price=price, number=_safe(num))
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n✅ تمام يا {name}! تم تحويل {unit_name} للرقم «{_safe(num)}» "
-                    f"وتم خصم {_fmt_syp(price)} من محفظتك.\n{BAND}",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                try:
-                    purge_state(user_id)
-                except Exception:
-                    pass
-                return
-
-            elif typ in ("syr_bill", "mtn_bill"):
-                amt   = int(amt or payload.get("price", 0) or 0)
-                num   = payload.get("number")
-                label = payload.get("unit_name", "فاتورة")
-
-                _insert_purchase_row(user_id, None, label, amt, _safe(num))
-                try:
-                    add_bill_or_units_purchase(user_id, bill_name=label, price=amt, number=_safe(num))
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n🧾 تمام يا {name}! تم دفع {label} للرقم «{_safe(num)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                try:
-                    purge_state(user_id)
-                except Exception:
-                    pass
-                return
-
-            elif typ == "internet":
-                amt      = int(amt or payload.get("price", 0) or 0)
-                provider = _safe(payload.get("provider"), dash="").strip()
-                speed    = _safe(payload.get("speed"), dash="").strip()
-                phone    = payload.get("phone")
-                name_lbl = ("إنترنت " + " ".join(x for x in [provider, speed] if x)).strip() or "إنترنت"
-
-                _insert_purchase_row(user_id, None, name_lbl, amt, _safe(phone))
-                try:
-                    add_internet_purchase(user_id, provider_name=provider or None, price=amt, phone=_safe(phone), speed=speed or None)
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n🌐 تمام يا {name}! تم دفع فاتورة الإنترنت ({name_lbl}) للرقم «{_safe(phone)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                return
-
-            elif typ == "cash_transfer":
-                amt       = int(amt or payload.get("price", 0) or 0)
-                number    = payload.get("number")
-                cash_type = _safe(payload.get("cash_type"), dash="").strip()
-                name_lbl  = (f"تحويل كاش {cash_type}".strip() if cash_type else "تحويل كاش")
-
-                _insert_purchase_row(user_id, None, name_lbl, amt, _safe(number))
-                try:
-                    add_cash_transfer_purchase(user_id, transfer_name=name_lbl, price=amt, number=_safe(number))
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n💸 تمام يا {name}! تم تنفيذ {name_lbl} للرقم «{_safe(number)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
-                    parse_mode="HTML",
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                try:
-                    purge_state(user_id)
-                except Exception:
-                    pass
-                return
-
-            elif typ == "companies_transfer":
-                amt                = int(amt or payload.get("price", 0) or 0)
-                company            = _safe(payload.get("company"), dash="").strip()
-                beneficiary_number = payload.get("beneficiary_number")
-                name_lbl           = (f"حوالة مالية عبر {company}".strip() if company else "حوالة مالية")
-
-                _insert_purchase_row(user_id, None, name_lbl, amt, _safe(beneficiary_number))
-                try:
-                    add_companies_transfer_purchase(user_id, company_name=(company or None), price=amt, beneficiary_number=_safe(beneficiary_number))
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n🏢 تمام يا {name}! تم تنفيذ {name_lbl} للمستفيد «{_safe(beneficiary_number)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
-                    parse_mode="HTML",
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                try:
-                    purge_state(user_id)
-                except Exception:
-                    pass
-                return
-
-            elif typ in ("university_fees",):
-                amt           = int(amt or payload.get("price", 0) or 0)
-                university    = _safe(payload.get("university"), dash="").strip()
-                university_id = payload.get("university_id")
-                name_lbl      = (f"رسوم جامعية ({university})".strip() if university else "رسوم جامعية")
-
-                _insert_purchase_row(user_id, None, name_lbl, amt, _safe(university_id))
-                try:
-                    add_university_fees_purchase(user_id, university_name=(university or None), price=amt, university_id=_safe(university_id))
-                except Exception:
-                    pass
-
-                delete_pending_request(request_id)
-                bot.send_message(
-                    user_id,
-                    f"{BAND}\n🎓 تمام يا {name}! تم دفع {name_lbl} للرقم الجامعي «{_safe(university_id)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
-                    parse_mode="HTML"
-                )
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
-                queue_cooldown_start(bot)
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                return
-
-            elif typ in ("recharge", "wallet_recharge", "deposit"):
-                amount = _amount_from_payload(payload) or payload.get("amount") or 0
-                amount = int(amount) if amount else 0
-                if amount <= 0:
-                    return bot.answer_callback_query(call.id, "❌ مبلغ الشحن غير صالح.")
-
-                try:
-                    logging.info(f"[ADMIN][RECHARGE][{user_id}] approve amount={amount} req_id={request_id}")
-                except Exception:
-                    pass
-
-            try:
-                log_admin_deposit(call.from_user.id if 'call' in locals() else m.from_user.id, user_id, int(amount), f"req={request_id}")
-            except Exception as _e:
-                logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
-            delete_pending_request(request_id)
-            bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
-            bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
-            queue_cooldown_start(bot)
-
-            # NEW: نظّف قفل الشحن المحلي بعد القبول
-            _clear_recharge_local_lock_safe(user_id)
-
-            _prompt_admin_note(bot, call.from_user.id, user_id)
-            return
-
-            else:
-                return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
-
-        bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
+    bot.answer_callback_query(call.id, "❌ حدث خطأ غير متوقع.")
 
     # === ملاحظة الإدمن بعد القبول/الإلغاء (اختياري) ===
     @bot.message_handler(func=lambda m: m.from_user.id in _accept_pending,
@@ -790,22 +553,22 @@ def register(bot, history):
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
     def admin_menu(msg):
-    if msg.from_user.id not in ADMINS:
-        return bot.reply_to(msg, "صلاحية الأدمن فقط.")
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # رئيسي أم مساعد؟
-    is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
-    if is_primary:
-        # ⛔️ حذف "إدارة المنتجات" كما طُلب + إضافة أزرار التقارير والبث
-        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-        kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
-        kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
-        kb.row("⚙️ النظام", "⬅️ رجوع")
-    else:
-        # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
-        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-        kb.row("⬅️ رجوع")
-    bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
+        if msg.from_user.id not in ADMINS:
+            return bot.reply_to(msg, "صلاحية الأدمن فقط.")
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        # رئيسي أم مساعد؟
+        is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
+        if is_primary:
+            # ⛔️ حذف "إدارة المنتجات" كما طُلب + إضافة أزرار التقارير والبث
+            kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+            kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
+            kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
+            kb.row("⚙️ النظام", "⬅️ رجوع")
+        else:
+            # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
+            kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+            kb.row("⬅️ رجوع")
+        bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
 
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and m.from_user.id in ADMINS)
     def admin_products_menu(m):
@@ -928,6 +691,7 @@ def quick_reports(m):
     except Exception as _e:
         logging.exception("[REPORTS] top5 weekly failed: %s", _e)
     bot.send_message(m.chat.id, "\n".join(lines))
+
 @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
 def assistants_daily_report(m):
     txt = summarize_assistants(days=7)
@@ -1000,7 +764,7 @@ def bc_free_recv(m):
     n = _enqueue_broadcast(text)
     bot.reply_to(m, f"✅ تم جدولة الرسالة إلى {n} مستخدم.")
 
-@bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
     def pending_count(m):
         c = pending_queue_count()
         bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
