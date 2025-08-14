@@ -19,6 +19,7 @@ from database.models.product import Product
 
 # (جديد) فلاغات المزايا للمنتجات الفردية
 from services.feature_flags import is_feature_enabled  # نستخدمه لتعطيل منتج معيّن (مثل 660 شدة)
+from services.feature_flags import UNAVAILABLE_MSG
 
 # حارس التأكيد الموحّد: يحذف الكيبورد + يعمل Debounce
 try:
@@ -51,11 +52,7 @@ def _card(title: str, lines: list[str]) -> str:
     return f"{BAND}\n{title}\n{body}\n{BAND}"
 
 def _unavailable_short(product_name: str) -> str:
-    # تنويه احترافي يظهر كـ Alert عندما يكون المنتج موقوفًا
-    return (
-        f"⛔ عذرًا، «{product_name}» غير متاح حاليًا بسبب صيانة أو نفاد الكمية.\n"
-        f"سنُعيد فتحه بأسرع وقت ممكن. شكرًا لتفهّمك 🤍"
-    )
+    return UNAVAILABLE_MSG.format(label=product_name)
 
 # ================= (جديد) تحكّم تفصيلي ON/OFF لكل زر كمية =================
 # نستخدم جدول features نفسه بمفاتيح منسّقة لكل خيار (SKU)
