@@ -1058,6 +1058,7 @@ def register(bot, history):
         ids.add(int(ADMIN_MAIN_ID))
     except Exception:
         pass
+
     try:
         for aid in ADMINS:
             try:
@@ -1067,19 +1068,31 @@ def register(bot, history):
     except Exception:
         pass
 
+    return ids
+
+
+def _enqueue_broadcast(text: str) -> int:
+    """
+    يضيف رسائل البث إلى outbox لكل المستخدمين.
+    """
+    user_ids = _collect_all_user_ids()
     outbox = get_table("notifications_outbox")
     n = 0
     now_iso = datetime.utcnow().isoformat()
-    for uid in ids:
+
+    for uid in user_ids:
         try:
-            outbox.insert({"user_id": int(uid), "message": text, "scheduled_at": now_iso}).execute()
+            outbox.insert(
+                {"user_id": int(uid), "message": text, "scheduled_at": now_iso}
+            ).execute()
             n += 1
         except Exception:
             pass
-    return n
 
-    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
-    def admins_roles(m):
-            from config import ADMINS, ADMIN_MAIN_ID
-            ids = ", ".join(str(x) for x in ADMINS)
-            bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
+    return n
+@bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
+def admins_roles(m):
+    # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
+    # from config import ADMINS, ADMIN_MAIN_ID  # ممكن تحذف هذه إن كانت معرفة مسبقاً
+    ids_str = ", ".join(str(x) for x in ADMINS)
+    bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
