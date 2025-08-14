@@ -9,6 +9,7 @@ from services.queue_service import add_pending_request, process_queue
 from services.validators import parse_amount
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
+from services.feature_flags import require_feature_or_alert
 import logging
 
 # NEW: بنفحص الطابور الفعلي
@@ -135,6 +136,9 @@ def start_recharge_menu(bot, message, history=None):
 
     name = _name_from_user(message.from_user)
     logging.info(f"[RECHARGE][{uid}] فتح قائمة الشحن")
+    # ميزة "شحن المحفظة" مقفولة؟ أرسل اعتذار وانهِ الدالة
+    if require_feature_or_alert(bot, message.chat.id, "wallet_recharge", "شحن المحفظة"):
+        return
     bot.send_message(
         message.chat.id,
         _with_cancel(f"💳 يا {name}، اختار طريقة شحن محفظتك:"),
@@ -176,6 +180,17 @@ def register(bot, history):
             return
 
         method = msg.text.replace("📲 ", "").replace("💳 ", "")
+        feature_map = {
+            "سيرياتيل كاش": "recharge_syriatel",
+            "أم تي إن كاش": "recharge_mtn",
+            "شام كاش": "recharge_sham",
+            "Payeer": "recharge_payeer",
+        }
+        fk = feature_map.get(method)
+        # لو الطريقة مقفولة، أرسل الاعتذار الاحترافي وتوقّف
+        if fk and require_feature_or_alert(bot, msg.chat.id, fk, f"شحن — {method}"):
+            return
+
         recharge_requests[user_id] = {"method": method}
         instructions = get_method_instructions(method)
         markup = types.InlineKeyboardMarkup()
@@ -220,6 +235,17 @@ def register(bot, history):
 
         name = _name_from_user(call.from_user)
         if call.data == "confirm_recharge_method":
+            method = (recharge_requests.get(user_id) or {}).get("method")
+            feature_map = {
+                "سيرياتيل كاش": "recharge_syriatel",
+                "أم تي إن كاش": "recharge_mtn",
+                "شام كاش": "recharge_sham",
+                "Payeer": "recharge_payeer",
+            }
+            fk = feature_map.get(method)
+            if fk and require_feature_or_alert(bot, call.message.chat.id, fk, f"شحن — {method}"):
+                return
+
             logging.info(f"[RECHARGE][{user_id}] أكد طريقة الشحن، بانتظار الصورة")
             bot.send_message(
                 call.message.chat.id,
