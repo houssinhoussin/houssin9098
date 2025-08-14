@@ -238,6 +238,17 @@ def _admin_product_actions_markup(pid: int):
 # ─────────────────────────────────────
 def _features_markup(page: int = 0, page_size: int = 10):
     items = list_features() or []
+    # إزالة التكرارات حسب المفتاح
+    seen = set()
+    unique = []
+    for it in items:
+        k = it.get("key")
+        if k in seen:
+            continue
+        seen.add(k)
+        unique.append(it)
+    items = unique
+
     total = len(items)
     if total == 0:
         kb = types.InlineKeyboardMarkup(row_width=1)
@@ -252,16 +263,14 @@ def _features_markup(page: int = 0, page_size: int = 10):
     kb = types.InlineKeyboardMarkup(row_width=1)
     for it in subset:
         k = it.get("key")
-        label = it.get("label") or k
+        label = (it.get("label") or k) or ""
         active = bool(it.get("active", True))
         lamp = "🟢" if active else "🔴"
         to = 0 if active else 1
-        kb.add(
-            types.InlineKeyboardButton(
-                text=f"{lamp} {label}",
-                callback_data=f"adm_feat_t:{k}:{to}:{page}"
-            )
-        )
+        kb.add(types.InlineKeyboardButton(
+            text=f"{lamp} {label}",
+            callback_data=f"adm_feat_t:{k}:{to}:{page}"
+        ))
 
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
@@ -272,7 +281,6 @@ def _features_markup(page: int = 0, page_size: int = 10):
             types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
         )
     return kb
-
 def register(bot, history):
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
@@ -914,19 +922,26 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     def adm_feature_toggle(call: types.CallbackQuery):
-        # "adm_feat_t:<KEY>:<TO>[:<PAGE>]"
         try:
-            _, rest = call.data.split(":", 1)
-            parts = rest.split(":")
-            key = parts[0]
-            to  = parts[1]
-            page = int(parts[2]) if len(parts) > 2 else 0
-        except Exception:
+            prefix = "adm_feat_t:"
+            tail = call.data[len(prefix):] if call.data.startswith(prefix) else call.data
+            parts = tail.rsplit(":", 2)  # <= 3 عناصر
+            if len(parts) == 3:
+                key, to, page_s = parts
+                try:
+                    page = int(page_s)
+                except Exception:
+                    page = 0
+            elif len(parts) == 2:
+                key, to = parts
+                page = 0
+            else:
+                return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+            ok = set_feature_active(key, bool(int(to)))
+        except Exception as e:
+            import logging
+            logging.exception("[ADMIN][feat_toggle] parse/toggle error: %s", e)
             return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
-
-        ok = set_feature_active(key, bool(int(to)))
-        if not ok:
-            return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
 
         try:
             bot.edit_message_reply_markup(
