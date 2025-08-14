@@ -81,6 +81,8 @@ _cancel_pending = {}
 _accept_pending = {}
 _msg_pending = {}
 
+
+_broadcast_pending = {}
 # ─────────────────────────────────────
 #   تنسيقات ونصوص
 # ─────────────────────────────────────
@@ -312,6 +314,7 @@ def register(bot, history):
     def _admin_cancel_any(msg: types.Message):
         _msg_pending.pop(msg.from_user.id, None)
         _accept_pending.pop(msg.from_user.id, None)
+        _broadcast_pending.pop(msg.from_user.id, None)
         bot.reply_to(msg, "✅ تم الإلغاء.")
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and msg.from_user.id in ADMINS)
