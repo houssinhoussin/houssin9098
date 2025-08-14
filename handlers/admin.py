@@ -236,28 +236,43 @@ def _admin_product_actions_markup(pid: int):
 # ─────────────────────────────────────
 #   لوحة المزايا (Feature Flags)
 # ─────────────────────────────────────
-def _features_markup():
-    items = list_features()
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    if not items:
+def _features_markup(page: int = 0, page_size: int = 10):
+    items = list_features() or []
+    total = len(items)
+    if total == 0:
+        kb = types.InlineKeyboardMarkup(row_width=1)
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
         return kb
-    for it in items:
-        k, label = it.get("key"), it.get("label")
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    subset = items[start : start + page_size]
+
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for it in subset:
+        k = it.get("key")
+        label = it.get("label") or k
         active = bool(it.get("active", True))
         lamp = "🟢" if active else "🔴"
         to = 0 if active else 1
         kb.add(
             types.InlineKeyboardButton(
                 text=f"{lamp} {label}",
-                callback_data=f"adm_feat_t:{k}:{to}"
+                callback_data=f"adm_feat_t:{k}:{to}:{page}"
             )
+        )
+
+    if total_pages > 1:
+        prev_page = (page - 1) % total_pages
+        next_page = (page + 1) % total_pages
+        kb.row(
+            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
+            types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
+            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
         )
     return kb
 
-# ─────────────────────────────────────
-#   التسجيل
-# ─────────────────────────────────────
 def register(bot, history):
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
@@ -894,27 +909,67 @@ def register(bot, history):
     # ===== لوحة المزايا (Feature Flags) =====
     @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and m.from_user.id in ADMINS)
     def features_menu(m):
-        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup())
+        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup(page=0))
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
-    def adm_feature_toggle(call: types.CallbackQuery):
-        # كان سابقًا: _, key, to = call.data.split(":")
+def adm_feature_toggle(call: types.CallbackQuery):
+    # "adm_feat_t:<KEY>:<TO>[:<PAGE>]"
+    try:
+        _, rest = call.data.split(":", 1)
+        parts = rest.split(":")
+        key = parts[0]
+        to  = parts[1]
+        page = int(parts[2]) if len(parts) > 2 else 0
+    except Exception:
+        return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+
+    ok = set_feature_active(key, bool(int(to)))
+    if not ok:
+        return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
+
+    try:
+        bot.edit_message_reply_markup(
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=_features_markup(page=page)
+        )
+    except Exception:
         try:
-            _, rest = call.data.split(":", 1)   # "adm_feat_t:<KEY>:<TO>"  => rest="<KEY>:<TO>"
-            key, to = rest.rsplit(":", 1)       # يسمح بوجود ":" داخل <KEY>
-        except ValueError:
-            return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
-        ok = set_feature_active(key, bool(int(to)))
-        if not ok:
-            return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
-        # تحديث اللوحة الحالية
-        try:
-            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=_features_markup())
+            bot.edit_message_text(
+                "بدّل حالة المزايا التالية:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=_features_markup(page=page)
+            )
         except Exception:
             pass
-        bot.answer_callback_query(call.id, "✅ تم التحديث.")
+    bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
-    
+
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and c.from_user.id in ADMINS)
+    def adm_feature_page(call: types.CallbackQuery):
+        try:
+            page = int(call.data.split(":", 1)[1])
+        except Exception:
+            page = 0
+        try:
+            bot.edit_message_reply_markup(
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=_features_markup(page=page)
+            )
+        except Exception:
+            try:
+                bot.edit_message_text(
+                    "بدّل حالة المزايا التالية:",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=_features_markup(page=page)
+                )
+            except Exception:
+                pass
+        bot.answer_callback_query(call.id)
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
     def quick_reports(m):
         dep, pur, top = totals_deposits_and_purchases_syp()
