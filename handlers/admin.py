@@ -1113,7 +1113,7 @@ def register(bot, history):
 
         # نسحب كل المستخدمين من الجدول
         try:
-            rs = get_table(DEFAULT_TABLE).select("user_id").execute()
+            rs = get_table("houssin363").select("user_id").execute()
             rows = rs.data or []
         except Exception:
             rows = []
