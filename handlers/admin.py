@@ -882,6 +882,62 @@ def register(bot, history):
         kb.row("🔄 مزامنة المنتجات (DB)")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
+ 
+    # ⏳ عرض طابور الانتظار للأدمن
+    @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
+    def admin_queue_list(m: types.Message):
+        # حمّل أول 30 طلب أقدم فالأحدث
+        try:
+            res = (
+                get_table("pending_requests")
+                .select("id,user_id,request_text,payload,created_at")
+                .order("created_at", desc=False)
+                .limit(30)
+                .execute()
+            )
+            rows = res.data or []
+        except Exception as e:
+            logging.exception("[ADMIN] load queue failed: %s", e)
+            return bot.reply_to(m, "❌ تعذّر تحميل الطابور.")
+
+        if not rows:
+            return bot.reply_to(m, "🟢 لا توجد طلبات حالية.")
+
+        for r in rows:
+            rid     = r["id"]
+            uid     = r["user_id"]
+            name    = _user_name(bot, uid)
+            req_txt = (r.get("request_text") or "").strip()
+            payload = r.get("payload") or {}
+
+            # لوحة الأزرار للطلب
+            kb = types.InlineKeyboardMarkup(row_width=3)
+            kb.row(
+                types.InlineKeyboardButton("📌 استلمت", callback_data=f"admin_queue_claim_{rid}"),
+                types.InlineKeyboardButton("✅ تأكيد",  callback_data=f"admin_queue_accept_{rid}"),
+                types.InlineKeyboardButton("🚫 إلغاء",  callback_data=f"admin_queue_cancel_{rid}"),
+            )
+            kb.row(
+                types.InlineKeyboardButton("⏳ تأجيل",  callback_data=f"admin_queue_postpone_{rid}"),
+                types.InlineKeyboardButton("📝 رسالة",  callback_data=f"admin_queue_message_{rid}"),
+                types.InlineKeyboardButton("🖼️ صورة",  callback_data=f"admin_queue_photo_{rid}"),
+            )
+
+            # نص الرسالة (نحافظ على HTML لو موجود)
+            head = f"🆕 طلب #{rid} — {name}\n"
+            try:
+                sent = bot.send_message(m.chat.id, head + req_txt, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                sent = bot.send_message(m.chat.id, head + req_txt, reply_markup=kb)
+
+            # خزّن مرجع رسالة الأدمن في payload.admin_msgs لدعم نظام القفل
+            try:
+                admin_msgs = (payload.get("admin_msgs") or [])
+                admin_msgs.append({"admin_id": m.chat.id, "message_id": sent.message_id})
+                payload["admin_msgs"] = admin_msgs
+                get_table("pending_requests").update({"payload": payload}).eq("id", rid).execute()
+            except Exception as ee:
+                logging.exception("[ADMIN] update admin_msgs failed: %s", ee)
 
     # ✅ بدّل إدخال الـID بمتصفح ملفات/منتجات إنلاين
     @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and m.from_user.id in ADMINS)
