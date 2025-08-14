@@ -30,7 +30,7 @@ except Exception:
 BAND = "━━━━━━━━━━━━━━━━"
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 ETA_TEXT = "من 1 إلى 4 دقائق"
-PAGE_SIZE_PRODUCTS = 6  # ✅ عرض كل المنتجات بالصفحات بدلاً من ظهور 3 فقط
+PAGE_SIZE_PRODUCTS = 7  # ✅ عرض كل المنتجات بالصفحات بدلاً من ظهور 3 فقط
 
 def _name_from_user(u) -> str:
     n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
