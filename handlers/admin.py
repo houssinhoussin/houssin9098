@@ -239,7 +239,27 @@ def _admin_product_actions_markup(pid: int):
 # ─────────────────────────────────────
 
 def _features_markup(page: int = 0, page_size: int = 10):
-    items = list_features() or []
+    try:
+        items = list_features() or []
+    except Exception as e:
+        logging.exception("[ADMIN] list_features failed: %s", e)
+        items = []
+
+    # طبّع العناصر: نقبل dict أو str ونحوّل الكل إلى dict موحّد
+    normalized = []
+    for it in items:
+        if isinstance(it, dict):
+            normalized.append({
+                "key":   (it.get("key") or it.get("id") or it.get("label") or "").strip(),
+                "label": (it.get("label") or it.get("key") or "").strip(),
+                "active": bool(it.get("active", True)),
+            })
+        else:
+            s = (str(it) or "").strip()
+            if not s:
+                continue
+            normalized.append({"key": s, "label": s, "active": True})
+    items = normalized
 
     # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
     import re as _re
@@ -1017,7 +1037,13 @@ def register(bot, history):
     # ===== لوحة المزايا (Feature Flags) =====
     @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and m.from_user.id in ADMINS)
     def features_menu(m):
-        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup(page=0))
+        try:
+            kb = _features_markup(page=0)
+        except Exception as e:
+            logging.exception("[ADMIN] features markup failed: %s", e)
+            kb = types.InlineKeyboardMarkup(row_width=1)
+            kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
+        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     def adm_feature_toggle(call: types.CallbackQuery):
