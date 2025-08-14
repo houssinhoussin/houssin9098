@@ -1033,6 +1033,7 @@ def register(bot, history):
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
+    
     def _collect_all_user_ids() -> set[int]:
         """
         يرجع مجموعة بكل user_id المعروفين (من الجدول + الأدمن).
@@ -1053,22 +1054,23 @@ def register(bot, history):
                     ids.add(uid)
             except Exception:
                 pass
-    # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
-    try:
-        ids.add(int(ADMIN_MAIN_ID))
-    except Exception:
-        pass
 
-    try:
-        for aid in ADMINS:
-            try:
-                ids.add(int(aid))
-            except Exception:
-                pass
-    except Exception:
-        pass
+        # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
+        try:
+            ids.add(int(ADMIN_MAIN_ID))
+        except Exception:
+            pass
 
-    return ids
+        try:
+            for aid in ADMINS:
+                try:
+                    ids.add(int(aid))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return ids
 
 
 def _enqueue_broadcast(text: str) -> int:
