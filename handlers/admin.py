@@ -1003,48 +1003,47 @@ def register(bot, history):
         bot.reply_to(m, f"✅ تم جدولة الرسالة إلى {n} مستخدم.")
 
     @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
-
     def pending_count(m):
         c = pending_queue_count()
         bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
 
     @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
     def system_menu(m):
-        state = "تشغيل" if not is_maintenance() else "إيقاف (صيانة)"
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.row("🛑 تفعيل وضع الصيانة", "▶️ إلغاء وضع الصيانة")
-        kb.row("🔁 إعادة التحقق من الاشتراك الآن")
-        kb.row("👥 صلاحيات الأدمن", "📜 Snapshot السجلات")
-        kb.row("⬅️ رجوع")
-        bot.send_message(m.chat.id, f"حالة النظام: {state}", reply_markup=kb)
+            state = "تشغيل" if not is_maintenance() else "إيقاف (صيانة)"
+            kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            kb.row("🛑 تفعيل وضع الصيانة", "▶️ إلغاء وضع الصيانة")
+            kb.row("🔁 إعادة التحقق من الاشتراك الآن")
+            kb.row("👥 صلاحيات الأدمن", "📜 Snapshot السجلات")
+            kb.row("⬅️ رجوع")
+            bot.send_message(m.chat.id, f"حالة النظام: {state}", reply_markup=kb)
 
     @bot.message_handler(func=lambda m: m.text == "🛑 تفعيل وضع الصيانة" and m.from_user.id in ADMINS)
     def enable_maint(m):
-        set_maintenance(True, "🛠️ نعمل على صيانة سريعة الآن. جرّب لاحقًا.")
-        log_action(m.from_user.id, "maintenance_on", "")
-        bot.reply_to(m, "تم تفعيل وضع الصيانة.")
+            set_maintenance(True, "🛠️ نعمل على صيانة سريعة الآن. جرّب لاحقًا.")
+            log_action(m.from_user.id, "maintenance_on", "")
+            bot.reply_to(m, "تم تفعيل وضع الصيانة.")
 
     @bot.message_handler(func=lambda m: m.text == "▶️ إلغاء وضع الصيانة" and m.from_user.id in ADMINS)
     def disable_maint(m):
-        set_maintenance(False)
-        log_action(m.from_user.id, "maintenance_off", "")
-        bot.reply_to(m, "تم إلغاء وضع الصيانة.")
+            set_maintenance(False)
+            log_action(m.from_user.id, "maintenance_off", "")
+            bot.reply_to(m, "تم إلغاء وضع الصيانة.")
 
     @bot.message_handler(func=lambda m: m.text == "🔁 إعادة التحقق من الاشتراك الآن" and m.from_user.id in ADMINS)
     def force_sub(m):
-        epoch = force_sub_recheck()
-        log_action(m.from_user.id, "force_sub_recheck", str(epoch))
-        bot.reply_to(m, "تم مسح الكاش، سيُعاد التحقق للمستخدمين الجدد.")
+            epoch = force_sub_recheck()
+            log_action(m.from_user.id, "force_sub_recheck", str(epoch))
+            bot.reply_to(m, "تم مسح الكاش، سيُعاد التحقق للمستخدمين الجدد.")
 
     @bot.message_handler(func=lambda m: m.text == "📜 Snapshot السجلات" and m.from_user.id in ADMINS)
     def show_logs_snapshot(m):
-        tail = get_logs_tail(30)
-        if len(tail) > 3500:
-            tail = tail[-3500:]
-        bot.send_message(m.chat.id, "آخر السجلات:\n" + "```\n" + tail + "\n```", parse_mode="Markdown")
+            tail = get_logs_tail(30)
+            if len(tail) > 3500:
+                tail = tail[-3500:]
+            bot.send_message(m.chat.id, "آخر السجلات:\n" + "```\n" + tail + "\n```", parse_mode="Markdown")
 
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
     def admins_roles(m):
-        from config import ADMINS, ADMIN_MAIN_ID
-        ids = ", ".join(str(x) for x in ADMINS)
-        bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
+            from config import ADMINS, ADMIN_MAIN_ID
+            ids = ", ".join(str(x) for x in ADMINS)
+            bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
