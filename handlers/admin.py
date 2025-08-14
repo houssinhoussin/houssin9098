@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 # handlers/admin.py
 
@@ -1147,6 +1146,9 @@ def _collect_all_user_ids() -> set[int]:
 def _enqueue_broadcast(text: str) -> int:
     """
     يضيف رسائل البث إلى outbox لكل المستخدمين.
+    يدعم مخططين لجدول notifications_outbox:
+      1) user_id, message, scheduled_at
+      2) user_id, template, payload(jsonb), scheduled_at
     """
     user_ids = _collect_all_user_ids()
     outbox = get_table("notifications_outbox")
@@ -1154,13 +1156,32 @@ def _enqueue_broadcast(text: str) -> int:
     now_iso = datetime.utcnow().isoformat()
 
     for uid in user_ids:
+        # المحاولة الأولى: عمود message (المخطط الأقدم)
         try:
             outbox.insert(
                 {"user_id": int(uid), "message": text, "scheduled_at": now_iso}
             ).execute()
             n += 1
-        except Exception:
-            pass
+            continue
+        except Exception as e1:
+            # fallback: باستخدام template + payload (المخطط الأحدث)
+            try:
+                outbox.insert(
+                    {
+                        "user_id": int(uid),
+                        "template": "plain_text",
+                        "payload": {"text": text},
+                        "scheduled_at": now_iso,
+                    }
+                ).execute()
+                n += 1
+                continue
+            except Exception as e2:
+                logging.error(
+                    "[ADMIN][broadcast] outbox insert failed for uid=%s: %s || fallback: %s",
+                    uid, e1, e2
+                )
+                # لا نرفع الاستثناء—نكمل مع باقي المستخدمين
 
     return n
 
