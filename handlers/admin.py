@@ -412,16 +412,18 @@ def register(bot, history):
         req_text = req.get("request_text") or ""
         name     = _user_name(bot, user_id)
 
-        if DELETE_ADMIN_MESSAGE_ON_ACTION:
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except Exception:
-                pass
-
-        # ===== نظام القفل/الحجز بين الأدمنين =====
+        # ✳️ إذا كان الطلب محجوز من أدمن آخر — نخرج فورًا (كما هو موجود أصلًا)
         locked_by = payload.get('locked_by')
         locked_by_username = payload.get('locked_by_username')
         admin_msgs = payload.get('admin_msgs') or []
+        if locked_by and int(locked_by) != int(call.from_user.id):
+            who = locked_by_username or _admin_mention(bot, locked_by)
+            return bot.answer_callback_query(call.id, f'🔒 محجوز بواسطة {who}')
+
+        # 🛑 بوابة "لا تتجاوب الأزرار قبل استلمت"
+        if action != 'claim' and not payload.get('claimed'):
+            return bot.answer_callback_query(call.id, "👋 اضغط «📌 استلمت» أولاً لتفعيل الأزرار.")
+
 
         def _disable_others(except_aid=None, except_mid=None):
             for entry in admin_msgs:
@@ -449,6 +451,7 @@ def register(bot, history):
             who = locked_by_username or _admin_mention(bot, locked_by)
             return bot.answer_callback_query(call.id, f'🔒 محجوز بواسطة {who}')
 
+        # لو ما في قفل، فعِّل القفل (كما هو عندك)
         if not locked_by:
             try:
                 locked_by_username = _admin_mention(bot, call.from_user.id)
@@ -458,11 +461,19 @@ def register(bot, history):
                 get_table('pending_requests').update({'payload': new_payload}).eq('id', request_id).execute()
                 _disable_others(except_aid=call.message.chat.id, except_mid=call.message.message_id)
                 _mark_locked_here()
+                payload = new_payload  # حدّث النسخة المحلية
             except Exception as e:
                 logging.exception('[ADMIN] failed to set lock: %s', e)
 
         # === زر الاستلام (📌 استلمت) ===
         if action == 'claim':
+            try:
+                # علِّم أنه "تم الاستلام" لتُفتح الأزرار لاحقًا
+                claimed_payload = dict(payload)
+                claimed_payload['claimed'] = True
+                get_table('pending_requests').update({'payload': claimed_payload}).eq('id', request_id).execute()
+            except Exception as e:
+                logging.exception('[ADMIN] failed to set claimed: %s', e)
             bot.answer_callback_query(call.id, '✅ تم الاستلام — أنت المتحكم بهذا الطلب الآن.')
             return
 
