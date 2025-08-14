@@ -236,28 +236,66 @@ def _admin_product_actions_markup(pid: int):
 # ─────────────────────────────────────
 #   لوحة المزايا (Feature Flags)
 # ─────────────────────────────────────
-def _features_markup():
-    items = list_features()
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    if not items:
+
+def _features_markup(page: int = 0, page_size: int = 10):
+    items = list_features() or []
+
+    # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
+    import re as _re
+    def _norm_label(s: str) -> str:
+        s = (s or "").strip()
+        s = s.replace("—", "-")
+        s = _re.sub(r"[\u200f\u200e]+", "", s)         # إزالة علامات الاتجاه
+        s = _re.sub(r"\s+", " ", s)                     # مسافات موحّدة
+        # نُبقي الحروف العربية/اللاتينية والأرقام والشرطة
+        s = _re.sub(r"[^0-9A-Za-z\u0600-\u06FF\- ]+", "", s)
+        return s.lower()
+
+    seen_labels = set()
+    unique = []
+    for it in items:
+        label = (it.get("label") or it.get("key") or "")
+        nl = _norm_label(label)
+        if nl in seen_labels:
+            continue
+        seen_labels.add(nl)
+        unique.append(it)
+    items = unique
+    # ===== انتهى منع التكرار =====
+
+    total = len(items)
+    if total == 0:
+        kb = types.InlineKeyboardMarkup(row_width=1)
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
         return kb
-    for it in items:
-        k, label = it.get("key"), it.get("label")
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start_i = page * page_size
+    subset = items[start_i : start_i + page_size]
+
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for it in subset:
+        k = it.get("key")
+        label = (it.get("label") or k) or ""
         active = bool(it.get("active", True))
         lamp = "🟢" if active else "🔴"
         to = 0 if active else 1
-        kb.add(
-            types.InlineKeyboardButton(
-                text=f"{lamp} {label}",
-                callback_data=f"adm_feat_t:{k}:{to}"
-            )
+        kb.add(types.InlineKeyboardButton(
+            text=f"{lamp} {label}",
+            callback_data=f"adm_feat_t:{k}:{to}:{page}"
+        ))
+
+    if total_pages > 1:
+        prev_page = (page - 1) % total_pages
+        next_page = (page + 1) % total_pages
+        kb.row(
+            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
+            types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
+            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
         )
     return kb
 
-# ─────────────────────────────────────
-#   التسجيل
-# ─────────────────────────────────────
 def register(bot, history):
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
@@ -454,14 +492,14 @@ def register(bot, history):
                 except Exception as e:
                     logging.exception("release_hold exception: %s", e)
             else:
-                    if reserved > 0:
-                        add_balance(user_id, reserved, "إلغاء حجز (قديم)")
+                if reserved > 0:
+                    add_balance(user_id, reserved, "إلغاء حجز (قديم)")
 
             delete_pending_request(request_id)
             if reserved > 0:
-                    bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
+                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
             else:
-                    bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
+                bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
@@ -748,20 +786,21 @@ def register(bot, history):
                 except Exception:
                     pass
 
-            try:
-                log_admin_deposit(call.from_user.id if 'call' in locals() else m.from_user.id, user_id, int(amount), f"req={request_id}")
-            except Exception as _e:
-                logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
-            delete_pending_request(request_id)
-            bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
-            bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
-            queue_cooldown_start(bot)
+                try:
+                    log_admin_deposit(call.from_user.id if 'call' in locals() else m.from_user.id, user_id, int(amount), f"req={request_id}")
+                except Exception as _e:
+                    logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
+                delete_pending_request(request_id)
 
-            # NEW: نظّف قفل الشحن المحلي بعد القبول
-            _clear_recharge_local_lock_safe(user_id)
+                bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
+                bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
+                queue_cooldown_start(bot)
 
-            _prompt_admin_note(bot, call.from_user.id, user_id)
-            return
+                # NEW: نظّف قفل الشحن المحلي بعد القبول
+                _clear_recharge_local_lock_safe(user_id)
+
+                _prompt_admin_note(bot, call.from_user.id, user_id)
+                return
 
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
@@ -790,22 +829,22 @@ def register(bot, history):
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
     def admin_menu(msg):
-    if msg.from_user.id not in ADMINS:
-        return bot.reply_to(msg, "صلاحية الأدمن فقط.")
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # رئيسي أم مساعد؟
-    is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
-    if is_primary:
-        # ⛔️ حذف "إدارة المنتجات" كما طُلب + إضافة أزرار التقارير والبث
-        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-        kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
-        kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
-        kb.row("⚙️ النظام", "⬅️ رجوع")
-    else:
-        # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
-        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-        kb.row("⬅️ رجوع")
-    bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
+        if msg.from_user.id not in ADMINS:
+            return bot.reply_to(msg, "صلاحية الأدمن فقط.")
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        # رئيسي أم مساعد؟
+        is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
+        if is_primary:
+            # ⛔️ حذف "إدارة المنتجات" كما طُلب + إضافة أزرار التقارير والبث
+            kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+            kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
+            kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
+            kb.row("⚙️ النظام", "⬅️ رجوع")
+        else:
+            # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
+            kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+            kb.row("⬅️ رجوع")
+        bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
 
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and m.from_user.id in ADMINS)
     def admin_products_menu(m):
@@ -893,101 +932,150 @@ def register(bot, history):
     # ===== لوحة المزايا (Feature Flags) =====
     @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and m.from_user.id in ADMINS)
     def features_menu(m):
-        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup())
+        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup(page=0))
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     def adm_feature_toggle(call: types.CallbackQuery):
-        # كان سابقًا: _, key, to = call.data.split(":")
         try:
-            _, rest = call.data.split(":", 1)   # "adm_feat_t:<KEY>:<TO>"  => rest="<KEY>:<TO>"
-            key, to = rest.rsplit(":", 1)       # يسمح بوجود ":" داخل <KEY>
-        except ValueError:
+            prefix = "adm_feat_t:"
+            tail = call.data[len(prefix):] if call.data.startswith(prefix) else call.data
+            parts = tail.rsplit(":", 2)  # <= 3 عناصر
+            if len(parts) == 3:
+                key, to, page_s = parts
+                try:
+                    page = int(page_s)
+                except Exception:
+                    page = 0
+            elif len(parts) == 2:
+                key, to = parts
+                page = 0
+            else:
+                return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+            ok = set_feature_active(key, bool(int(to)))
+        except Exception as e:
+            import logging
+            logging.exception("[ADMIN][feat_toggle] parse/toggle error: %s", e)
             return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
-        ok = set_feature_active(key, bool(int(to)))
-        if not ok:
-            return bot.answer_callback_query(call.id, "❌ تعذّر تحديث الميزة.")
-        # تحديث اللوحة الحالية
+
         try:
-            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=_features_markup())
+            bot.edit_message_reply_markup(
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=_features_markup(page=page)
+            )
         except Exception:
-            pass
-        bot.answer_callback_query(call.id, "✅ تم التحديث.")
-
-    
-@bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
-def quick_reports(m):
-    dep, pur, top = totals_deposits_and_purchases_syp()
-    lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
-    # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
-    try:
-        top5 = top5_clients_week()
-        if top5:
-            lines.append("🏅 أفضل ٥ عملاء (آخر 7 أيام):")
-            for u in top5:
-                lines.append(f" • {u['name']} — شحن: {u['deposits']:,} ل.س | صرف: {u['spend']:,} ل.س")
-    except Exception as _e:
-        logging.exception("[REPORTS] top5 weekly failed: %s", _e)
-    bot.send_message(m.chat.id, "\n".join(lines))
-@bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
-def assistants_daily_report(m):
-    txt = summarize_assistants(days=7)
-    bot.send_message(m.chat.id, txt, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
-def all_admins_report(m):
-    txt = summarize_all_admins(days=7)
-    bot.send_message(m.chat.id, txt, parse_mode="HTML")
-
-# ==== بث للجميع ====
-@bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and m.from_user.id == ADMIN_MAIN_ID)
-def broadcast_menu(m):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("📬 ترحيب — نحن شغالين", "📢 رسالة تسويقية")
-    kb.row("⭐ تقييم منتج", "📝 رسالة حرة")
-    kb.row("⬅️ رجوع")
-    bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
-
-def _enqueue_broadcast(text: str) -> int:
-    # نجلب user_id فقط لتفادي أعمدة غير موجودة، ونحدد scheduled_at حتى يلتقطها مرسل الـ outbox
-    try:
-        rs = get_table(DEFAULT_TABLE).select("user_id").execute()
-        rows = rs.data or []
-    except Exception:
-        rows = []
-    ids = set()
-    for r in rows:
-        try:
-            uid = int(r.get("user_id") or 0)
-            if uid:
-                ids.add(uid)
-        except Exception:
-            pass
-    # أضف الأدمن الرئيسي والأدمنين للاختبار
-    try:
-        ids.add(int(ADMIN_MAIN_ID))
-    except Exception:
-        pass
-    try:
-        for aid in ADMINS:
             try:
-                ids.add(int(aid))
+                bot.edit_message_text(
+                    "بدّل حالة المزايا التالية:",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=_features_markup(page=page)
+                )
             except Exception:
                 pass
+        bot.answer_callback_query(call.id, "✅ تم التحديث.")
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and c.from_user.id in ADMINS)
+    def adm_feature_page(call: types.CallbackQuery):
+        try:
+            page = int(call.data.split(":", 1)[1])
+        except Exception:
+            page = 0
+        try:
+            bot.edit_message_reply_markup(
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=_features_markup(page=page)
+            )
+        except Exception:
+            try:
+                bot.edit_message_text(
+                    "بدّل حالة المزايا التالية:",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=_features_markup(page=page)
+                )
+            except Exception:
+                pass
+        bot.answer_callback_query(call.id)
+    @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
+    def quick_reports(m):
+        dep, pur, top = totals_deposits_and_purchases_syp()
+        lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
+        # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
+        try:
+            top5 = top5_clients_week()
+            if top5:
+                lines.append("🏅 أفضل ٥ عملاء (آخر 7 أيام):")
+                for u in top5:
+                    lines.append(f" • {u['name']} — شحن: {u['deposits']:,} ل.س | صرف: {u['spend']:,} ل.س")
+        except Exception as _e:
+            logging.exception("[REPORTS] top5 weekly failed: %s", _e)
+        bot.send_message(m.chat.id, "\n".join(lines))
+
+    @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
+    def assistants_daily_report(m):
+        txt = summarize_assistants(days=7)
+        bot.send_message(m.chat.id, txt, parse_mode="HTML")
+
+    @bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
+    def all_admins_report(m):
+        txt = summarize_all_admins(days=7)
+        bot.send_message(m.chat.id, txt, parse_mode="HTML")
+
+    # ==== بث للجميع ====
+    @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and m.from_user.id == ADMIN_MAIN_ID)
+    def broadcast_menu(m):
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        kb.row("📬 ترحيب — نحن شغالين", "📢 رسالة تسويقية")
+        kb.row("⭐ تقييم منتج", "📝 رسالة حرة")
+        kb.row("⬅️ رجوع")
+        bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
+
+    def _enqueue_broadcast(text: str) -> int:
+# نسحب كل المستخدمين ونضيفهم لجدول outbox
+try:
+    rs = get_table(DEFAULT_TABLE).select("user_id").execute()
+    rows = rs.data or []
+except Exception:
+    rows = []
+# نجمع المعرّفات بدون تكرار
+ids = set()
+for r in rows:
+    try:
+        uid = int(r.get("user_id") or 0)
+        if uid:
+            ids.add(uid)
     except Exception:
         pass
-
-    outbox = get_table("notifications_outbox")
-    n = 0
-    now_iso = datetime.utcnow().isoformat()
-    for uid in ids:
+# اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
+try:
+    ids.add(int(ADMIN_MAIN_ID))
+except Exception:
+    pass
+try:
+    for aid in ADMINS:
         try:
-            outbox.insert({"user_id": int(uid), "message": text, "scheduled_at": now_iso}).execute()
-            n += 1
+            ids.add(int(aid))
         except Exception:
             pass
-    return n
+except Exception:
+    pass
+
+outbox = get_table("notifications_outbox")
+n = 0
+now_iso = datetime.utcnow().isoformat()
+for uid in ids:
+    try:
+        outbox.insert({"user_id": int(uid), "message": text, "scheduled_at": now_iso}).execute()
+        n += 1
+    except Exception:
+        pass
+return n
+
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
     def admins_roles(m):
-        from config import ADMINS, ADMIN_MAIN_ID
-        ids = ", ".join(str(x) for x in ADMINS)
-        bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
+            from config import ADMINS, ADMIN_MAIN_ID
+            ids = ", ".join(str(x) for x in ADMINS)
+            bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids}")
