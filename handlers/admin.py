@@ -236,18 +236,32 @@ def _admin_product_actions_markup(pid: int):
 # ─────────────────────────────────────
 #   لوحة المزايا (Feature Flags)
 # ─────────────────────────────────────
+
 def _features_markup(page: int = 0, page_size: int = 10):
     items = list_features() or []
-    # إزالة التكرارات حسب المفتاح
-    seen = set()
+
+    # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
+    import re as _re
+    def _norm_label(s: str) -> str:
+        s = (s or "").strip()
+        s = s.replace("—", "-")
+        s = _re.sub(r"[\u200f\u200e]+", "", s)         # إزالة علامات الاتجاه
+        s = _re.sub(r"\s+", " ", s)                     # مسافات موحّدة
+        # نُبقي الحروف العربية/اللاتينية والأرقام والشرطة
+        s = _re.sub(r"[^0-9A-Za-z\u0600-\u06FF\- ]+", "", s)
+        return s.lower()
+
+    seen_labels = set()
     unique = []
     for it in items:
-        k = it.get("key")
-        if k in seen:
+        label = (it.get("label") or it.get("key") or "")
+        nl = _norm_label(label)
+        if nl in seen_labels:
             continue
-        seen.add(k)
+        seen_labels.add(nl)
         unique.append(it)
     items = unique
+    # ===== انتهى منع التكرار =====
 
     total = len(items)
     if total == 0:
@@ -257,8 +271,8 @@ def _features_markup(page: int = 0, page_size: int = 10):
 
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = max(0, min(page, total_pages - 1))
-    start = page * page_size
-    subset = items[start : start + page_size]
+    start_i = page * page_size
+    subset = items[start_i : start_i + page_size]
 
     kb = types.InlineKeyboardMarkup(row_width=1)
     for it in subset:
@@ -281,6 +295,7 @@ def _features_markup(page: int = 0, page_size: int = 10):
             types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
         )
     return kb
+
 def register(bot, history):
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
