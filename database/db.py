@@ -10,7 +10,10 @@ load_dotenv()
 # ---------- إعداد Supabase ----------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_API_KEY")
-DEFAULT_TABLE = os.getenv("houssin363")  # مثل: houssin363
+
+# اجعل اسم الجدول الافتراضي قادماً من البيئة، مع قيمة افتراضية سليمة houssin363
+# مثال: ضع في البيئة SUPABASE_TABLE_NAME=houssin363
+DEFAULT_TABLE = os.getenv("SUPABASE_TABLE_NAME", "houssin363")  # مثل: houssin363
 
 if not SUPABASE_URL:
     raise RuntimeError("Missing SUPABASE_URL in environment (.env)")
@@ -29,18 +32,22 @@ def client() -> Client:
     return _supabase
 
 
-def get_table(table_name: str):
-    """أرجِع كائن الجدول المطلوب (توقيع محفوظ كما هو)."""
-    if not table_name or not isinstance(table_name, str):
-        raise ValueError("table_name must be a non-empty string")
-    return _supabase.table(table_name)
+def get_table(table_name: Optional[str] = None):
+    """
+    أرجِع كائن الجدول المطلوب.
+    لو لم يُمرَّر اسم جدول، نستخدم DEFAULT_TABLE (من البيئة أو الافتراضي).
+    """
+    name = (table_name or DEFAULT_TABLE)
+    if not name:
+        raise RuntimeError("No table name provided and SUPABASE_TABLE_NAME is not set.")
+    return _supabase.table(name)
 
 
 def table(table_name: Optional[str] = None):
     """
-    بديل مريح: لو ما زوّدت اسم جدول، يستخدم SUPABASE_TABLE_NAME من .env
+    بديل مريح: لو ما زوّدت اسم جدول، يستخدم DEFAULT_TABLE.
     """
-    name = table_name or DEFAULT_TABLE
+    name = (table_name or DEFAULT_TABLE)
     if not name:
         raise RuntimeError("No table name provided and SUPABASE_TABLE_NAME is not set.")
     return _supabase.table(name)
