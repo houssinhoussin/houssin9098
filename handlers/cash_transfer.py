@@ -289,7 +289,7 @@ def register(bot, history):
         if _service_unavailable_guard(bot, call.message.chat.id):
             return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
-        user_states[user_id] = {"step": "awaiting_number", **user_states.get(user_id, {})}
+        user_states[user_id] = {**user_states.get(user_id, {}), "step": "awaiting_number"}
         kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
         try:
             bot.edit_message_text(
