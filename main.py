@@ -182,7 +182,7 @@ def handle_transfers(msg):
         "من خلال هذه الخدمة تستطيع تحويل رصيد محفظتك إليك أو لأي شخص آخر عن طريق شركات الحوالات (كالهرم)، أو كرصيد كاش (سيرياتيل/MTN)."
     )
     bot.send_message(msg.chat.id, "اختر نوع التحويل:", reply_markup=transfers_menu())
-    user_state[msg.from_user.id] = "transfers_menu"
+    user_state[msg.from_user.id]['step'] = "transfers_menu"
 
 @bot.message_handler(func=lambda msg: msg.text == "💵 تحويل الى رصيد كاش")
 def handle_cash_transfer(msg):
@@ -232,7 +232,7 @@ def handle_al_haram(msg):
             "✔️ تأكيد حوالة الهرم", "❌ إلغاء"
         )
     )
-    user_state[msg.from_user.id] = "alharam_start"
+    user_state[msg.from_user.id]['step'] = "alharam_start"
 
 @bot.message_handler(func=lambda msg: msg.text == "شركة الفؤاد")
 def handle_alfouad(msg):
@@ -245,7 +245,7 @@ def handle_alfouad(msg):
             "✔️ تأكيد حوالة الفؤاد", "❌ إلغاء"
         )
     )
-    user_state[msg.from_user.id] = "alfouad_start"
+    user_state[msg.from_user.id]['step'] = "alfouad_start"
 
 @bot.message_handler(func=lambda msg: msg.text == "شركة شخاشير")
 def handle_shakhashir(msg):
@@ -258,7 +258,7 @@ def handle_shakhashir(msg):
             "✔️ تأكيد حوالة شخاشير", "❌ إلغاء"
         )
     )
-    user_state[msg.from_user.id] = "shakhashir_start"
+    user_state[msg.from_user.id]['step'] = "shakhashir_start"
 
 # ---------------------------------------------------------
 # تشغيل نظام الطابور (QUEUE)
