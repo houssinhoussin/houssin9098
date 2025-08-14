@@ -1090,9 +1090,12 @@ def _enqueue_broadcast(text: str) -> int:
             pass
 
     return n
-@bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
-def admins_roles(m):
-    # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
-    # from config import ADMINS, ADMIN_MAIN_ID  # ممكن تحذف هذه إن كانت معرفة مسبقاً
-    ids_str = ", ".join(str(x) for x in ADMINS)
-    bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
+
+
+def _register_admin_roles(bot):
+    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
+    def admins_roles(m):
+        # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
+        ids_str = ", ".join(str(x) for x in ADMINS)
+        bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
+
