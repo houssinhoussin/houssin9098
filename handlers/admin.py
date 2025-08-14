@@ -1028,13 +1028,81 @@ def register(bot, history):
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
     # ==== بث للجميع ====
-    @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and m.from_user.id == ADMIN_MAIN_ID)
+    @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     def broadcast_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.row("📬 ترحيب — نحن شغالين", "📢 رسالة تسويقية")
-        kb.row("⭐ تقييم منتج", "📝 رسالة حرة")
+        kb.row("📬 ترحيب — نحن شغالين", "📢 عرض اليوم")
+        kb.row("📊 استفتاء سريع", "📝 رسالة من عندي")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
+    # ——— أزرار البث ———
+    def _broadcast_template(title: str, body: str) -> int:
+        text = f"{BAND}\n<b>{title}</b>\n{body}\n{BAND}"
+        return _enqueue_broadcast(text)
+
+    @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def broadcast_we_are_online(m):
+        n = _broadcast_template(
+            "أهلاً وسهلاً 👋 نحن شغّالين الآن",
+            "✅ جاهزين نخدمك بأي وقت! اطلب شحن ألعاب، وحدات، إنترنت، أو تحويل كاش — كلها تتم بسرعة.\n"
+            "✨ جرّب خدماتنا اليوم."
+        )
+        bot.reply_to(m, f"✅ تمت جدولة رسالة الترحيب لجميع المستخدمين ({n} مستلم).", parse_mode="HTML")
+
+    @bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def broadcast_deal_of_day(m):
+        n = _broadcast_template(
+            "📢 عرض اليوم",
+            "خصم محدود لفترة قصيرة!\n"
+            "• شحن ألعاب مختارة بعمولة مخفّضة\n"
+            "• باقات وحدات وهدايا على بعض الطلبات\n"
+            "⏳ العرض ساري اليوم فقط — لا تفوّت الفرصة!"
+        )
+        bot.reply_to(m, f"✅ تمت جدولة الرسالة التسويقية ({n} مستلم).", parse_mode="HTML")
+
+    # زر الاستفتاء — يُرسل Telegram Poll إلى الجميع في خيط منفصل
+    def _broadcast_poll(question: str, options: list[str], is_anonymous: bool = True):
+        user_ids = _collect_all_user_ids()
+        def _runner():
+            for uid in user_ids:
+                try:
+                    bot.send_poll(uid, question=question, options=options, is_anonymous=is_anonymous, allows_multiple_answers=False)
+                except Exception:
+                    pass
+        try:
+            threading.Thread(target=_runner, daemon=True).start()
+            return True, len(user_ids)
+        except Exception:
+            return False, 0
+
+    @bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def broadcast_poll(m):
+        ok, total = _broadcast_poll(
+            "أي خدمة تهمّك أكثر عندنا؟",
+            ["شحن ألعاب 🎮", "وحدات موبايل 📱", "تحويل كاش 💸", "إنترنت 🌐"],
+            is_anonymous=True
+        )
+        if ok:
+            bot.reply_to(m, f"✅ تم إرسال الاستفتاء إلى الجميع (المستلمين المتوقعين: {total}).")
+        else:
+            bot.reply_to(m, "❌ تعذّر إرسال الاستفتاء.")
+
+    @bot.message_handler(func=lambda m: m.text == "📝 رسالة من عندي" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def broadcast_free(m):
+        _broadcast_pending[m.from_user.id] = {"mode": "free"}
+        bot.reply_to(m, f"📝 اكتب نص الرسالة الآن لإرسالها إلى الجميع.\n{CANCEL_HINT_ADMIN}")
+
+    @bot.message_handler(func=lambda m: m.from_user.id in _broadcast_pending, content_types=["text"])
+    def handle_broadcast_text(m):
+        st = _broadcast_pending.pop(m.from_user.id, None)
+        if not st:
+            return
+        text = (m.text or "").strip()
+        if not text:
+            return bot.reply_to(m, "❌ النص فارغ.")
+        n = _enqueue_broadcast(text)
+        bot.reply_to(m, f"✅ تمت جدولة الإرسال لجميع المستخدمين ({n} مستلم).")
+
 
     
     def _collect_all_user_ids() -> set[int]:
