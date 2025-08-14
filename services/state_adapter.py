@@ -45,9 +45,15 @@ class UserStateDictLike:
     def __getitem__(self, user_id: int) -> _DictProxy:
         return _DictProxy(user_id)
 
-    def __setitem__(self, user_id: int, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError("user_states[user_id] يجب أن يكون dict")
+    def __setitem__(self, user_id: int, value):
+        # مرونة آمنة: لو حد حط سترينغ اعتبره خطوة state
+        if isinstance(value, str):
+            value = {"step": value}
+        elif not isinstance(value, dict):
+            # نحافظ على الحزم مع الأنواع الأخرى (علشان ما نخزن هياكل غير متوقعة)
+            raise TypeError("user_states[user_id] يجب أن يكون dict أو str (يُحفظ كـ step)")
+
+        # TTL زي ما هو (120 دقيقة)
         set_data(user_id, value, ttl_minutes=120)
 
     def get(self, user_id: int, default=None):
