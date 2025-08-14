@@ -112,42 +112,56 @@ def summarize_all_admins(days: int = 7) -> str:
 
 # ────────────────────────────────────────────────────────────
 # مساعد مرن لجلب أسماء/تسميات المستخدمين من جدول المستخدمين
-# دون افتراض وجود أعمدة محددة (first_name قد لا يكون موجودًا)
+# دون افتراض وجود أعمدة محددة (name/username اختياريان)
 # ────────────────────────────────────────────────────────────
 def _load_user_map(user_ids) -> Dict[int, str]:
-    user_ids = list({int(u) for u in user_ids if u is not None})
-    if not user_ids:
+    ids = list({int(u) for u in user_ids if u is not None})
+    if not ids:
         return {}
-    # نجرب عدة صيغ اختيار آمنة حتى لا تُرمى 400 من Supabase
-    candidates = [
-        ("user_id", "user_id,username"),
-        ("user_id", "user_id"),
-        ("id",      "id,username"),
-        ("id",      "id"),
+
+    # نحاول توليفات مفاتيح/أعمدة شائعة بترتيب آمن
+    key_options = ["user_id", "id"]
+    select_options = [
+        "user_id,username,name",
+        "user_id,name",
+        "user_id,username",
+        "user_id",
+        "id,username,name",
+        "id,name",
+        "id,username",
+        "id",
     ]
-    for key, sel in candidates:
-        try:
-            q = get_table(DEFAULT_TABLE).select(sel)
-            # بعض العملاء لديهم in_ في عميل Postgrest
-            if hasattr(q, "in_"):
-                q = q.in_(key, user_ids)
-            rows = q.execute().data or []
-            if rows:
-                m = {}
-                for r in rows:
-                    uid = r.get(key)
-                    try:
-                        uid = int(uid)
-                    except Exception:
-                        continue
-                    label = r.get("username") or f"مستخدم #{uid}"
-                    m[uid] = label
-                return m
-        except Exception:
-            # جرّب صيغة أخرى
-            continue
-    # لو فشلت كل المحاولات
-    return {int(uid): f"مستخدم #{int(uid)}" for uid in user_ids}
+
+    for key in key_options:
+        for sel in select_options:
+            try:
+                q = get_table(DEFAULT_TABLE).select(sel)
+                # إن وُجد in_ نستخدمه، وإلا نجلب على دفعات eq
+                if hasattr(q, "in_"):
+                    rows = q.in_(key, ids).execute().data or []
+                else:
+                    rows = []
+                    for uid in ids:
+                        r = get_table(DEFAULT_TABLE).select(sel).eq(key, uid).execute().data or []
+                        rows.extend(r)
+
+                if rows:
+                    m: Dict[int, str] = {}
+                    for r in rows:
+                        try:
+                            uid = int(r.get(key))
+                        except Exception:
+                            continue
+                        label = r.get("username") or r.get("name") or f"مستخدم #{uid}"
+                        m[uid] = label
+                    if m:
+                        return m
+            except Exception:
+                # جرّب تركيبة أخرى
+                continue
+
+    # Fallback
+    return {int(uid): f"مستخدم #{int(uid)}" for uid in ids}
 
 # ────────────────────────────────────────────────────────────
 # أفضل ٥ عملاء أسبوعيًا
@@ -155,7 +169,7 @@ def _load_user_map(user_ids) -> Dict[int, str]:
 def top5_clients_week() -> List[Dict[str, Any]]:
     """
     أفضل 5 عملاء خلال 7 أيام: لكل مستخدم مجموع الشحن (amount>0) والصرف (amount<0) من جدول transactions.
-    لا نفترض وجود عمود first_name في جدول المستخدمين، بل نستخدم username إن وُجد، أو تسمية افتراضية.
+    لا نفترض وجود أعمدة اسم محددة؛ نستعمل username أو name إن توفّرا وإلا نعرض معرفًا افتراضيًا.
     """
     since = datetime.now(timezone.utc) - timedelta(days=7)
     tx = (
