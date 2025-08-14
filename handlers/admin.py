@@ -454,14 +454,14 @@ def register(bot, history):
                 except Exception as e:
                     logging.exception("release_hold exception: %s", e)
             else:
-                if reserved > 0:
-                    add_balance(user_id, reserved, "إلغاء حجز (قديم)")
+                    if reserved > 0:
+                        add_balance(user_id, reserved, "إلغاء حجز (قديم)")
 
             delete_pending_request(request_id)
             if reserved > 0:
-                bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
+                    bot.send_message(user_id, f"🚫 تم إلغاء طلبك.\n🔁 رجّعنا {_fmt_syp(reserved)} من المبلغ المحجوز لمحفظتك — كله تمام 😎")
             else:
-                bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
+                    bot.send_message(user_id, "🚫 تم إلغاء طلبك.\n🔁 رجّعنا المبلغ المحجوز (إن وُجد) لمحفظتك.")
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
@@ -748,22 +748,20 @@ def register(bot, history):
                 except Exception:
                     pass
 
-                \1
-        try:
-            log_admin_deposit(call.from_user.id if 'call' in locals() else m.from_user.id, user_id, int(amount), f"req={request_id}")
-        except Exception as _e:
-            logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
-    delete_pending_request(request_id)
+            try:
+                log_admin_deposit(call.from_user.id if 'call' in locals() else m.from_user.id, user_id, int(amount), f"req={request_id}")
+            except Exception as _e:
+                logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
+            delete_pending_request(request_id)
+            bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
+            bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
+            queue_cooldown_start(bot)
 
-                bot.send_message(user_id, f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}")
-                bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
-                queue_cooldown_start(bot)
+            # NEW: نظّف قفل الشحن المحلي بعد القبول
+            _clear_recharge_local_lock_safe(user_id)
 
-                # NEW: نظّف قفل الشحن المحلي بعد القبول
-                _clear_recharge_local_lock_safe(user_id)
-
-                _prompt_admin_note(bot, call.from_user.id, user_id)
-                return
+            _prompt_admin_note(bot, call.from_user.id, user_id)
+            return
 
             else:
                 return bot.answer_callback_query(call.id, "❌ نوع الطلب غير معروف.")
@@ -791,7 +789,7 @@ def register(bot, history):
 
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
-def admin_menu(msg):
+    def admin_menu(msg):
     if msg.from_user.id not in ADMINS:
         return bot.reply_to(msg, "صلاحية الأدمن فقط.")
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -924,15 +922,12 @@ def quick_reports(m):
     try:
         top5 = top5_clients_week()
         if top5:
-            lines.append("
-🏅 أفضل ٥ عملاء (آخر 7 أيام):")
+            lines.append("🏅 أفضل ٥ عملاء (آخر 7 أيام):")
             for u in top5:
                 lines.append(f" • {u['name']} — شحن: {u['deposits']:,} ل.س | صرف: {u['spend']:,} ل.س")
     except Exception as _e:
         logging.exception("[REPORTS] top5 weekly failed: %s", _e)
-    bot.send_message(m.chat.id, "
-".join(lines))
-
+    bot.send_message(m.chat.id, "\n".join(lines))
 @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
 def assistants_daily_report(m):
     txt = summarize_assistants(days=7)
@@ -1006,7 +1001,6 @@ def bc_free_recv(m):
     bot.reply_to(m, f"✅ تم جدولة الرسالة إلى {n} مستخدم.")
 
 @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
-
     def pending_count(m):
         c = pending_queue_count()
         bot.send_message(m.chat.id, f"عدد الطلبات قيد الانتظار: {c}")
