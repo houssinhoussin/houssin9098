@@ -1034,45 +1034,45 @@ def register(bot, history):
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
     def _enqueue_broadcast(text: str) -> int:
-# نسحب كل المستخدمين ونضيفهم لجدول outbox
-try:
-    rs = get_table(DEFAULT_TABLE).select("user_id").execute()
-    rows = rs.data or []
-except Exception:
-    rows = []
-# نجمع المعرّفات بدون تكرار
-ids = set()
-for r in rows:
+    # نسحب كل المستخدمين ونضيفهم لجدول outbox
     try:
-        uid = int(r.get("user_id") or 0)
-        if uid:
-            ids.add(uid)
+        rs = get_table(DEFAULT_TABLE).select("user_id").execute()
+        rows = rs.data or []
     except Exception:
-        pass
-# اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
-try:
-    ids.add(int(ADMIN_MAIN_ID))
-except Exception:
-    pass
-try:
-    for aid in ADMINS:
+        rows = []
+    # نجمع المعرّفات بدون تكرار
+    ids = set()
+    for r in rows:
         try:
-            ids.add(int(aid))
+            uid = int(r.get("user_id") or 0)
+            if uid:
+                ids.add(uid)
         except Exception:
             pass
-except Exception:
-    pass
-
-outbox = get_table("notifications_outbox")
-n = 0
-now_iso = datetime.utcnow().isoformat()
-for uid in ids:
+    # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
     try:
-        outbox.insert({"user_id": int(uid), "message": text, "scheduled_at": now_iso}).execute()
-        n += 1
+        ids.add(int(ADMIN_MAIN_ID))
     except Exception:
         pass
-return n
+    try:
+        for aid in ADMINS:
+            try:
+                ids.add(int(aid))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    outbox = get_table("notifications_outbox")
+    n = 0
+    now_iso = datetime.utcnow().isoformat()
+    for uid in ids:
+        try:
+            outbox.insert({"user_id": int(uid), "message": text, "scheduled_at": now_iso}).execute()
+            n += 1
+        except Exception:
+            pass
+    return n
 
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
     def admins_roles(m):
