@@ -152,25 +152,25 @@ start_housekeeping(bot)    # تنظيف 14 ساعة + تنبيهات/حذف ال
 @bot.message_handler(func=lambda msg: msg.text == "⬅️ رجوع")
 def handle_back(msg):
     user_id = msg.from_user.id
-    state = user_state.get(user_id, "main_menu")
+    state = user_state.get(user_id, {}).get("step", "main_menu")
 
     if state == "products_menu":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى المنتجات.", reply_markup=products_menu())
-        user_state[user_id] = "main_menu"
+        user_state[user_id]['step'] = "main_menu"
     elif state == "main_menu":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى القائمة الرئيسية.", reply_markup=main_menu())
     elif state == "game_menu":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى الألعاب.", reply_markup=game_categories())
-        user_state[user_id] = "products_menu"
+        user_state[user_id]['step'] = "products_menu"
     elif state == "cash_menu":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى قائمة الكاش.", reply_markup=cash_transfer_menu())
-        user_state[user_id] = "main_menu"
+        user_state[user_id]['step'] = "main_menu"
     elif state == "syrian_transfer":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى تحويل الرصيد السوري.", reply_markup=syrian_balance_menu())
-        user_state[user_id] = "products_menu"
+        user_state[user_id]['step'] = "products_menu"
     else:
         bot.send_message(msg.chat.id, "⬅️ عدت إلى البداية.", reply_markup=main_menu())
-        user_state[user_id] = "main_menu"
+        user_state[user_id]['step'] = "main_menu"
 
 # ---------------------------------------------------------
 # ربط أزرار المنتجات بالخدمات الخاصة بها
