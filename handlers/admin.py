@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 # handlers/admin.py
 
@@ -5,10 +6,10 @@ import re
 import logging
 from datetime import datetime, timedelta
 from telebot import types
+import threading
 
 # التحكم في حذف رسالة الأدمن عند أي إجراء على الطابور
 DELETE_ADMIN_MESSAGE_ON_ACTION = False
-import threading
 
 from services.ads_service import add_channel_ad
 
@@ -80,9 +81,8 @@ except Exception:
 _cancel_pending = {}
 _accept_pending = {}
 _msg_pending = {}
-
-
 _broadcast_pending = {}
+
 # ─────────────────────────────────────
 #   تنسيقات ونصوص
 # ─────────────────────────────────────
@@ -399,7 +399,6 @@ def register(bot, history):
             except Exception:
                 pass
 
-        
         # ===== نظام القفل/الحجز بين الأدمنين =====
         locked_by = payload.get('locked_by')
         locked_by_username = payload.get('locked_by_username')
@@ -448,7 +447,7 @@ def register(bot, history):
             bot.answer_callback_query(call.id, '✅ تم الاستلام — أنت المتحكم بهذا الطلب الآن.')
             return
 
-# === تأجيل الطلب ===
+        # === تأجيل الطلب ===
         if action == "postpone":
             if not (call.from_user.id == ADMIN_MAIN_ID or call.from_user.id in ADMINS or allowed(call.from_user.id, "queue:postpone")):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
@@ -479,6 +478,7 @@ def register(bot, history):
                 pass
             queue_cooldown_start(bot)
             return
+
         # === إلغاء الطلب ===
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
@@ -938,7 +938,6 @@ def register(bot, history):
         bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=_features_markup(page=0))
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     def adm_feature_toggle(call: types.CallbackQuery):
         try:
             prefix = "adm_feat_t:"
@@ -957,7 +956,6 @@ def register(bot, history):
                 return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
             ok = set_feature_active(key, bool(int(to)))
         except Exception as e:
-            import logging
             logging.exception("[ADMIN][feat_toggle] parse/toggle error: %s", e)
             return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
 
@@ -1002,6 +1000,7 @@ def register(bot, history):
             except Exception:
                 pass
         bot.answer_callback_query(call.id)
+
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
     def quick_reports(m):
         dep, pur, top = totals_deposits_and_purchases_syp()
@@ -1035,6 +1034,7 @@ def register(bot, history):
         kb.row("📊 استفتاء سريع", "📝 رسالة من عندي")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
+
     # ——— أزرار البث ———
     def _broadcast_template(title: str, body: str) -> int:
         text = f"{BAND}\n<b>{title}</b>\n{body}\n{BAND}"
@@ -1104,44 +1104,44 @@ def register(bot, history):
         bot.reply_to(m, f"✅ تمت جدولة الإرسال لجميع المستخدمين ({n} مستلم).")
 
 
-    
-    def _collect_all_user_ids() -> set[int]:
-        """
-        يرجع مجموعة بكل user_id المعروفين (من الجدول + الأدمن).
-        """
-        ids: set[int] = set()
+# === نقلناها إلى مستوى الموديول لتتفادا NameError ===
+def _collect_all_user_ids() -> set[int]:
+    """
+    يرجع مجموعة بكل user_id المعروفين (من الجدول + الأدمن).
+    """
+    ids: set[int] = set()
 
-        # نسحب كل المستخدمين من الجدول
+    # نسحب كل المستخدمين من الجدول
+    try:
+        rs = get_table("houssin363").select("user_id").execute()
+        rows = rs.data or []
+    except Exception:
+        rows = []
+
+    for r in rows:
         try:
-            rs = get_table("houssin363").select("user_id").execute()
-            rows = rs.data or []
+            uid = int(r.get("user_id") or 0)
+            if uid:
+                ids.add(uid)
         except Exception:
-            rows = []
+            pass
 
-        for r in rows:
+    # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
+    try:
+        ids.add(int(ADMIN_MAIN_ID))
+    except Exception:
+        pass
+
+    try:
+        for aid in ADMINS:
             try:
-                uid = int(r.get("user_id") or 0)
-                if uid:
-                    ids.add(uid)
+                ids.add(int(aid))
             except Exception:
                 pass
+    except Exception:
+        pass
 
-        # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
-        try:
-            ids.add(int(ADMIN_MAIN_ID))
-        except Exception:
-            pass
-
-        try:
-            for aid in ADMINS:
-                try:
-                    ids.add(int(aid))
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        return ids
+    return ids
 
 
 def _enqueue_broadcast(text: str) -> int:
@@ -1171,4 +1171,3 @@ def _register_admin_roles(bot):
         # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
         ids_str = ", ".join(str(x) for x in ADMINS)
         bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
-
