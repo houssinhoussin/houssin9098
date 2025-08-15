@@ -939,70 +939,71 @@ def register(bot, history):
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("⬅️ رجوع")
         bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
-# =========================
-# 📬 ترحيب — نحن شغالين (مباشر)
-# =========================
-@bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def bc_welcome(m):
-    _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
-    kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
-        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
-    )
-    kb.row(
-        types.InlineKeyboardButton("✅ إرسال الآن", callback_data="bw_confirm"),
-        types.InlineKeyboardButton("❌ إلغاء",      callback_data="bw_cancel"),
-    )
-    bot.reply_to(m,
-                 "🔎 *معاينة رسالة الترحيب*:\n"
-                 f"{BAND}\n(سيتم إدراج اسم كل عميل تلقائيًا)\n{BAND}",
-                 parse_mode="Markdown", reply_markup=kb)
 
-@bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel"))
-def _bw_flow(c):
-    st = _broadcast_pending.get(c.from_user.id)
-    if not st or st.get("mode") != "welcome":
-        return
-    if c.data == "bw_cancel":
-        _broadcast_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        return
+    # =========================
+    # 📬 ترحيب — نحن شغالين (مباشر)
+    # =========================
+    @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def bc_welcome(m):
+        _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
+            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("✅ إرسال الآن", callback_data="bw_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء",      callback_data="bw_cancel"),
+        )
+        bot.reply_to(m,
+                     "🔎 *معاينة رسالة الترحيب*:\n"
+                     f"{BAND}\n(سيتم إدراج اسم كل عميل تلقائيًا)\n{BAND}",
+                     parse_mode="Markdown", reply_markup=kb)
 
-    if c.data in ("bw_dest_clients","bw_dest_channel"):
-        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
-        _broadcast_pending[c.from_user.id] = st
-        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-        except Exception: pass
-        return
+    @bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel"))
+    def _bw_flow(c):
+        st = _broadcast_pending.get(c.from_user.id)
+        if not st or st.get("mode") != "welcome":
+            return
+        if c.data == "bw_cancel":
+            _broadcast_pending.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            except Exception: pass
+            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            except Exception: pass
+            return
 
-    if c.data == "bw_confirm":
-        sent = 0
-        if st["dest"] == "clients":
-            for i, (uid, nm) in enumerate(_collect_clients_with_names(), 1):
+        if c.data in ("bw_dest_clients","bw_dest_channel"):
+            st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+            _broadcast_pending[c.from_user.id] = st
+            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            except Exception: pass
+            return
+
+        if c.data == "bw_confirm":
+            sent = 0
+            if st["dest"] == "clients":
+                for i, (uid, nm) in enumerate(_collect_clients_with_names(), 1):
+                    try:
+                        bot.send_message(uid, _funny_welcome_text(nm))
+                        sent += 1
+                    except Exception:
+                        pass
+                    if i % 25 == 0:
+                        time.sleep(1)
+            else:
+                dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
-                    bot.send_message(uid, _funny_welcome_text(nm))
-                    sent += 1
+                    bot.send_message(dest, _funny_welcome_text(None))
+                    sent = 1
                 except Exception:
                     pass
-                if i % 25 == 0:
-                    time.sleep(1)
-        else:
-            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
-            try:
-                bot.send_message(dest, _funny_welcome_text(None))
-                sent = 1
-            except Exception:
-                pass
-        _broadcast_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+            _broadcast_pending.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            except Exception: pass
+            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            except Exception: pass
+            bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
 
 # =========================
@@ -1230,7 +1231,7 @@ def _bf_flow(c):
         try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception: pass
         bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
-
+    
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and m.from_user.id in ADMINS)
     def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
