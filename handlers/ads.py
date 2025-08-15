@@ -17,6 +17,72 @@ from services.wallet_service import (
 from services.queue_service import add_pending_request, process_queue
 from handlers.keyboards import main_menu
 
+# === Publisher used by services/scheduled_tasks.post_ads_task ===
+from config import CHANNEL_USERNAME
+from telebot.types import InputMediaPhoto
+import html
+
+def _prep_channel_id():
+    cid = CHANNEL_USERNAME or ""
+    cid = cid.strip()
+    # قبول @username أو -100id
+    if cid.startswith("@") or cid.startswith("-100"):
+        return cid
+    if cid:
+        return f"@{cid}"
+    raise RuntimeError("CHANNEL_USERNAME غير مضبوط في config.py")
+
+def _safe_html(s: str) -> str:
+    try:
+        return html.escape(str(s or ""))
+    except Exception:
+        return str(s or "")
+
+def publish_channel_ad(bot, ad_row) -> bool:
+    """
+    تنشر إعلانًا واحدًا في قناة CHANNEL_USERNAME.
+    ad_row يحتوي: ad_text, contact, images (قائمة file_id), ...
+    ترجع True عند النجاح، False عند الفشل (حتى لا يُزاد العداد).
+    """
+    chat_id = _prep_channel_id()
+    ad_text  = _safe_html(ad_row.get("ad_text") or "")
+    contact  = _safe_html(ad_row.get("contact") or "—")
+    images   = [x for x in (ad_row.get("images") or []) if x]
+
+    # نص الرسالة
+    body = (
+        "<b><u>📣 إعـــــلان</u></b>\n\n"
+        f"{ad_text}\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "📱 للتواصل:\n"
+        f"{contact}\n"
+        "━━━━━━━━━━━━━━━━"
+    )
+
+    try:
+        if images:
+            # صورة واحدة → caption + HTML
+            if len(images) == 1:
+                cap = body[:1000]  # نحجز ~24 حرف احتياط للكابتشن
+                bot.send_photo(chat_id, images[0], caption=cap, parse_mode="HTML")
+                if len(body) > len(cap):
+                    bot.send_message(chat_id, body, parse_mode="HTML")
+            else:
+                # أكثر من صورة → media group: أول صورة معها Caption
+                media = [InputMediaPhoto(images[0], caption=body[:1000], parse_mode="HTML")]
+                media += [InputMediaPhoto(x) for x in images[1:10]]  # أقصى 10 حسب تيليجرام
+                bot.send_media_group(chat_id, media)
+                if len(body) > 1000:
+                    bot.send_message(chat_id, body, parse_mode="HTML")
+        else:
+            bot.send_message(chat_id, body, parse_mode="HTML")
+        return True
+    except Exception as e:
+        # خليه False عشان الجدولة تعيد المحاولة وما تزود العداد
+        print(f"[publish_channel_ad] failed: {e}")
+        return False
+
+
 # صيانة + أعلام المزايا
 from services.system_service import is_maintenance, maintenance_message
 from services.feature_flags import block_if_disabled  # requires flag key: "ads"
