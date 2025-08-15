@@ -408,14 +408,14 @@ def register(bot, _history):
     def confirm_ad(call):
         user_id = call.from_user.id
 
-        # ✅ عند التأكيد — احذف الكيبورد فقط + Debounce
+        # ✅ عند التأكيد — احذف الكيبورد فقط + Debounce (يمنع الدبل-كليك)
         if confirm_guard(bot, call, "ads_confirm_send"):
             return
-    @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")  
 
         # صيانة/إيقاف خدمة؟
         if is_maintenance():
-            return bot.send_message(call.message.chat.id, maintenance_message())
+            bot.send_message(call.message.chat.id, maintenance_message())
+            return
         if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
             return
 
@@ -427,9 +427,9 @@ def register(bot, _history):
             user_ads_state.pop(user_id, None)
             return
 
-        price   = int(data["price"])
-        times   = int(data["times"])
-        name    = _name_from_user(call.from_user)
+        price = int(data["price"])
+        times = int(data["times"])
+        name = _name_from_user(call.from_user)
 
         # ✅ الرصيد المتاح (balance - held)
         available = int(get_available_balance(user_id) or 0)
@@ -443,9 +443,41 @@ def register(bot, _history):
                     f"السعر: <b>{_fmt_syp(price)}</b>\n"
                     f"الناقص تقريبًا: <b>{_fmt_syp(missing)}</b>"
                 ),
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             return
+
+        # 🧾 إنشاء حجز للمبلغ (ذرّيًا عبر RPC)
+        hold_id = create_hold(user_id, price, f"ads x{times}")
+        if not hold_id:
+            bot.send_message(call.message.chat.id, "❌ تعذر حجز المبلغ. حاول لاحقًا.")
+            return
+
+        # 📨 إضافة الطلب لطابور الإدارة
+        payload = {
+            "type": "ads",
+            "times": times,
+            "price": price,
+            "contact": data.get("contact"),
+            "ad_text": data.get("ad_text"),
+            "images": data.get("images") or [],
+            "user_id": user_id,
+            "reserved": price,
+            "hold_id": hold_id,
+            "hold_desc": f"ads x{times}",
+        }
+        add_pending_request(user_id, "ads", payload, f"طلب إعلان ×{times} بسعر {_fmt_syp(price)}")
+        process_queue(bot)
+
+        # ✔️ إنهاء الواجهة وإعلام المستخدم
+        safe_finalize(
+            bot,
+            call.message,
+            new_text="✅ تم إرسال طلب إعلانك للمراجعة. سنبلغك حال الموافقة.",
+            parse_mode=None,
+        )
+        user_ads_state[user_id] = {"step": "submitted"}
+
 
         # ——— حجز المبلغ عبر RPC ———
         hold_id = None
