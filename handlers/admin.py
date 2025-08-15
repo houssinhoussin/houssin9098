@@ -1006,90 +1006,90 @@ def register(bot, history):
             bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
 
-# =========================
-# 📢 عرض اليوم (مباشر)
-# =========================
-@bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_deal_of_day(m):
-    _broadcast_pending[m.from_user.id] = {"mode": "deal_wait"}
-    bot.reply_to(m, "🛍️ أرسل *نص العرض* الآن.\nمثال:\n"
-                    "• خصم 20% على باقات كذا\n• توصيل فوري\n• ينتهي اليوم ⏳",
-                 parse_mode="Markdown")
+    # =========================
+    # 📢 عرض اليوم (مباشر)
+    # =========================
+    @bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def broadcast_deal_of_day(m):
+        _broadcast_pending[m.from_user.id] = {"mode": "deal_wait"}
+        bot.reply_to(m, "🛍️ أرسل *نص العرض* الآن.\nمثال:\n"
+                        "• خصم 20% على باقات كذا\n• توصيل فوري\n• ينتهي اليوم ⏳",
+                     parse_mode="Markdown")
 
-@bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "deal_wait", content_types=["text"])
-def _deal_collect(m):
-    body = (m.text or "").strip()
-    if not body:
-        return bot.reply_to(m, "❌ النص فارغ.")
-    _broadcast_pending[m.from_user.id] = {"mode": "deal_confirm", "body": body, "dest": "clients"}
-    kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bd_dest_clients"),
-        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bd_dest_channel"),
-    )
-    kb.row(
-        types.InlineKeyboardButton("✅ بث الآن", callback_data="bd_confirm"),
-        types.InlineKeyboardButton("❌ إلغاء",   callback_data="bd_cancel"),
-    )
-    preview = (f"{BAND}\n<b>📢 عرض اليوم</b>\n"
-               f"{body}\n"
-               "🎯 *سارع قبل النفاد*\n"
-               "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
-               f"{BAND}")
-    bot.reply_to(m, preview, parse_mode="HTML", reply_markup=kb)
+    @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "deal_wait", content_types=["text"])
+    def _deal_collect(m):
+        body = (m.text or "").strip()
+        if not body:
+            return bot.reply_to(m, "❌ النص فارغ.")
+        _broadcast_pending[m.from_user.id] = {"mode": "deal_confirm", "body": body, "dest": "clients"}
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bd_dest_clients"),
+            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bd_dest_channel"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("✅ بث الآن", callback_data="bd_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء",   callback_data="bd_cancel"),
+        )
+        preview = (f"{BAND}\n<b>📢 عرض اليوم</b>\n"
+                   f"{body}\n"
+                   "🎯 *سارع قبل النفاد*\n"
+                   "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
+                   f"{BAND}")
+        bot.reply_to(m, preview, parse_mode="HTML", reply_markup=kb)
 
-@bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel"))
-def _bd_flow(c):
-    st = _broadcast_pending.get(c.from_user.id)
-    if not st or st.get("mode") != "deal_confirm":
-        return
-    if c.data == "bd_cancel":
-        _broadcast_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        return
-    if c.data in ("bd_dest_clients","bd_dest_channel"):
-        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
-        _broadcast_pending[c.from_user.id] = st
-        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-        except Exception: pass
-        return
+    @bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel"))
+    def _bd_flow(c):
+        st = _broadcast_pending.get(c.from_user.id)
+        if not st or st.get("mode") != "deal_confirm":
+            return
+        if c.data == "bd_cancel":
+            _broadcast_pending.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            except Exception: pass
+            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            except Exception: pass
+            return
+        if c.data in ("bd_dest_clients","bd_dest_channel"):
+            st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+            _broadcast_pending[c.from_user.id] = st
+            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            except Exception: pass
+            return
 
-    if c.data == "bd_confirm":
-        text = (f"{BAND}\n<b>📢 عرض اليوم</b>\n{st['body']}\n"
-                "🎯 *سارع قبل النفاد*\n"
-                "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
-                f"{BAND}")
-        sent = 0
-        if st["dest"] == "clients":
-            for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
+        if c.data == "bd_confirm":
+            text = (f"{BAND}\n<b>📢 عرض اليوم</b>\n{st['body']}\n"
+                    "🎯 *سارع قبل النفاد*\n"
+                    "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
+                    f"{BAND}")
+            sent = 0
+            if st["dest"] == "clients":
+                for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
+                    try:
+                        bot.send_message(uid, text, parse_mode="HTML")
+                        sent += 1
+                    except Exception:
+                        pass
+                    if i % 25 == 0:
+                        time.sleep(1)
+            else:
+                dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
-                    bot.send_message(uid, text, parse_mode="HTML")
-                    sent += 1
+                    bot.send_message(dest, text, parse_mode="HTML")
+                    sent = 1
                 except Exception:
                     pass
-                if i % 25 == 0:
-                    time.sleep(1)
-        else:
-            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
-            try:
-                bot.send_message(dest, text, parse_mode="HTML")
-                sent = 1
-            except Exception:
-                pass
-        _broadcast_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        bot.send_message(c.message.chat.id, f"✅ العرض أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+            _broadcast_pending.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            except Exception: pass
+            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            except Exception: pass
+            bot.send_message(c.message.chat.id, f"✅ العرض أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
 
-# =========================
-# 📊 استفتاء سريع (مباشر)
-# =========================
+    # =========================
+    # 📊 استفتاء سريع (مباشر)
+    # =========================
 @bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
 def broadcast_poll(m):
     _broadcast_pending[m.from_user.id] = {"mode": "poll_wait"}
