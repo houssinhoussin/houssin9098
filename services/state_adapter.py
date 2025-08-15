@@ -31,6 +31,7 @@ class _DictProxy(MutableMapping):
         return len(get_data(self.user_id))
 
     def get(self, key, default=None):
+        # السطر المقطوع المشار إليه هو ببساطة الاستدعاء التالي لاسترجاع القيمة أو الافتراضي:
         return get_kv(self.user_id, key, default)
 
     def setdefault(self, key, default=None):
