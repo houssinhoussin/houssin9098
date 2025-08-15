@@ -6,25 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from telebot import types
 import threading
-USERS_TABLE = "houssin363"  # ← إن كان جدولك اسمه "hussein" غيّرها هنا فقط
-def _collect_clients_with_names():
-    """
-    يرجع قائمة (user_id, name) من جدول العملاء المحدد.
-    الأعمدة المقبولة للاسم: full_name / name / first_name (حسب ما هو متوفر بجدولك).
-    """
-    try:
-        res = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").execute()
-        rows = res.data or []
-    except Exception:
-        rows = []
-    out = []
-    for r in rows:
-        uid = r.get("user_id") or r.get("id") or r.get("tg_id")
-        if not uid:
-            continue
-        nm = r.get("full_name") or r.get("name") or r.get("first_name")
-        out.append((int(uid), nm))
-    return out
+import time
 
 # التحكم في حذف رسالة الأدمن عند أي إجراء على الطابور
 DELETE_ADMIN_MESSAGE_ON_ACTION = False
@@ -40,6 +22,27 @@ from services.admin_ledger import (
 )
 from config import ADMINS, ADMIN_MAIN_ID
 from database.db import get_table, DEFAULT_TABLE
+from database.db import get_table, DEFAULT_TABLE
+USERS_TABLE = "houssin363"  # ← إن كان اسمك مختلف، عدّله هنا فقط
+def _collect_clients_with_names():
+    """
+    يرجع قائمة (user_id, name) من جدول العملاء المحدد.
+    الأعمدة المقبولة للاسم: full_name / name / first_name (حسب المتوفر).
+    """
+    try:
+        res = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").execute()
+        rows = res.data or []
+    except Exception:
+        rows = []
+    out = []
+    for r in rows:
+        uid = r.get("user_id") or r.get("id") or r.get("tg_id")
+        if not uid:
+            continue
+        nm = r.get("full_name") or r.get("name") or r.get("first_name")
+        out.append((int(uid), nm))
+    return out
+
 from services.state_service import purge_state
 from services.products_admin import set_product_active, get_product_active, bulk_ensure_products
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
@@ -77,7 +80,7 @@ from handlers import cash_transfer, companies_transfer
 
 # ===== Override 'allowed' محليًا: ADMINS و ADMIN_MAIN_ID لديهم كل الصلاحيات مؤقتًا =====
 def allowed(user_id: int, perm: str) -> bool:
-    from config import ADMINS, ADMIN_MAIN_ID
+    from config import ADMINS, ADMIN_MAIN_ID, CHANNEL_USERNAME, FORCE_SUB_CHANNEL_USERNAME
     return (user_id == ADMIN_MAIN_ID or user_id in ADMINS) or _allowed(user_id, perm)
 
 
@@ -106,6 +109,18 @@ _broadcast_pending = {}
 # ─────────────────────────────────────
 BAND = "━━━━━━━━━━━━━━━━"
 CANCEL_HINT_ADMIN = "✋ اكتب /cancel لإلغاء الوضع الحالي."
+def _funny_welcome_text(name):
+    n = name or "صديقنا"
+    return (
+        f"🎉 أهلاً يا {n}! 😜🛒\n"
+        "نحنا جاهزين نستلم طلباتك بأسرع وقت ⚡️\n"
+        "اطلب ولا يهمك… الخدمة عنا مثل القهوة: سريعة وسخنة ☕️🔥\n\n"
+        "• شحن ألعاب وتطبيقات 🎮📱\n"
+        "• فواتير وتحويل وحدات 💳\n"
+        "• اشتراكات وإنترنت 🌐\n"
+        "• تحويلات كاش 💸\n\n"
+        "إذا عندك سؤال… اسأل قبل ما يبرد الحماس 😁"
+    )
 
 def _fmt_syp(n: int) -> str:
     try:
@@ -924,6 +939,297 @@ def register(bot, history):
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("⬅️ رجوع")
         bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
+# =========================
+# 📬 ترحيب — نحن شغالين (مباشر)
+# =========================
+@bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+def bc_welcome(m):
+    _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
+    kb = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
+        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("✅ إرسال الآن", callback_data="bw_confirm"),
+        types.InlineKeyboardButton("❌ إلغاء",      callback_data="bw_cancel"),
+    )
+    bot.reply_to(m,
+                 "🔎 *معاينة رسالة الترحيب*:\n"
+                 f"{BAND}\n(سيتم إدراج اسم كل عميل تلقائيًا)\n{BAND}",
+                 parse_mode="Markdown", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel"))
+def _bw_flow(c):
+    st = _broadcast_pending.get(c.from_user.id)
+    if not st or st.get("mode") != "welcome":
+        return
+    if c.data == "bw_cancel":
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        return
+
+    if c.data in ("bw_dest_clients","bw_dest_channel"):
+        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+        _broadcast_pending[c.from_user.id] = st
+        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+        except Exception: pass
+        return
+
+    if c.data == "bw_confirm":
+        sent = 0
+        if st["dest"] == "clients":
+            for i, (uid, nm) in enumerate(_collect_clients_with_names(), 1):
+                try:
+                    bot.send_message(uid, _funny_welcome_text(nm))
+                    sent += 1
+                except Exception:
+                    pass
+                if i % 25 == 0:
+                    time.sleep(1)
+        else:
+            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
+            try:
+                bot.send_message(dest, _funny_welcome_text(None))
+                sent = 1
+            except Exception:
+                pass
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+
+
+# =========================
+# 📢 عرض اليوم (مباشر)
+# =========================
+@bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+def broadcast_deal_of_day(m):
+    _broadcast_pending[m.from_user.id] = {"mode": "deal_wait"}
+    bot.reply_to(m, "🛍️ أرسل *نص العرض* الآن.\nمثال:\n"
+                    "• خصم 20% على باقات كذا\n• توصيل فوري\n• ينتهي اليوم ⏳",
+                 parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "deal_wait", content_types=["text"])
+def _deal_collect(m):
+    body = (m.text or "").strip()
+    if not body:
+        return bot.reply_to(m, "❌ النص فارغ.")
+    _broadcast_pending[m.from_user.id] = {"mode": "deal_confirm", "body": body, "dest": "clients"}
+    kb = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bd_dest_clients"),
+        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bd_dest_channel"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("✅ بث الآن", callback_data="bd_confirm"),
+        types.InlineKeyboardButton("❌ إلغاء",   callback_data="bd_cancel"),
+    )
+    preview = (f"{BAND}\n<b>📢 عرض اليوم</b>\n"
+               f"{body}\n"
+               "🎯 *سارع قبل النفاد*\n"
+               "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
+               f"{BAND}")
+    bot.reply_to(m, preview, parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel"))
+def _bd_flow(c):
+    st = _broadcast_pending.get(c.from_user.id)
+    if not st or st.get("mode") != "deal_confirm":
+        return
+    if c.data == "bd_cancel":
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        return
+    if c.data in ("bd_dest_clients","bd_dest_channel"):
+        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+        _broadcast_pending[c.from_user.id] = st
+        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+        except Exception: pass
+        return
+
+    if c.data == "bd_confirm":
+        text = (f"{BAND}\n<b>📢 عرض اليوم</b>\n{st['body']}\n"
+                "🎯 *سارع قبل النفاد*\n"
+                "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
+                f"{BAND}")
+        sent = 0
+        if st["dest"] == "clients":
+            for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
+                try:
+                    bot.send_message(uid, text, parse_mode="HTML")
+                    sent += 1
+                except Exception:
+                    pass
+                if i % 25 == 0:
+                    time.sleep(1)
+        else:
+            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
+            try:
+                bot.send_message(dest, text, parse_mode="HTML")
+                sent = 1
+            except Exception:
+                pass
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        bot.send_message(c.message.chat.id, f"✅ العرض أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+
+
+# =========================
+# 📊 استفتاء سريع (مباشر)
+# =========================
+@bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+def broadcast_poll(m):
+    _broadcast_pending[m.from_user.id] = {"mode": "poll_wait"}
+    bot.reply_to(m, "🗳️ أرسل الاستفتاء بصيغة:\n"
+                    "*السؤال*\n"
+                    "الخيار 1\nالخيار 2\nالخيار 3\nالخيار 4",
+                 parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "poll_wait", content_types=["text"])
+def _poll_collect(m):
+    lines = [l.strip() for l in (m.text or "").splitlines() if l.strip()]
+    if len(lines) < 5:
+        return bot.reply_to(m, "❌ الصيغة غير صحيحة. أرسل 5 أسطر: سؤال + 4 خيارات.")
+    q, opts = lines[0], lines[1:5]
+    _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
+    kb = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
+        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("✅ بث الآن", callback_data="bp_confirm"),
+        types.InlineKeyboardButton("❌ إلغاء",   callback_data="bp_cancel"),
+    )
+    bot.reply_to(m, f"🔎 *معاينة الاستفتاء:*\n{q}\n- {opts[0]}\n- {opts[1]}\n- {opts[2]}\n- {opts[3]}",
+                 parse_mode="Markdown", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel"))
+def _bp_flow(c):
+    st = _broadcast_pending.get(c.from_user.id)
+    if not st or st.get("mode") != "poll_confirm":
+        return
+    if c.data == "bp_cancel":
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        return
+    if c.data in ("bp_dest_clients","bp_dest_channel"):
+        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+        _broadcast_pending[c.from_user.id] = st
+        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+        except Exception: pass
+        return
+
+    if c.data == "bp_confirm":
+        q, opts = st["q"], st["opts"]
+        sent = 0
+        if st["dest"] == "clients":
+            ids = list(_collect_clients_with_names())
+            for i, (uid, _) in enumerate(ids, 1):
+                try:
+                    bot.send_poll(uid, question=q, options=opts, is_anonymous=True, allows_multiple_answers=False)
+                    sent += 1
+                except Exception:
+                    pass
+                if i % 25 == 0:
+                    time.sleep(1)
+        else:
+            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
+            try:
+                bot.send_poll(dest, question=q, options=opts, is_anonymous=True, allows_multiple_answers=False)
+                sent = 1
+            except Exception:
+                pass
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        bot.send_message(c.message.chat.id, f"✅ الاستفتاء أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+
+
+# =========================
+# 📝 رسالة من عندي (مباشر)
+# =========================
+@bot.message_handler(func=lambda m: m.text == "📝 رسالة من عندي" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+def broadcast_free(m):
+    _broadcast_pending[m.from_user.id] = {"mode": "free_wait"}
+    bot.reply_to(m, "📝 أرسل النص الآن.")
+
+@bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "free_wait", content_types=["text"])
+def _free_collect(m):
+    text = (m.text or "").strip()
+    if not text:
+        return bot.reply_to(m, "❌ النص فارغ.")
+    _broadcast_pending[m.from_user.id] = {"mode": "free_confirm", "text": text, "dest": "clients"}
+    kb = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bf_dest_clients"),
+        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bf_dest_channel"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("✅ بث الآن", callback_data="bf_confirm"),
+        types.InlineKeyboardButton("❌ إلغاء",   callback_data="bf_cancel"),
+    )
+    bot.reply_to(m, f"{BAND}\n{text}\n{BAND}", parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data in ("bf_dest_clients","bf_dest_channel","bf_confirm","bf_cancel"))
+def _bf_flow(c):
+    st = _broadcast_pending.get(c.from_user.id)
+    if not st or st.get("mode") != "free_confirm":
+        return
+    if c.data == "bf_cancel":
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        return
+    if c.data in ("bf_dest_clients","bf_dest_channel"):
+        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+        _broadcast_pending[c.from_user.id] = st
+        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+        except Exception: pass
+        return
+    if c.data == "bf_confirm":
+        sent = 0
+        if st["dest"] == "clients":
+            for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
+                try:
+                    bot.send_message(uid, st["text"], parse_mode="HTML")
+                    sent += 1
+                except Exception:
+                    pass
+                if i % 25 == 0:
+                    time.sleep(1)
+        else:
+            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
+            try:
+                bot.send_message(dest, st["text"], parse_mode="HTML")
+                sent = 1
+            except Exception:
+                pass
+        _broadcast_pending.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+        except Exception: pass
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+        bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and m.from_user.id in ADMINS)
     def admin_products_menu(m):
@@ -1173,75 +1479,6 @@ def register(bot, history):
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
-    # ——— أزرار البث ———
-    def _broadcast_template(title: str, body: str) -> int:
-        text = f"{BAND}\n<b>{title}</b>\n{body}\n{BAND}"
-        return _enqueue_broadcast(text)
-
-    @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    def broadcast_we_are_online(m):
-        n = _broadcast_template(
-            "أهلاً وسهلاً 👋 نحن شغّالين الآن",
-            "✅ جاهزين نخدمك بأي وقت! اطلب شحن ألعاب، وحدات، إنترنت، أو تحويل كاش — كلها تتم بسرعة.\n"
-            "✨ جرّب خدماتنا اليوم."
-        )
-        bot.reply_to(m, f"✅ تمت جدولة رسالة الترحيب لجميع المستخدمين ({n} مستلم).", parse_mode="HTML")
-
-    @bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    def broadcast_deal_of_day(m):
-        n = _broadcast_template(
-            "📢 عرض اليوم",
-            "خصم محدود لفترة قصيرة!\n"
-            "• شحن ألعاب مختارة بعمولة مخفّضة\n"
-            "• باقات وحدات وهدايا على بعض الطلبات\n"
-            "⏳ العرض ساري اليوم فقط — لا تفوّت الفرصة!"
-        )
-        bot.reply_to(m, f"✅ تمت جدولة الرسالة التسويقية ({n} مستلم).", parse_mode="HTML")
-
-    # زر الاستفتاء — يُرسل Telegram Poll إلى الجميع في خيط منفصل
-    def _broadcast_poll(question: str, options: list[str], is_anonymous: bool = True):
-        user_ids = _collect_all_user_ids()
-        def _runner():
-            for uid in user_ids:
-                try:
-                    bot.send_poll(uid, question=question, options=options, is_anonymous=is_anonymous, allows_multiple_answers=False)
-                except Exception:
-                    pass
-        try:
-            threading.Thread(target=_runner, daemon=True).start()
-            return True, len(user_ids)
-        except Exception:
-            return False, 0
-
-    @bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    def broadcast_poll(m):
-        ok, total = _broadcast_poll(
-            "أي خدمة تهمّك أكثر عندنا؟",
-            ["شحن ألعاب 🎮", "وحدات موبايل 📱", "تحويل كاش 💸", "إنترنت 🌐"],
-            is_anonymous=True
-        )
-        if ok:
-            bot.reply_to(m, f"✅ تم إرسال الاستفتاء إلى الجميع (المستلمين المتوقعين: {total}).")
-        else:
-            bot.reply_to(m, "❌ تعذّر إرسال الاستفتاء.")
-
-    @bot.message_handler(func=lambda m: m.text == "📝 رسالة من عندي" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    def broadcast_free(m):
-        _broadcast_pending[m.from_user.id] = {"mode": "free"}
-        bot.reply_to(m, f"📝 اكتب نص الرسالة الآن لإرسالها إلى الجميع.\n{CANCEL_HINT_ADMIN}")
-
-    @bot.message_handler(func=lambda m: m.from_user.id in _broadcast_pending, content_types=["text"])
-    def handle_broadcast_text(m):
-        st = _broadcast_pending.pop(m.from_user.id, None)
-        if not st:
-            return
-        text = (m.text or "").strip()
-        if not text:
-            return bot.reply_to(m, "❌ النص فارغ.")
-        n = _enqueue_broadcast(text)
-        bot.reply_to(m, f"✅ تمت جدولة الإرسال لجميع المستخدمين ({n} مستلم).")
-
-
 # === نقلناها إلى مستوى الموديول لتتفادا NameError ===
 def _collect_all_user_ids() -> set[int]:
     """
@@ -1280,50 +1517,6 @@ def _collect_all_user_ids() -> set[int]:
         pass
 
     return ids
-
-
-def _enqueue_broadcast(text: str) -> int:
-    """
-    يضيف رسائل البث إلى outbox لكل المستخدمين.
-    يدعم مخططين لجدول notifications_outbox:
-      1) user_id, message, scheduled_at
-      2) user_id, template, payload(jsonb), scheduled_at
-    """
-    user_ids = _collect_all_user_ids()
-    outbox = get_table("notifications_outbox")
-    n = 0
-    now_iso = datetime.utcnow().isoformat()
-
-    for uid in user_ids:
-        # المحاولة الأولى: عمود message (المخطط الأقدم)
-        try:
-            outbox.insert(
-                {"user_id": int(uid), "message": text, "scheduled_at": now_iso}
-            ).execute()
-            n += 1
-            continue
-        except Exception as e1:
-            # fallback: باستخدام template + payload (المخطط الأحدث)
-            try:
-                outbox.insert(
-                    {
-                        "user_id": int(uid),
-                        "template": "plain_text",
-                        "payload": {"text": text},
-                        "scheduled_at": now_iso,
-                    }
-                ).execute()
-                n += 1
-                continue
-            except Exception as e2:
-                logging.error(
-                    "[ADMIN][broadcast] outbox insert failed for uid=%s: %s || fallback: %s",
-                    uid, e1, e2
-                )
-                # لا نرفع الاستثناء—نكمل مع باقي المستخدمين
-
-    return n
-
 
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
