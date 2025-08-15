@@ -1101,9 +1101,40 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "poll_wait", content_types=["text"])
     def _poll_collect(m):
         lines = [l.strip() for l in (m.text or "").splitlines() if l.strip()]
-        if len(lines) < 5:
-            return bot.reply_to(m, "❌ الصيغة غير صحيحة. أرسل 5 أسطر: سؤال + 4 خيارات.")
-        q, opts = lines[0], lines[1:5]
+        if len(lines) < 3:
+            return bot.reply_to(m, "❌ الصيغة غير صحيحة. المطلوب: سؤال + خيارين على الأقل.")
+
+        q, raw_opts = lines[0], lines[1:]
+        # إزالة المكررات والإفراغ وقصّ حتى 10 خيارات (شرط تيليجرام)
+        opts = []
+        for o in raw_opts:
+            if not o:
+                continue
+            if o in opts:
+                continue
+            if len(o) > 100:
+                o = o[:100]
+            opts.append(o)
+        opts = opts[:10]
+
+        if len(opts) < 2:
+            return bot.reply_to(m, "❌ لازم خيارين فريدين على الأقل.")
+
+        _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
+
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
+            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("✅ بث الآن", callback_data="bp_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء",   callback_data="bp_cancel"),
+        )
+
+        preview = "🔎 *معاينة الاستفتاء:*\n" + q + "\n" + "\n".join(f"- {o}" for o in opts)
+        bot.reply_to(m, preview, parse_mode="Markdown", reply_markup=kb)
+
         _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
         kb = types.InlineKeyboardMarkup()
         kb.row(
