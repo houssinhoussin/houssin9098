@@ -1090,81 +1090,81 @@ def register(bot, history):
     # =========================
     # 📊 استفتاء سريع (مباشر)
     # =========================
-@bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_poll(m):
-    _broadcast_pending[m.from_user.id] = {"mode": "poll_wait"}
-    bot.reply_to(m, "🗳️ أرسل الاستفتاء بصيغة:\n"
-                    "*السؤال*\n"
-                    "الخيار 1\nالخيار 2\nالخيار 3\nالخيار 4",
-                 parse_mode="Markdown")
+    @bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    def broadcast_poll(m):
+        _broadcast_pending[m.from_user.id] = {"mode": "poll_wait"}
+        bot.reply_to(m, "🗳️ أرسل الاستفتاء بصيغة:\n"
+                        "*السؤال*\n"
+                        "الخيار 1\nالخيار 2\nالخيار 3\nالخيار 4",
+                     parse_mode="Markdown")
 
-@bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "poll_wait", content_types=["text"])
-def _poll_collect(m):
-    lines = [l.strip() for l in (m.text or "").splitlines() if l.strip()]
-    if len(lines) < 5:
-        return bot.reply_to(m, "❌ الصيغة غير صحيحة. أرسل 5 أسطر: سؤال + 4 خيارات.")
-    q, opts = lines[0], lines[1:5]
-    _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
-    kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
-        types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
-    )
-    kb.row(
-        types.InlineKeyboardButton("✅ بث الآن", callback_data="bp_confirm"),
-        types.InlineKeyboardButton("❌ إلغاء",   callback_data="bp_cancel"),
-    )
-    bot.reply_to(m, f"🔎 *معاينة الاستفتاء:*\n{q}\n- {opts[0]}\n- {opts[1]}\n- {opts[2]}\n- {opts[3]}",
-                 parse_mode="Markdown", reply_markup=kb)
+    @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "poll_wait", content_types=["text"])
+    def _poll_collect(m):
+        lines = [l.strip() for l in (m.text or "").splitlines() if l.strip()]
+        if len(lines) < 5:
+            return bot.reply_to(m, "❌ الصيغة غير صحيحة. أرسل 5 أسطر: سؤال + 4 خيارات.")
+        q, opts = lines[0], lines[1:5]
+        _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
+            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("✅ بث الآن", callback_data="bp_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء",   callback_data="bp_cancel"),
+        )
+        bot.reply_to(m, f"🔎 *معاينة الاستفتاء:*\n{q}\n- {opts[0]}\n- {opts[1]}\n- {opts[2]}\n- {opts[3]}",
+                     parse_mode="Markdown", reply_markup=kb)
 
-@bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel"))
-def _bp_flow(c):
-    st = _broadcast_pending.get(c.from_user.id)
-    if not st or st.get("mode") != "poll_confirm":
-        return
-    if c.data == "bp_cancel":
-        _broadcast_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        return
-    if c.data in ("bp_dest_clients","bp_dest_channel"):
-        st["dest"] = "clients" if c.data.endswith("clients") else "channel"
-        _broadcast_pending[c.from_user.id] = st
-        try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-        except Exception: pass
-        return
+    @bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel"))
+    def _bp_flow(c):
+        st = _broadcast_pending.get(c.from_user.id)
+        if not st or st.get("mode") != "poll_confirm":
+            return
+        if c.data == "bp_cancel":
+            _broadcast_pending.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            except Exception: pass
+            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            except Exception: pass
+            return
+        if c.data in ("bp_dest_clients","bp_dest_channel"):
+            st["dest"] = "clients" if c.data.endswith("clients") else "channel"
+            _broadcast_pending[c.from_user.id] = st
+            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            except Exception: pass
+            return
 
-    if c.data == "bp_confirm":
-        q, opts = st["q"], st["opts"]
-        sent = 0
-        if st["dest"] == "clients":
-            ids = list(_collect_clients_with_names())
-            for i, (uid, _) in enumerate(ids, 1):
+        if c.data == "bp_confirm":
+            q, opts = st["q"], st["opts"]
+            sent = 0
+            if st["dest"] == "clients":
+                ids = list(_collect_clients_with_names())
+                for i, (uid, _) in enumerate(ids, 1):
+                    try:
+                        bot.send_poll(uid, question=q, options=opts, is_anonymous=True, allows_multiple_answers=False)
+                        sent += 1
+                    except Exception:
+                        pass
+                    if i % 25 == 0:
+                        time.sleep(1)
+            else:
+                dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
-                    bot.send_poll(uid, question=q, options=opts, is_anonymous=True, allows_multiple_answers=False)
-                    sent += 1
+                    bot.send_poll(dest, question=q, options=opts, is_anonymous=True, allows_multiple_answers=False)
+                    sent = 1
                 except Exception:
                     pass
-                if i % 25 == 0:
-                    time.sleep(1)
-        else:
-            dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
-            try:
-                bot.send_poll(dest, question=q, options=opts, is_anonymous=True, allows_multiple_answers=False)
-                sent = 1
-            except Exception:
-                pass
-        _broadcast_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        bot.send_message(c.message.chat.id, f"✅ الاستفتاء أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+            _broadcast_pending.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            except Exception: pass
+            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            except Exception: pass
+            bot.send_message(c.message.chat.id, f"✅ الاستفتاء أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
 
-# =========================
+    # =========================
 # 📝 رسالة من عندي (مباشر)
 # =========================
 @bot.message_handler(func=lambda m: m.text == "📝 رسالة من عندي" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
