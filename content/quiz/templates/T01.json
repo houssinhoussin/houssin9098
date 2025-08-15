@@ -81,7 +81,35 @@
       { "id": "Q-20","difficulty": "easy",    "text": "العنصر Na هو:",                     "options": ["بوتاسيوم","صوديوم","كالسيوم","مغنيسيوم"], "correct_index": 1 }
     ],
 
-    "3": [],
+    "3": [
+      { "id": "R-21", "difficulty": "medium", "text": "له سرير ولا ينام، وله فم ولا يتكلّم:", "options": ["النهر","الكهف","البركان","الساعة"], "correct_index": 0 },
+      { "id": "R-22", "difficulty": "easy",   "text": "له عينٌ واحدة ولا يرى:",               "options": ["الإبرة","الإعصار","العاصفة","المرساة"], "correct_index": 0 },
+      { "id": "R-23", "difficulty": "medium", "text": "يطير بلا جناح ويبكي بلا عين:",         "options": ["السحاب","الدخان","البخار","الندى"], "correct_index": 0 },
+      { "id": "R-24", "difficulty": "medium", "text": "إذا جاع أكل نفسه:",                     "options": ["الشمعة","النار","الصدأ","الحوت"], "correct_index": 0 },
+      { "id": "R-25", "difficulty": "easy",   "text": "يمشي بلا أقدام ولا يتوقف:",            "options": ["الوقت","النهر","الهواء","الظل"], "correct_index": 0 },
+      { "id": "R-26", "difficulty": "medium", "text": "شيء يحيط بالعالم ولا يتحرّك:",         "options": ["الخريطة","الغلاف الجوي","الشبكة","الأفق"], "correct_index": 0 },
+      { "id": "R-27", "difficulty": "medium", "text": "له لسانٌ ولا يتكلّم:",                 "options": ["الميزان","الحذاء","القفل","السيف"], "correct_index": 0 },
+      { "id": "R-28", "difficulty": "hard",   "text": "فيه بحور بلا ماء:",                     "options": ["المعجم","الأطلس","الإنترنت","اللوح"], "correct_index": 0 },
+      { "id": "R-29", "difficulty": "easy",   "text": "مولودٌ في النهار ويموت في الليل:",     "options": ["الظل","القمر","الندى","البرق"], "correct_index": 0 },
+      { "id": "R-30", "difficulty": "easy",   "text": "لها أربع أرجل ولا تمشي:",              "options": ["الطاولة","السرير","الخزانة","العنكبوت"], "correct_index": 0 },
+      { "id": "R-31", "difficulty": "hard",   "text": "تراه مرة في الدقيقة ومرتين في اللحظة:", "options": ["حرف الميم","الظل","النقطة","الصدى"], "correct_index": 0 },
+      { "id": "R-32", "difficulty": "easy",   "text": "شيء له أوراق وليس شجرة:",              "options": ["الكتاب","الدفتر","الجريدة","التقويم"], "correct_index": 0 },
+
+      { "id": "Q-21", "difficulty": "easy",   "text": "عدد أسابيع السنة:",                    "options": ["48","50","52","54"], "correct_index": 2 },
+      { "id": "Q-22", "difficulty": "medium", "text": "أقرب الكواكب إلى الشمس:",              "options": ["الزهرة","عطارد","الأرض","المريخ"], "correct_index": 1 },
+      { "id": "Q-23", "difficulty": "easy",   "text": "محيط يفصل أفريقيا عن أمريكا الجنوبية:", "options": ["الأطلسي","الهادئ","الهندي","المتوسط"], "correct_index": 0 },
+      { "id": "Q-24", "difficulty": "medium", "text": "غاز التنفّس الأساسي:",                 "options": ["الأكسجين","النيتروجين","الأرجون","الهيدروجين"], "correct_index": 0 },
+      { "id": "Q-25", "difficulty": "easy",   "text": "كم ثانية في 5 دقائق:",                 "options": ["200","250","300","350"], "correct_index": 2 },
+      { "id": "Q-26", "difficulty": "medium", "text": "مخترع الهاتف:",                         "options": ["غراهام بل","إديسون","ماركوني","تسلا"], "correct_index": 0 },
+      { "id": "Q-27", "difficulty": "easy",   "text": "عاصمة الأردن:",                         "options": ["عمّان","إربد","الزرقاء","العقبة"], "correct_index": 0 },
+      { "id": "Q-28", "difficulty": "medium", "text": "كم ضلعًا للمضلّع الخماسي:",            "options": ["4","5","6","7"], "correct_index": 1 },
+      { "id": "Q-29", "difficulty": "easy",   "text": "أثقل المعادن التالية:",                 "options": ["حديد","رصاص","نحاس","ألمنيوم"], "correct_index": 1 },
+      { "id": "Q-30", "difficulty": "medium", "text": "الكوكب الأحمر:",                        "options": ["المريخ","عطارد","نبتون","بلوتو"], "correct_index": 0 },
+      { "id": "Q-31", "difficulty": "medium", "text": "العاصمة القديمة للدولة العباسية:",     "options": ["بغداد","دمشق","الكوفة","سامرّاء"], "correct_index": 2 },
+      { "id": "Q-32", "difficulty": "easy",   "text": "نتيجة 12 × 8:",                         "options": ["80","88","96","104"], "correct_index": 2 },
+      { "id": "Q-33", "difficulty": "medium", "text": "أداة قياس الضغط الجوي:",               "options": ["بارومتر","سيسموجراف","هيدرومتر","تيرمومتر"], "correct_index": 0 }
+    ],
+
     "4": [],
     "5": [],
     "6": [],
