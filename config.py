@@ -90,5 +90,25 @@ if not _supabase_key:
 
 SUPABASE_KEY = _supabase_key
 
+# --- طباعة دور المفتاح (service_role أو anon) للمساعدة في التشخيص ---
+def _jwt_role(jwt: str | None):
+    if not jwt:
+        return None
+    try:
+        import base64, json
+        parts = jwt.split('.')
+        if len(parts) < 2:
+            return None
+        pad = '=' * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + pad).decode())
+        return payload.get("role") or payload.get("user_role")
+    except Exception:
+        return None
+
+_role = _jwt_role(SUPABASE_KEY)
+logging.info(f"Supabase auth role: {_role or 'unknown'}")
+if _role != 'service_role':
+    logging.warning("⚠️ SUPABASE_KEY ليس service_role (غالبًا anon). قد تمنع RLS عمليات الكتابة. ضع service_role في متغيرات البيئة على الخادم.")
+
 if not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_KEY (or SUPABASE_API_KEY) in environment")
