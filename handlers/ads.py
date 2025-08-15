@@ -411,6 +411,7 @@ def register(bot, _history):
         # ✅ عند التأكيد — احذف الكيبورد فقط + Debounce
         if confirm_guard(bot, call, "ads_confirm_send"):
             return
+    @bot.callback_query_handler(func=lambda call: call.data == "ads_confirm_send")  
 
         # صيانة/إيقاف خدمة؟
         if is_maintenance():
