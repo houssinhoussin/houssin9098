@@ -6,6 +6,25 @@ import logging
 from datetime import datetime, timedelta
 from telebot import types
 import threading
+USERS_TABLE = "houssin363"  # ← إن كان جدولك اسمه "hussein" غيّرها هنا فقط
+def _collect_clients_with_names():
+    """
+    يرجع قائمة (user_id, name) من جدول العملاء المحدد.
+    الأعمدة المقبولة للاسم: full_name / name / first_name (حسب ما هو متوفر بجدولك).
+    """
+    try:
+        res = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").execute()
+        rows = res.data or []
+    except Exception:
+        rows = []
+    out = []
+    for r in rows:
+        uid = r.get("user_id") or r.get("id") or r.get("tg_id")
+        if not uid:
+            continue
+        nm = r.get("full_name") or r.get("name") or r.get("first_name")
+        out.append((int(uid), nm))
+    return out
 
 # التحكم في حذف رسالة الأدمن عند أي إجراء على الطابور
 DELETE_ADMIN_MESSAGE_ON_ACTION = False
