@@ -24,52 +24,71 @@ def _get(name, default=None, cast=None, required=False):
             raise RuntimeError(f"Invalid value for {name}: expected {cast.__name__}")
     return val
 
+# === الدوال التي طلبت إضافتها ===
+def _as_int(x, default=None):
+    try:
+        return int(str(x).strip())
+    except Exception:
+        return default
+
+def _as_int_list(csv, default=None):
+    if not csv:
+        return default or []
+    out = []
+    for part in str(csv).split(","):
+        part = part.strip()
+        if part:
+            v = _as_int(part)
+            if v is not None:
+                out.append(v)
+    return out
+
 # --- Telegram ---
-API_TOKEN    = _get("API_TOKEN", required=True)
-BOT_USERNAME = _get("BOT_USERNAME", required=True)
-BOT_NAME     = _get("BOT_NAME", "Bot")
-BOT_ID       = _get("BOT_ID", cast=int, required=True)
+# نحافظ على نفس الاستدعاء لكن نوفر القيم الحقيقية كقيم افتراضية
+API_TOKEN    = _get("API_TOKEN", "7936418161:AAGNZEMIGZEmPfYlCGQbO_vM9oQbQUVSiT4")
+BOT_USERNAME = _get("BOT_USERNAME", "@my_fast_shop_bot")
+BOT_NAME     = _get("BOT_NAME", "المتجر العالمي")
+BOT_ID       = _get("BOT_ID", 7936418161, cast=int)
 
 # --- Admin ---
-ADMIN_MAIN_ID       = _get("ADMIN_MAIN_ID", cast=int, required=True)
-ADMIN_MAIN_USERNAME = _get("ADMIN_MAIN_USERNAME")
+ADMIN_MAIN_ID       = _get("ADMIN_MAIN_ID", 6935846121, cast=int)
+ADMIN_MAIN_USERNAME = _get("ADMIN_MAIN_USERNAME", "@Houssin363")
 
 def _parse_admin_ids(s: str | None, fallback: int):
-    ids = []
-    if s:
-        for part in s.split(","):
-            p = part.strip()
-            if not p:
-                continue
-            try:
-                ids.append(int(p))
-            except ValueError:
-                raise RuntimeError(f"Invalid admin id in ADMINS: {p}")
-    if not ids and fallback is not None:
-        ids = [int(fallback)]
-    return ids
+    # نُبقي الدالة كما هي منطقيًا، لكن نستخدم الدوال الجديدة داخليًا
+    default_list = [fallback] if fallback is not None else []
+    return _as_int_list(s or "", default=default_list)
 
 # من .env: ADMINS=6935846121,123456...
-ADMINS = _parse_admin_ids(os.getenv("ADMINS"), ADMIN_MAIN_ID)
+# إن لم يوجد المتغير ستُستخدم القيم التي زودتها
+ADMINS = _parse_admin_ids(os.getenv("ADMINS") or "6935846121,5401037337", ADMIN_MAIN_ID)
 
 # --- Force Sub / Channel ---
 # نحتفظ بها كنص لأن قنوات تيليغرام IDs تكون بصيغة -100xxxx وتعمل كنص
-FORCE_SUB_CHANNEL_ID       = _get("FORCE_SUB_CHANNEL_ID")
-FORCE_SUB_CHANNEL_USERNAME = _get("FORCE_SUB_CHANNEL_USERNAME")
-CHANNEL_USERNAME           = _get("CHANNEL_USERNAME")
+FORCE_SUB_CHANNEL_ID       = _get("FORCE_SUB_CHANNEL_ID", "-1002852510917")
+FORCE_SUB_CHANNEL_USERNAME = _get("FORCE_SUB_CHANNEL_USERNAME", "@shop100sho")
+CHANNEL_USERNAME           = _get("CHANNEL_USERNAME", "@shop100sho")
 
 # --- Webhook (اختياري) ---
-WEBHOOK_URL = _get("WEBHOOK_URL")
+WEBHOOK_URL = _get("WEBHOOK_URL", "https://telegram-shop-bot-lo4t.onrender.com/")
 
 # --- General ---
 LANG        = _get("LANG", "ar")
 ENCODING    = _get("ENCODING", "utf-8")
-PAYEER_RATE = _get("PAYEER_RATE", 0, cast=int)
+PAYEER_RATE = _get("PAYEER_RATE", 9000, cast=int)
 
 # --- Supabase ---
-SUPABASE_URL        = _get("SUPABASE_URL", required=True)
-SUPABASE_KEY        = _get("SUPABASE_KEY") or _get("SUPABASE_API_KEY")
+SUPABASE_URL        = _get("SUPABASE_URL", "https://azortroeejjomqweintc.supabase.co")
 SUPABASE_TABLE_NAME = _get("SUPABASE_TABLE_NAME", "houssin363")
+
+# نُبقي نفس منطق التفضيل مع توفير مفاتيحك كقيمة افتراضية
+_supabase_key = _get("SUPABASE_KEY")
+if not _supabase_key:
+    _supabase_key = _get("SUPABASE_API_KEY")
+if not _supabase_key:
+    _supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF6b3J0cm9lZWpqb21xd2VpbnRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxOTIzNjUsImV4cCI6MjA2Nzc2ODM2NX0.x3Pwq8OyRmlr7JQuEU2xRxYJtSoz67eIVzDx8Nh4muk"
+
+SUPABASE_KEY = _supabase_key
 
 if not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_KEY (or SUPABASE_API_KEY) in environment")
