@@ -20,8 +20,7 @@ from services.admin_ledger import (
     summarize_all_admins,
     top5_clients_week,
 )
-from config import ADMINS, ADMIN_MAIN_ID
-from database.db import get_table, DEFAULT_TABLE
+from config import ADMINS, ADMIN_MAIN_ID, CHANNEL_USERNAME, FORCE_SUB_CHANNEL_USERNAME
 from database.db import get_table, DEFAULT_TABLE
 USERS_TABLE = "houssin363"  # ← إن كان اسمك مختلف، عدّله هنا فقط
 def _collect_clients_with_names():
@@ -960,7 +959,7 @@ def register(bot, history):
                      f"{BAND}\n(سيتم إدراج اسم كل عميل تلقائيًا)\n{BAND}",
                      parse_mode="Markdown", reply_markup=kb)
 
-    @bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel"))
+    @bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
     def _bw_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "welcome":
@@ -1032,13 +1031,13 @@ def register(bot, history):
             types.InlineKeyboardButton("❌ إلغاء",   callback_data="bd_cancel"),
         )
         preview = (f"{BAND}\n<b>📢 عرض اليوم</b>\n"
-                   f"{body}\n"
-                   "🎯 *سارع قبل النفاد*\n"
-                   "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
-                   f"{BAND}")
+           f"{body}\n"
+           "🎯 <b>سارع قبل النفاد</b>\n"
+           "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
+           f"{BAND}")
         bot.reply_to(m, preview, parse_mode="HTML", reply_markup=kb)
 
-    @bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel"))
+    @bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
     def _bd_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "deal_confirm":
@@ -1059,9 +1058,10 @@ def register(bot, history):
 
         if c.data == "bd_confirm":
             text = (f"{BAND}\n<b>📢 عرض اليوم</b>\n{st['body']}\n"
-                    "🎯 *سارع قبل النفاد*\n"
+                    "🎯 <b>سارع قبل النفاد</b>\n"
                     "💳 طرق دفع متعددة • ⚡️ تنفيذ فوري\n"
                     f"{BAND}")
+
             sent = 0
             if st["dest"] == "clients":
                 for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
@@ -1117,7 +1117,7 @@ def register(bot, history):
         bot.reply_to(m, f"🔎 *معاينة الاستفتاء:*\n{q}\n- {opts[0]}\n- {opts[1]}\n- {opts[2]}\n- {opts[3]}",
                      parse_mode="Markdown", reply_markup=kb)
 
-    @bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel"))
+    @bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
     def _bp_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "poll_confirm":
@@ -1189,7 +1189,7 @@ def register(bot, history):
         )
         bot.reply_to(m, f"{BAND}\n{text}\n{BAND}", parse_mode="HTML", reply_markup=kb)
 
-    @bot.callback_query_handler(func=lambda c: c.data in ("bf_dest_clients","bf_dest_channel","bf_confirm","bf_cancel"))
+    @bot.callback_query_handler(func=lambda c: c.data in ("bf_dest_clients","bf_dest_channel","bf_confirm","bf_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
     def _bf_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "free_confirm":
