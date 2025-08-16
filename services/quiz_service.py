@@ -129,14 +129,12 @@ def load_settings(refresh: bool = False) -> Dict[str, Any]:
 
 # --- قراءة ترتيب القوالب مع تصفية ما لا يوجد فعليًا ---
 def _read_templates_order() -> List[str]:
-    # القوالب الموجودة فعليًا في المجلد
     existing = {p.stem for p in TEMPLATES_DIR.glob("T*.json")}
     if ORDER_PATH.exists():
         order = [ln.strip() for ln in ORDER_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()]
         order = [t for t in order if t in existing]
         if order:
             return order
-    # إن لم توجد القائمة أو صارت فارغة، استخدم الموجود بالمجلد (مرتّبًا)
     if existing:
         return sorted(existing)
     return ["T01"]
@@ -166,10 +164,9 @@ def get_points_value_syp(points: int, settings: Dict[str, Any] | None = None) ->
     return units * spu
 
 def _syp_to_points(amount_syp: int, settings: Dict[str, Any]) -> int:
-    """حوّل مبلغ ليرة إلى نقاط وفق points_conversion_rate."""
     conv = settings.get("points_conversion_rate", _DEFAULT_SETTINGS["points_conversion_rate"])
-    ppu = int(conv.get("points_per_unit", 10))  # كم نقطة لكل وحدة
-    spu = int(conv.get("syp_per_unit", 5))      # كم ل.س لكل وحدة
+    ppu = int(conv.get("points_per_unit", 10))
+    spu = int(conv.get("syp_per_unit", 5))
     if spu <= 0:
         return 0
     units = amount_syp // spu
@@ -183,13 +180,12 @@ def load_template(requested_template_id: str, refresh: bool = False) -> Dict[str
     """
     global _TEMPLATES_CACHE
     order = _read_templates_order()
-    # حدّد القالب الفعلي
     real_id = requested_template_id if (TEMPLATES_DIR / f"{requested_template_id}.json").exists() \
               else (order[0] if order else "T01")
     if (real_id in _TEMPLATES_CACHE) and not refresh:
         return _TEMPLATES_CACHE[real_id]
     path = TEMPLATES_DIR / f"{real_id}.json"
-    if not path.exists():  # حماية قصوى
+    if not path.exists():
         path = TEMPLATES_DIR / "T01.json"
         real_id = "T01"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -236,14 +232,57 @@ def deduct_fee_for_stage(user_id: int, stage_no: int) -> Tuple[bool, int, int]:
     new_bal, _ = change_balance(user_id, -price)
     return (True, new_bal, price)
 
-def convert_points_to_balance(user_id: int) -> Tuple[int, int, int]:
-    """يرجع: (points_before, syp_added, points_after)"""
-    bal, pts = get_wallet(user_id)
-    syp = get_points_value_syp(pts)
-    if syp <= 0:
-        return (pts, 0, pts)
-    sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": 0, "balance": bal + syp})
-    return (pts, syp, 0)
+# ------------------------ خصم آمن قبل عرض السؤال ------------------------
+def _current_q_key(user_id: int, tpl_id: str, stage_no: int, q_idx: int, item: Dict[str, Any]) -> str:
+    qid = str(item.get("id", q_idx))
+    return f"{tpl_id}:{stage_no}:{qid}"
+
+def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
+    """
+    يحاول خصم سعر المرحلة مرّة واحدة قبل عرض السؤال الحالي.
+    يرجع: (ok, balance_or_new_balance, price, reason)
+      - ok=True و reason in {"already","paid","no-questions"}
+      - ok=False و reason="insufficient"
+    """
+    st = get_progress(user_id) or reset_progress(user_id)
+    tpl_id = st.get("template_id", "T01")
+    tpl = load_template(tpl_id)
+    stage_no = int(st.get("stage", 1))
+    q_idx = int(st.get("q_index", 0))
+    arr = (tpl.get("items_by_stage", {}) or {}).get(str(stage_no), []) or []
+    if not arr:
+        bal, _ = get_wallet(user_id)
+        return True, bal, 0, "no-questions"
+
+    if q_idx >= len(arr):
+        q_idx = len(arr) - 1
+
+    item = arr[q_idx]
+    q_key = _current_q_key(user_id, tpl_id, stage_no, q_idx, item)
+
+    # لو هذا السؤال مدفوع سابقًا لنفس النسخة فلا نكرر الخصم
+    if st.get("paid_key") == q_key:
+        bal, _ = get_wallet(user_id)
+        return True, bal, 0, "already"
+
+    ok, new_bal_or_old, price = deduct_fee_for_stage(user_id, stage_no)
+    if not ok:
+        st["last_balance"] = new_bal_or_old
+        user_quiz_state[user_id] = st
+        return False, new_bal_or_old, price, "insufficient"
+
+    # تمييز هذه النسخة من السؤال كمدفوعة
+    st["paid_key"] = q_key
+    st["last_balance"] = new_bal_or_old
+    user_quiz_state[user_id] = st
+    return True, new_bal_or_old, price, "paid"
+
+def pause_current_question(user_id: int) -> None:
+    """استدعِها عندما يضغط اللاعب 'أكمل لاحقًا' لفرض خصم جديد عند الاستئناف."""
+    st = get_progress(user_id)
+    if st:
+        st.pop("paid_key", None)
+        user_quiz_state[user_id] = st
 
 # ------------------------ جلسة اللاعب ------------------------
 def get_progress(user_id: int) -> Dict[str, Any]:
@@ -264,6 +303,7 @@ def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str,
         "last_balance": 0,
         "attempts_on_current": 0,
         "last_click_ts": 0.0,
+        "paid_key": None,
     }
     user_quiz_state[user_id] = state
     return state
@@ -292,6 +332,8 @@ def next_question(user_id: int) -> Tuple[Dict[str, Any], Dict[str, Any], int, in
 def advance(user_id: int):
     st = get_progress(user_id)
     st["q_index"] = int(st.get("q_index", 0)) + 1
+    # سؤال جديد ⇒ إزالة مفتاح الدفع لضمان خصم جديد
+    st.pop("paid_key", None)
     user_quiz_state[user_id] = st
 
 # ------------------------ منطق المرحلة والجوائز (كنقاط) ------------------------
@@ -349,7 +391,7 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
     else:
         _, pts_after = get_wallet(user_id)
 
-    # لوج المرحلة في قاعدة البيانات (يتضمن template_id الآن)
+    # لوج المرحلة في قاعدة البيانات (يتضمن template_id)
     try:
         st = get_progress(user_id)
         payload = {
@@ -375,6 +417,8 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
     else:
         st["stage"] = 1
     st["q_index"] = 0
+    # بداية مرحلة جديدة ⇒ إزالة paid_key لضمان خصم أول سؤال
+    st.pop("paid_key", None)
     user_quiz_state[user_id] = st
 
     _reset_stage_counters(user_id)
