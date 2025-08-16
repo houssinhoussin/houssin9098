@@ -16,6 +16,11 @@ from services.commands_setup import setup_bot_commands
 # NEW: عُمّال الإشعارات والصيانة
 from services.outbox_worker import start_outbox_worker
 from services.maintenance_worker import start_housekeeping
+# main.py (أو الملف الذي تُسجَّل فيه المعالجات)
+from handlers.quiz import attach_handlers as attach_quiz_handlers
+
+# بعد إنشاء bot مباشرة:
+attach_quiz_handlers(bot)
 
 PORT = 8081
 
