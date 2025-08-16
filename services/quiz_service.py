@@ -4,6 +4,7 @@
 from __future__ import annotations
 import json
 import time
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -126,9 +127,18 @@ def load_settings(refresh: bool = False) -> Dict[str, Any]:
         _SETTINGS_CACHE = _DEFAULT_SETTINGS.copy()
     return _SETTINGS_CACHE
 
+# --- قراءة ترتيب القوالب مع تصفية ما لا يوجد فعليًا ---
 def _read_templates_order() -> List[str]:
+    # القوالب الموجودة فعليًا في المجلد
+    existing = {p.stem for p in TEMPLATES_DIR.glob("T*.json")}
     if ORDER_PATH.exists():
-        return [ln.strip() for ln in ORDER_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        order = [ln.strip() for ln in ORDER_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        order = [t for t in order if t in existing]
+        if order:
+            return order
+    # إن لم توجد القائمة أو صارت فارغة، استخدم الموجود بالمجلد (مرتّبًا)
+    if existing:
+        return sorted(existing)
     return ["T01"]
 
 def _band_contains(stage_no: int, band: Dict[str, Any]) -> bool:
@@ -166,15 +176,24 @@ def _syp_to_points(amount_syp: int, settings: Dict[str, Any]) -> int:
     return units * ppu
 
 # ------------------------ القوالب ------------------------
-def load_template(template_id: str, refresh: bool = False) -> Dict[str, Any]:
+def load_template(requested_template_id: str, refresh: bool = False) -> Dict[str, Any]:
+    """
+    يحمّل قالب الأسئلة. لو القالب المطلوب غير موجود، نختار أول قالب متاح من templates_order.txt
+    أو من الملفات الموجودة بالمجلد. التخزين المخبئي يتم بالمُعرّف الفعلي الموجود.
+    """
     global _TEMPLATES_CACHE
-    if template_id in _TEMPLATES_CACHE and not refresh:
-        return _TEMPLATES_CACHE[template_id]
-    path = TEMPLATES_DIR / f"{template_id}.json"
-    if not path.exists():
+    order = _read_templates_order()
+    # حدّد القالب الفعلي
+    real_id = requested_template_id if (TEMPLATES_DIR / f"{requested_template_id}.json").exists() \
+              else (order[0] if order else "T01")
+    if (real_id in _TEMPLATES_CACHE) and not refresh:
+        return _TEMPLATES_CACHE[real_id]
+    path = TEMPLATES_DIR / f"{real_id}.json"
+    if not path.exists():  # حماية قصوى
         path = TEMPLATES_DIR / "T01.json"
+        real_id = "T01"
     data = json.loads(path.read_text(encoding="utf-8"))
-    _TEMPLATES_CACHE[template_id] = data
+    _TEMPLATES_CACHE[real_id] = data
     return data
 
 def pick_template_for_user(user_id: int) -> str:
@@ -330,10 +349,12 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
     else:
         _, pts_after = get_wallet(user_id)
 
-    # لوج اختياري
+    # لوج المرحلة في قاعدة البيانات (يتضمن template_id الآن)
     try:
+        st = get_progress(user_id)
         payload = {
             "user_id": user_id,
+            "template_id": st.get("template_id", "T01"),
             "stage_no": stage_no,
             "questions": int(total_q),
             "stars": int(stars),
