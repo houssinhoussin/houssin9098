@@ -1,118 +1,45 @@
 {
   "seconds_per_question": 60,
-  "timer_tick_seconds": 5,
+  "timer_tick_seconds": 1,
   "timer_bar_full": "🟩",
   "timer_bar_empty": "⬜",
+
   "points_per_stars": {
     "3": 3,
     "2": 2,
     "1": 1,
     "0": 0
   },
+
   "points_conversion_rate": {
     "points_per_unit": 10,
     "syp_per_unit": 5
   },
+
   "attempt_price_by_stage": [
-    {
-      "range": [
-        1,
-        2
-      ],
-      "price": 25
-    },
-    {
-      "range": [
-        3,
-        4
-      ],
-      "price": 75
-    },
-    {
-      "range": [
-        5,
-        6
-      ],
-      "price": 100
-    },
-    {
-      "range": [
-        7,
-        8
-      ],
-      "price": 125
-    },
-    {
-      "range": [
-        9,
-        10
-      ],
-      "price": 150
-    },
-    {
-      "range": [
-        11,
-        12
-      ],
-      "price": 175
-    },
-    {
-      "range": [
-        13,
-        14
-      ],
-      "price": 200
-    },
-    {
-      "range": [
-        15,
-        16
-      ],
-      "price": 225
-    },
-    {
-      "range": [
-        17,
-        30
-      ],
-      "price": 250
-    }
+    { "range": [1, 2],   "price": 25  },
+    { "range": [3, 4],   "price": 75  },
+    { "range": [5, 6],   "price": 100 },
+    { "range": [7, 8],   "price": 125 },
+    { "range": [9, 10],  "price": 150 },
+    { "range": [11, 12], "price": 175 },
+    { "range": [13, 14], "price": 200 },
+    { "range": [15, 16], "price": 225 },
+    { "range": [17, 30], "price": 250 }
   ],
+
   "stage_prize_tables": {
-    "20": {
-      "hi": 500,
-      "mid": 200,
-      "low": 100
-    },
-    "25": {
-      "hi": 950,
-      "mid": 300,
-      "low": 150
-    },
-    "30": {
-      "hi": 1500,
-      "mid": 500,
-      "low": 250
-    },
-    "35": {
-      "hi": 2200,
-      "mid": 700,
-      "low": 350
-    },
-    "40": {
-      "hi": 3000,
-      "mid": 1000,
-      "low": 500
-    },
-    "45+": {
-      "hi": 4000,
-      "mid": 1300,
-      "low": 650
-    }
+    "20":  { "hi": 500,  "mid": 200,  "low": 100 },
+    "25":  { "hi": 950,  "mid": 300,  "low": 150 },
+    "30":  { "hi": 1500, "mid": 500,  "low": 250 },
+    "35":  { "hi": 2200, "mid": 700,  "low": 350 },
+    "40":  { "hi": 3000, "mid": 1000, "low": 500 },
+    "45+": { "hi": 4000, "mid": 1300, "low": 650 }
   },
+
   "pools": {
-    "players_share_of_P0": 0.6,
-    "top3_share_of_P0": 0.45,
+    "players_share_of_P0": 0.60,
+    "top3_share_of_P0":    0.45,
     "finishers_share_of_P0": 0.15
   }
 }
