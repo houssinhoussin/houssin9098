@@ -21,6 +21,20 @@ TEMPLATES_DIR = BASE / "templates"
 
 # ------------------------ حالة المستخدم (TTL=120 دقيقة) ------------------------
 user_quiz_state = UserStateDictLike()   # يخزّن: template_id, stage, q_index, active_msg_id, timer_cancel, started_at
+# ✳️ حالة وقتية لا تُحفَظ في Supabase (Timer, etc.)
+user_quiz_runtime: dict[int, dict] = {}
+
+def get_runtime(user_id: int) -> dict:
+    return user_quiz_runtime.get(user_id, {})
+
+def set_runtime(user_id: int, **kwargs) -> dict:
+    r = user_quiz_runtime.get(user_id) or {}
+    r.update(kwargs)
+    user_quiz_runtime[user_id] = r
+    return r
+
+def clear_runtime(user_id: int):
+    user_quiz_runtime.pop(user_id, None)
 
 # ------------------------ Supabase REST helpers ------------------------
 def _rest_headers() -> Dict[str, str]:
