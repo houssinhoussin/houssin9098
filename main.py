@@ -16,16 +16,13 @@ from services.commands_setup import setup_bot_commands
 # NEW: عُمّال الإشعارات والصيانة
 from services.outbox_worker import start_outbox_worker
 from services.maintenance_worker import start_housekeeping
-# main.py (أو الملف الذي تُسجَّل فيه المعالجات)
-from handlers.quiz import attach_handlers as attach_quiz_handlers
-
-# بعد إنشاء bot مباشرة:
-attach_quiz_handlers(bot)
 
 PORT = 8081
 
 def run_dummy_server():
     handler = http.server.SimpleHTTPRequestHandler
+    # ✅ السماح بإعادة استخدام المنفذ لتفادي OSError: [Errno 98]
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), handler) as httpd:
         print(f"🔌 Dummy server listening on port {PORT}")
         httpd.serve_forever()
@@ -273,6 +270,28 @@ from services.queue_service import process_queue
 threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
 
 # ---------------------------------------------------------
+# ✅ ربط معالجات لعبة الجوائز بعد إنشاء البوت وتسجيل الهاندلرز
+# ---------------------------------------------------------
+from handlers.quiz import attach_handlers as attach_quiz_handlers
+attach_quiz_handlers(bot)
+
+# ---------------------------------------------------------
+# معالج إلغاء عام (يجب تسجيله قبل start_polling)
+# ---------------------------------------------------------
+@bot.message_handler(func=lambda msg: msg.text in ["❌ إلغاء", "/cancel"])
+def global_cancel(msg):
+    try:
+        from services.state_service import clear_state
+        clear_state(msg.from_user.id)
+    except Exception:
+        pass
+    try:
+        from handlers import keyboards
+        bot.send_message(msg.chat.id, "تم إلغاء كل العمليات والعودة للبداية.", reply_markup=keyboards.main_menu())
+    except Exception:
+        bot.send_message(msg.chat.id, "تم إلغاء كل العمليات.")
+
+# ---------------------------------------------------------
 # تشغيل البوت مع نظام إعادة المحاولة والتنبيه في حال الخطأ
 # ---------------------------------------------------------
 import time
@@ -305,16 +324,3 @@ def start_polling():
             break
 
 start_polling()
-
-@bot.message_handler(func=lambda msg: msg.text in ["❌ إلغاء", "/cancel"])
-def global_cancel(msg):
-    try:
-        from services.state_service import clear_state
-        clear_state(msg.from_user.id)
-    except Exception:
-        pass
-    try:
-        from handlers import keyboards
-        bot.send_message(msg.chat.id, "تم إلغاء كل العمليات والعودة للبداية.", reply_markup=keyboards.main_menu())
-    except Exception:
-        bot.send_message(msg.chat.id, "تم إلغاء كل العمليات.")
