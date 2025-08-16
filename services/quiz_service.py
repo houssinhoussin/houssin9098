@@ -1,12 +1,6 @@
 # services/quiz_service.py
-# خدمة مساعدة للعبة: قراءة الإعدادات/القوالب، إدارة حالة اللاعب، والربط مع Supabase (balance/points)
-# ✅ يشمل:
-#   - stage_question_count: م1–2=20 ثم +5 كل مرحلة
-#   - عدّادات المرحلة: نجوم/محاولات خاطئة/عدد منجَز
-#   - compute_stage_reward_and_finalize: حساب الجائزة وإيداعها وتسجيل الملخّص
-#   - runtime (timer/cancel) في ذاكرة محلية فقط (لا تُحفظ في Supabase)
-#   - get_attempt_price يدعم {"range":[lo,hi]} أو {"min":..,"max":..}
-#   - next_question لا يقدّم المرحلة تلقائيًا عند نهاية الأسئلة (التقديم يتم بعد finalize)
+# خدمة لعبة الحزازير: إعدادات/قوالب، جلسة اللاعب، محفظة/نقاط، منع التكرار عبر quiz_seen،
+# وحساب جائزة المرحلة كنقاط (لا مال) كي يحولها اللاعب متى شاء.
 
 from __future__ import annotations
 import json
@@ -19,39 +13,29 @@ import httpx
 from config import SUPABASE_URL, SUPABASE_KEY
 from services.state_adapter import UserStateDictLike
 
-# ------------------------ إعدادات المسارات ------------------------
+# ------------------------ مسارات الملفات ------------------------
 BASE = Path("content/quiz")
 SETTINGS_PATH = BASE / "settings.json"
 ORDER_PATH = BASE / "templates_order.txt"
 TEMPLATES_DIR = BASE / "templates"
 
-# ------------------------ حالة المستخدم (JSON-safe) ------------------------
-user_quiz_state = UserStateDictLike()   # template_id, stage, q_index, active_msg_id, started_at, stage_* counters, last_balance
-
-# ------------------------ حالة وقتية بالذاكرة فقط ------------------------
-user_quiz_runtime: dict[int, dict] = {}
-
-def get_runtime(user_id: int) -> dict:
-    return user_quiz_runtime.get(user_id, {})
-
-def set_runtime(user_id: int, **kwargs) -> dict:
-    r = user_quiz_runtime.get(user_id) or {}
-    r.update(kwargs)
-    user_quiz_runtime[user_id] = r
-    return r
-
-def clear_runtime(user_id: int):
-    user_quiz_runtime.pop(user_id, None)
+# ------------------------ حالة اللاعب (صالحة للتسلسل JSON) ------------------------
+# ستُخزَّن في user_state(vars) عبر الـ adapter لديك
+user_quiz_state = UserStateDictLike()   # template_id, stage, q_index, active_msg_id, started_at, stage_* counters, etc.
 
 # ------------------------ Supabase REST helpers ------------------------
-def _rest_headers() -> Dict[str, str]:
-    return {
+def _rest_headers(prefer: Optional[str] = None) -> Dict[str, str]:
+    # نسمح بتعديل Prefer عند الحاجة (ignore-duplicates)
+    h = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Prefer": "return=representation",
     }
+    if prefer:
+        h["Prefer"] = prefer
+    return h
 
 def _table_url(table: str) -> str:
     return f"{SUPABASE_URL}/rest/v1/{table}"
@@ -84,6 +68,17 @@ def sb_update(table: str, filters: Dict[str, Any], patch: Dict[str, Any]) -> Lis
         out = r.json()
         return out if isinstance(out, list) else []
 
+def sb_insert_ignore(table: str, rows: List[Dict[str, Any]], on_conflict_cols: List[str]) -> None:
+    """
+    إدراج مع تجاهل التكرار (PK/unique) باستخدام:
+    Prefer: return=minimal,resolution=ignore-duplicates
+    """
+    params = {"on_conflict": ",".join(on_conflict_cols)}
+    prefer = "return=minimal,resolution=ignore-duplicates"
+    with httpx.Client(timeout=20.0) as client:
+        r = client.post(_table_url(table), headers=_rest_headers(prefer), params=params, json=rows)
+        r.raise_for_status()
+
 # ------------------------ إعدادات اللعبة ------------------------
 _DEFAULT_SETTINGS = {
     "seconds_per_question": 60,
@@ -91,10 +86,9 @@ _DEFAULT_SETTINGS = {
     "timer_bar_full": "🟩",
     "timer_bar_empty": "⬜",
     "points_per_stars": {"3": 3, "2": 2, "1": 1, "0": 0},
-    "points_conversion_rate": {"points_per_unit": 10, "syp_per_unit": 100},
+    "points_conversion_rate": {"points_per_unit": 10, "syp_per_unit": 5},  # 10 نقاط = 5 ل.س
     "attempt_price_by_stage": [
-        {"min": 1, "max": 1, "price": 25},
-        {"min": 2, "max": 2, "price": 50},
+        {"min": 1, "max": 2, "price": 25},
         {"min": 3, "max": 4, "price": 75},
         {"min": 5, "max": 6, "price": 100},
         {"min": 7, "max": 8, "price": 125},
@@ -104,8 +98,9 @@ _DEFAULT_SETTINGS = {
         {"min": 15, "max": 16, "price": 225},
         {"min": 17, "max": 999, "price": 250},
     ],
+    # سياسة جائزة المرحلة (تُحسب مبدئيًا بالليرة ثم نحولها لنقاط)
     "reward_policy": {
-        "target_payout_ratio": 0.30,
+        "target_payout_ratio": 0.30,  # لا ندفع أكثر من ~30% من الإيراد المتوقع للمرحلة
         "bands": [
             {"name": "high", "stars_pct_min": 0.70, "payout_ratio": 1.00},
             {"name": "mid",  "stars_pct_min": 0.50, "payout_ratio": 0.60},
@@ -158,9 +153,19 @@ def get_points_value_syp(points: int, settings: Dict[str, Any] | None = None) ->
     s = settings or load_settings()
     conv = s.get("points_conversion_rate", _DEFAULT_SETTINGS["points_conversion_rate"])
     ppu = int(conv.get("points_per_unit", 10))
-    spu = int(conv.get("syp_per_unit", 100))
+    spu = int(conv.get("syp_per_unit", 5))
     units = points // ppu
     return units * spu
+
+def syp_to_points(amount_syp: int, settings: Dict[str, Any] | None = None) -> int:
+    """حوّل ليرة إلى نقاط وفق معادلة الإعدادات: نقاط/وحدة و ل.س/وحدة."""
+    s = settings or load_settings()
+    conv = s.get("points_conversion_rate", _DEFAULT_SETTINGS["points_conversion_rate"])
+    ppu = float(conv.get("points_per_unit", 10))
+    spu = float(conv.get("syp_per_unit", 5))
+    if spu <= 0:
+        return 0
+    return int(round(amount_syp * (ppu / spu)))
 
 # ------------------------ القوالب (الأسئلة) ------------------------
 def load_template(template_id: str, refresh: bool = False) -> Dict[str, Any]:
@@ -181,7 +186,7 @@ def pick_template_for_user(user_id: int) -> str:
     idx = user_id % len(order)
     return order[idx]
 
-# ------------------------ محفظة/نقاط في جدول houssin363 ------------------------
+# ------------------------ محفظة/نقاط (houssin363) ------------------------
 def ensure_user_wallet(user_id: int, name: str | None = None) -> Dict[str, Any]:
     row = sb_select_one("houssin363", {"user_id": f"eq.{user_id}"})
     if row:
@@ -215,7 +220,7 @@ def deduct_fee_for_stage(user_id: int, stage_no: int) -> Tuple[bool, int, int]:
     return (True, new_bal, price)
 
 def convert_points_to_balance(user_id: int) -> Tuple[int, int, int]:
-    """يرجع: (points_before, syp_added, points_after)"""
+    """رجوع: (points_before, syp_added, points_after)"""
     bal, pts = get_wallet(user_id)
     syp = get_points_value_syp(pts)
     if syp <= 0:
@@ -225,8 +230,7 @@ def convert_points_to_balance(user_id: int) -> Tuple[int, int, int]:
 
 # ------------------------ إدارة الجلسة ------------------------
 def get_progress(user_id: int) -> Dict[str, Any]:
-    st = user_quiz_state.get(user_id, {}) or {}
-    return st
+    return user_quiz_state.get(user_id, {}) or {}
 
 def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str, Any]:
     t = template_id or pick_template_for_user(user_id)
@@ -241,6 +245,7 @@ def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str,
         "stage_done": 0,
         "last_balance": 0,
         "attempts_on_current": 0,
+        "last_click_ts": 0.0,
     }
     user_quiz_state[user_id] = state
     return state
@@ -251,8 +256,8 @@ def _tpl_items_for_stage(tpl: Dict[str, Any], stage_no: int) -> List[Dict[str, A
 
 def next_question(user_id: int) -> Tuple[Dict[str, Any], Dict[str, Any], int, int]:
     """
-    لا يقدّم المرحلة تلقائياً إذا انتهت الأسئلة؛ فقط يُرجِع آخر سؤال (clamp) حتى تستدعي
-    compute_stage_reward_and_finalize من الهاندلر عند إكمال المرحلة.
+    يُرجِع السؤال الحالي (لا يقدّم المرحلة تلقائياً إن انتهت).
+    التقديم يتم من الهاندلر عبر advance() و/أو compute_stage_reward_and_finalize().
     """
     st = get_progress(user_id)
     if not st:
@@ -267,7 +272,7 @@ def next_question(user_id: int) -> Tuple[Dict[str, Any], Dict[str, Any], int, in
         return st, dummy, stage_no, 0
 
     if q_idx >= len(arr):
-        q_idx = len(arr) - 1  # clamp
+        q_idx = len(arr) - 1
     item = arr[q_idx]
     return st, item, stage_no, q_idx
 
@@ -276,8 +281,19 @@ def advance(user_id: int):
     st["q_index"] = int(st.get("q_index", 0)) + 1
     user_quiz_state[user_id] = st
 
-# ------------------------ منطق المرحلة والجوائز ------------------------
+# ------------------------ تتبّع عدم التكرار (quiz_seen) ------------------------
+def seen_mark(user_id: int, template_id: str, qid: str):
+    """تسجيل أن اللاعب رأى هذا السؤال (تجاهل إن كان مسجّلاً)."""
+    try:
+        sb_insert_ignore("quiz_seen",
+                         [{"user_id": user_id, "template_id": template_id, "qid": qid}],
+                         on_conflict_cols=["user_id", "template_id", "qid"])
+    except Exception:
+        pass
+
+# ------------------------ منطق المرحلة والجوائز (نقاط) ------------------------
 def stage_question_count(stage_no: int) -> int:
+    # المرحلة 1–2: 20 سؤال، ثم +5 كل مرحلة
     return 20 if stage_no <= 2 else 20 + (stage_no - 2) * 5
 
 def _get_stage_counters(user_id: int) -> Tuple[int, int, int]:
@@ -293,6 +309,7 @@ def _reset_stage_counters(user_id: int):
     user_quiz_state[user_id] = st
 
 def _compute_reward_syp(stars: int, questions: int, stage_no: int, settings: dict) -> int:
+    # إيراد متوقّع تقريبي: 2.5 محاولة لكل سؤال
     price = get_attempt_price(stage_no, settings)
     expected_R = 2.5 * questions * price
     pol = settings.get("reward_policy", _DEFAULT_SETTINGS["reward_policy"])
@@ -309,18 +326,27 @@ def _compute_reward_syp(stars: int, questions: int, stage_no: int, settings: dic
     return int(round(max_payout * float(chosen.get("payout_ratio", 0.0))))
 
 def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: int) -> dict:
+    """
+    يحسب جائزة المرحلة كنقاط (لا مال)، يضيفها للمحفظة (points)،
+    يسجل Log اختياري، ثم يصفّر عدادات المرحلة ويجهز المرحلة التالية.
+    يرجع: {questions, wrong_attempts, stars, reward_pts, points_after}
+    """
     settings = load_settings()
     stars, wrongs, done = _get_stage_counters(user_id)
     total_q = questions if questions > 0 else done
     if done < total_q:
-        bal, _ = get_wallet(user_id)
-        return {"questions": done, "wrong_attempts": wrongs, "stars": stars, "reward_syp": 0, "balance_after": bal}
+        # لم يكمل كل أسئلة المرحلة
+        _, pts_now = get_wallet(user_id)
+        return {"questions": done, "wrong_attempts": wrongs, "stars": stars, "reward_pts": 0, "points_after": pts_now}
 
-    reward = _compute_reward_syp(stars, total_q, stage_no, settings)
-    if reward > 0:
-        bal_after, _ = change_balance(user_id, reward)
+    # احسب الجائزة (بالليرة) ثم حوّلها لنقاط
+    reward_syp = _compute_reward_syp(stars, total_q, stage_no, settings)
+    reward_pts = syp_to_points(reward_syp, settings) if reward_syp > 0 else 0
+
+    if reward_pts > 0:
+        _, pts_after = add_points(user_id, reward_pts)
     else:
-        bal_after, _ = get_wallet(user_id)
+        _, pts_after = get_wallet(user_id)
 
     # لوج (اختياري)
     try:
@@ -330,7 +356,7 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
             "questions": int(total_q),
             "stars": int(stars),
             "wrong_attempts": int(wrongs),
-            "reward_syp": int(reward),
+            "reward_points": int(reward_pts),
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         sb_upsert("quiz_stage_runs", payload)
@@ -354,6 +380,6 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         "questions": int(total_q),
         "wrong_attempts": int(wrongs),
         "stars": int(stars),
-        "reward_syp": int(reward),
-        "balance_after": int(bal_after),
+        "reward_pts": int(reward_pts),
+        "points_after": int(pts_after),
     }
