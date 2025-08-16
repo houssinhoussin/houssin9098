@@ -1,7 +1,10 @@
 # handlers/quiz.py
 # "🎯 الحزازير (ربحي)" بدون عدّاد
-# يحذف رسالة السؤال القديمة عند الصحّ، ويعرض رسالة جديدة بنجاح + زر ⏭️ التالي
-# عند الخطأ: يرسل رسالة خطأ مع زر 🔁 إعادة المحاولة + ⏸️ أكمل لاحقًا
+# - يحذف رسالة السؤال فور التقييم (صح/خطأ)
+# - بعد الصح: رسالة نجاح + زر ⏭️ التالي (يخصم عند العرض)
+# - بعد الخطأ: رسالة خطأ + زر 🔁 إعادة المحاولة (يخصم) + ⏸️ أكمل لاحقًا
+# - زر "🏅 نقاطي" يظهر النقاط + ما تعادل بالليرة + رصيد المحفظة
+# - شاشة الملخّص تدعم مكافأة نقاط أو ليرات (تلقائيًا حسب مخرجات الخدمة الحالية)
 
 from __future__ import annotations
 import time
@@ -9,14 +12,11 @@ import time
 from telebot import TeleBot, types
 
 from services.quiz_service import (
+    # اقتصاد/حالة
     load_settings, ensure_user_wallet, get_wallet, get_attempt_price,
     reset_progress, next_question, deduct_fee_for_stage, add_points,
-    user_quiz_state,                # حالة دائمة (JSON فقط)
-    convert_points_to_balance,
-    load_template,
-    compute_stage_reward_and_finalize,
-    advance,
-    get_points_value_syp,
+    user_quiz_state, convert_points_to_balance, load_template, advance,
+    get_points_value_syp, compute_stage_reward_and_finalize,
 )
 
 # ------------------------ واجهة العرض ------------------------
@@ -44,7 +44,7 @@ def _after_correct_markup() -> types.InlineKeyboardMarkup:
 
 def _after_wrong_markup(price: int) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton(text=f"🔁 إعادة المحاولة (سيخصم {price} ل.س)", callback_data="quiz_retry"))
+    kb.add(types.InlineKeyboardButton(text=f"🔁 إعادة المحاولة (سيُخصم {price} ل.س)", callback_data="quiz_retry"))
     kb.add(types.InlineKeyboardButton(text="⏸️ أكمل لاحقًا", callback_data="quiz_pause"))
     return kb
 
@@ -73,6 +73,18 @@ def _intro_markup(resume: bool) -> types.InlineKeyboardMarkup:
     kb.add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
     return kb
 
+def _delete_if_exists(bot: TeleBot, chat_id: int, msg_id: int | None):
+    if not msg_id:
+        return
+    try:
+        bot.delete_message(chat_id, msg_id)
+    except Exception:
+        # fallback: عطّل الأزرار إن فشل الحذف (رسالة قديمة، لا صلاحية، إلخ)
+        try:
+            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+        except Exception:
+            pass
+
 # ------------------------ شاشة تمهيد ------------------------
 def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = False):
     settings = load_settings()
@@ -97,7 +109,7 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = 
     bal, pts = get_wallet(user_id)
     syp_val  = get_points_value_syp(pts, settings)
 
-    resume_avail = (int(st.get("q_index", 0)) > 0)
+    resume_avail = (int(st.get("q_index", 0)) > 0 or bool(st.get("active_msg_id")))
 
     txt = _intro_text(stage_no, price, q_count, bal, pts, syp_val)
     kb = _intro_markup(resume=(resume_avail and not resume_only))
@@ -111,49 +123,44 @@ def attach_handlers(bot: TeleBot):
         user_id = msg.from_user.id
         name = (msg.from_user.first_name or "").strip()
         ensure_user_wallet(user_id, name)
-        # بداية جديدة نظيفة
-        st = reset_progress(user_id)
-        st["stage_stars"] = 0
-        st["stage_wrong_attempts"] = 0
-        st["stage_done"] = 0
-        st["attempts_on_current"] = 0
-        st["last_click_ts"] = 0.0
-        st.pop("active_msg_id", None)
+        # ✳️ لا نعيد ضبط التقدم تلقائيًا؛ ليقدر يكمل لاحقًا
+        if not user_quiz_state.get(user_id):
+            reset_progress(user_id)
+        # نظّف أي رسالة معلومات قديمة مُخزنة
+        st = user_quiz_state.get(user_id, {})
         st.pop("last_info_msg_id", None)
         user_quiz_state[user_id] = st
         _intro_screen(bot, msg.chat.id, user_id)
 
     # --------------------------------------------
     # عرض السؤال (خصم مسبق) — يُستدعى من: quiz_next / quiz_retry / quiz_resume
-    # يحاول حذف الرسالة السابقة (سواء كانت سؤالًا أو نتيجة)
+    # يحاول حذف الرسالة السابقة (سؤال/نتيجة) قبل طرح السؤال الجديد
     # --------------------------------------------
-    def _send_next_question(bot: TeleBot, chat_id: int, user_id: int, delete_msg_ids: list[int] | None = None) -> bool:
+    def _send_next_question(bot: TeleBot, chat_id: int, user_id: int,
+                            delete_msg_ids: list[int] | None = None,
+                            skip_deduct: bool = False) -> bool:
         st, item, stage_no, q_idx = next_question(user_id)
 
-        # خصم السعر قبل الإظهار
-        ok, new_bal, price = deduct_fee_for_stage(user_id, stage_no)
-        if not ok:
-            bal, _ = get_wallet(user_id)
-            bot.send_message(
-                chat_id,
-                f"❌ رصيدك غير كافٍ لسعر المحاولة.\n"
-                f"المطلوب: <b>{price}</b> ل.س — المتاح: <b>{bal}</b> ل.س",
-                parse_mode="HTML"
-            )
-            return False
+        # خصم السعر قبل الإظهار (إلا في حالة الاستئناف)
+        if not skip_deduct:
+            ok, new_bal, price = deduct_fee_for_stage(user_id, stage_no)
+            if not ok:
+                bal, _ = get_wallet(user_id)
+                bot.send_message(
+                    chat_id,
+                    f"❌ رصيدك غير كافٍ لسعر المحاولة.\n"
+                    f"المطلوب: <b>{price}</b> ل.س — المتاح: <b>{bal}</b> ل.س",
+                    parse_mode="HTML"
+                )
+                return False
 
         # احذف أي رسائل قديمة (سؤال/نتيجة) قبل طرح السؤال الجديد
         if delete_msg_ids:
             for mid in delete_msg_ids:
-                try:
-                    bot.delete_message(chat_id, mid)
-                except Exception:
-                    pass
+                _delete_if_exists(bot, chat_id, mid)
+
         # احذف أيضًا السؤال النشط السابق إن وُجد
-        old_q = st.get("active_msg_id")
-        if old_q:
-            try: bot.delete_message(chat_id, old_q)
-            except Exception: pass
+        _delete_if_exists(bot, chat_id, st.get("active_msg_id"))
 
         # أرسل السؤال الجديد
         txt = _question_text(stage_no, q_idx, item)
@@ -189,10 +196,10 @@ def attach_handlers(bot: TeleBot):
         if _click_guard(user_id):
             return
 
-        # احذف رسالة زر النتيجة/المقدمة التي ضغط منها
         delete_ids = [call.message.message_id]
-
-        _send_next_question(bot, chat_id, user_id, delete_msg_ids=delete_ids)
+        # الاستئناف لا يخصم (نعيد إرسال نفس السؤال لمن فاته الرسالة)
+        skip = (call.data == "quiz_resume")
+        _send_next_question(bot, chat_id, user_id, delete_msg_ids=delete_ids, skip_deduct=skip)
 
     # اختيار جواب
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("quiz_ans:"))
@@ -211,16 +218,12 @@ def attach_handlers(bot: TeleBot):
         is_correct = (idx == int(item["correct_index"]))
         attempts_on_current = int(st.get("attempts_on_current", 0))
 
-        # عطّل/احذف رسالة السؤال القديمة فوراً
-        active_mid = st.get("active_msg_id")
-        if active_mid:
-            try:
-                # احذفها نهائيًا كما طلبت
-                bot.delete_message(chat_id, active_mid)
-            except Exception:
-                # بديل: تعطيل الأزرار إن فشل الحذف
-                try: bot.edit_message_reply_markup(chat_id, active_mid, reply_markup=None)
-                except Exception: pass
+        # احذف رسالة السؤال فورًا
+        _delete_if_exists(bot, chat_id, st.get("active_msg_id"))
+        # احذف رسالة معلومات قديمة إن وُجدت
+        _delete_if_exists(bot, chat_id, st.get("last_info_msg_id"))
+        st.pop("active_msg_id", None)
+        st.pop("last_info_msg_id", None)
 
         if is_correct:
             # حساب النجوم والنقاط
@@ -239,7 +242,7 @@ def attach_handlers(bot: TeleBot):
             items = tpl.get("items_by_stage", {}).get(str(stage_no), []) or []
             is_last_in_stage = (q_idx == len(items) - 1)
 
-            # أرسل رسالة نجاح جديدة + زر ⏭️ التالي
+            # رسالة نجاح + زر ⏭️ التالي
             ok_msg = bot.send_message(
                 chat_id,
                 f"✅ إجابة صحيحة! (+{award_pts} نقاط)\n"
@@ -247,30 +250,46 @@ def attach_handlers(bot: TeleBot):
                 parse_mode="HTML",
                 reply_markup=_after_correct_markup()
             )
-            # خزّن معرّف رسالة النتيجة (للحذف لاحقًا عند التالي)
             st["last_info_msg_id"] = ok_msg.message_id
             user_quiz_state[user_id] = st
 
-            # لو كانت نهاية مرحلة، نعرض الملخّص والجائزة ثم ننتظر "التالي"
+            # تقدّم بالمؤشر (العرض الفعلي عند الضغط على «التالي»)
+            advance(user_id)
+
+            # نهاية مرحلة → ملخص فوري (الجائزة قد تكون نقاط أو ليرات حسب الخدمة الحالية)
             if is_last_in_stage:
                 summary = compute_stage_reward_and_finalize(user_id, stage_no, len(items))
-                bot.send_message(
-                    chat_id,
-                    "🏁 <b>ملخص المرحلة</b>\n"
-                    f"المرحلة: <b>{stage_no}</b>\n"
-                    f"الأسئلة المنجزة: <b>{summary['questions']}</b>\n"
-                    f"المحاولات الخاطئة: <b>{summary['wrong_attempts']}</b>\n"
-                    f"النجوم: <b>{summary['stars']}</b>\n"
-                    f"🎁 الجائزة: <b>{summary['reward_syp']}</b> ل.س\n"
-                    f"💰 رصيدك الآن: <b>{summary['balance_after']}</b> ل.س",
-                    parse_mode="HTML"
-                )
-                # تقدّم للمرحلة التالية (يبقى انتظار "التالي" لخصم السؤال اللاحق)
-                advance(user_id)
+                # دعم مفتاحي points أو syp
+                reward_points = summary.get("reward_points")
+                points_after  = summary.get("points_after")
+                reward_syp    = summary.get("reward_syp")
+                balance_after = summary.get("balance_after")
 
-            else:
-                # تقدّم للسؤال التالي (لكن لن نعرضه إلا عند ضغط "التالي")
-                advance(user_id)
+                if reward_points is not None:
+                    bot.send_message(
+                        chat_id,
+                        "🏁 <b>ملخص المرحلة</b>\n"
+                        f"المرحلة: <b>{stage_no}</b>\n"
+                        f"الأسئلة المنجزة: <b>{summary.get('questions', 0)}</b>\n"
+                        f"المحاولات الخاطئة: <b>{summary.get('wrong_attempts', 0)}</b>\n"
+                        f"النجوم: <b>{summary.get('stars', 0)}</b>\n"
+                        f"🎁 الجائزة: <b>{reward_points}</b> نقطة\n"
+                        f"🏅 نقاطك الآن: <b>{points_after}</b>",
+                        parse_mode="HTML"
+                    )
+                else:
+                    # تراجع مؤقتًا على النسخة القديمة (بالليرة) لحين تعديل الخدمة
+                    bot.send_message(
+                        chat_id,
+                        "🏁 <b>ملخص المرحلة</b>\n"
+                        f"المرحلة: <b>{stage_no}</b>\n"
+                        f"الأسئلة المنجزة: <b>{summary.get('questions', 0)}</b>\n"
+                        f"المحاولات الخاطئة: <b>{summary.get('wrong_attempts', 0)}</b>\n"
+                        f"النجوم: <b>{summary.get('stars', 0)}</b>\n"
+                        f"🎁 الجائزة: <b>{reward_syp or 0}</b> ل.س\n"
+                        f"💰 رصيدك الآن: <b>{balance_after or 0}</b> ل.س",
+                        parse_mode="HTML"
+                    )
 
         else:
             # خطأ → حدّث عدادات المرحلة
@@ -279,8 +298,6 @@ def attach_handlers(bot: TeleBot):
             user_quiz_state[user_id] = st
 
             price = get_attempt_price(stage_no, settings)
-
-            # أرسل رسالة خطأ جديدة + زر 🔁 إعادة المحاولة
             wrong_msg = bot.send_message(
                 chat_id,
                 f"❌ إجابة خاطئة.\n"
@@ -311,19 +328,23 @@ def attach_handlers(bot: TeleBot):
             parse_mode="HTML"
         )
 
-    # عرض النقاط
+    # عرض النقاط + رصيد المحفظة
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_points")
     def on_points(call):
         user_id = call.from_user.id
         settings = load_settings()
-        _, pts = get_wallet(user_id)
+        bal, pts = get_wallet(user_id)
         syp_val  = get_points_value_syp(pts, settings)
         try:
-            bot.answer_callback_query(call.id, f"نقاطك: {pts} ≈ {syp_val} ل.س", show_alert=False)
+            bot.answer_callback_query(
+                call.id,
+                f"🏅 نقاطك: {pts} (≈ {syp_val} ل.س)\n💰 رصيد المحفظة: {bal} ل.س",
+                show_alert=False
+            )
         except:
             pass
 
-    # شرح اللعبة (بدون عدّاد الآن)
+    # شرح اللعبة (بدون عدّاد)
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_help")
     def on_help(call):
         try: bot.answer_callback_query(call.id)
@@ -348,16 +369,12 @@ def attach_handlers(bot: TeleBot):
         try: bot.answer_callback_query(call.id, "تم الحفظ. رجعناك لبداية الزر.")
         except: pass
 
-        # حاول حذف رسالة النتيجة الأخيرة إن وجدت
         st = user_quiz_state.get(user_id, {}) or {}
-        last_info = st.get("last_info_msg_id")
-        if last_info:
-            try: bot.delete_message(chat_id, last_info)
-            except Exception: pass
-            st.pop("last_info_msg_id", None)
-
-        # لا نحذف السؤال هنا حتى يستطيع الرجوع والمتابعة لاحقًا لو أراد
+        # احذف رسالة النتيجة الأخيرة إن وجدت
+        _delete_if_exists(bot, chat_id, st.get("last_info_msg_id"))
+        st.pop("last_info_msg_id", None)
         user_quiz_state[user_id] = st
+
         _intro_screen(bot, chat_id, user_id, resume_only=False)
 
     # إلغاء من الشاشة التمهيدية
