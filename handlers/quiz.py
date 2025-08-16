@@ -11,8 +11,9 @@ from services.quiz_service import (
     load_settings, ensure_user_wallet, get_wallet, get_attempt_price,
     reset_progress, next_question, deduct_fee_for_stage, add_points,
 )
-from services.quiz_service import user_quiz_state   # للوصول إلى حالة المؤقت والرسالة
+from services.quiz_service import user_quiz_state   # للحالة الدائمة (تُحفظ في القاعدة)
 from services.quiz_service import convert_points_to_balance
+from services.quiz_service import get_runtime, set_runtime, clear_runtime  # للحالة الوقتية (لا تُحفظ في القاعدة)
 
 # ------------------------ أدوات واجهة ------------------------
 def _timer_bar(total: int, left: int, full: str, empty: str) -> str:
@@ -44,11 +45,10 @@ def _options_markup(item: dict) -> types.InlineKeyboardMarkup:
 def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings: dict):
     total = int(settings["seconds_per_question"])
     tick  = int(settings["timer_tick_seconds"])
-    # خزن cancel في الحالة لإيقافه عند الإجابة
+
+    # ✳️ خزّن الـ Event في حالة وقتية محلية فقط (لا تُكتب في Supabase)
     cancel = threading.Event()
-    st = user_quiz_state.get(user_id, {})
-    st["timer_cancel"] = cancel
-    user_quiz_state[user_id] = st
+    set_runtime(user_id, timer_cancel=cancel)
 
     def _loop():
         left = total
@@ -100,7 +100,7 @@ def attach_handlers(bot: TeleBot):
         kb  = _options_markup(item)
         sent = bot.send_message(chat_id, txt, reply_markup=kb, parse_mode="HTML")
 
-        # خزّن msg_id لنعيد تحرير نفس الرسالة
+        # خزّن msg_id لنعيد تحرير نفس الرسالة (قِيَم قابلة للتسلسل JSON)
         st["active_msg_id"] = sent.message_id
         st["started_at"] = int(time.time()*1000)
         user_quiz_state[user_id] = st
@@ -114,9 +114,9 @@ def attach_handlers(bot: TeleBot):
         chat_id = call.message.chat.id
         idx = int(call.data.split(":")[1])
 
-        # أوقف المؤقت
-        st = user_quiz_state.get(user_id, {})
-        cancel = st.get("timer_cancel")
+        # أوقف المؤقت (من الحالة الوقتية فقط)
+        rt = get_runtime(user_id)
+        cancel = rt.get("timer_cancel")
         if cancel:
             cancel.set()
 
@@ -126,7 +126,6 @@ def attach_handlers(bot: TeleBot):
         is_correct = (idx == int(item["correct_index"]))
         # منح النقاط حسب الصعوبة
         diff = item.get("difficulty", "medium")
-        stars_map = settings.get("points_per_stars", {"3": 3, "2": 2, "1": 1, "0": 0})
         award = 1 if diff == "easy" else (2 if diff == "medium" else 3)
         if is_correct:
             _, pts = add_points(user_id, award)
@@ -148,10 +147,7 @@ def attach_handlers(bot: TeleBot):
 
         # بعد ثانيتين، أعرض السؤال التالي/المعاد
         def _after():
-            if is_correct:
-                _send_next_question(bot, chat_id, user_id)
-            else:
-                _send_next_question(bot, chat_id, user_id)
+            _send_next_question(bot, chat_id, user_id)
         threading.Timer(2.0, _after).start()
 
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_convert")
@@ -174,9 +170,12 @@ def attach_handlers(bot: TeleBot):
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_cancel")
     def on_cancel(call):
         user_id = call.from_user.id
-        st = user_quiz_state.get(user_id, {})
-        cancel = st.get("timer_cancel")
+        # أوقف المؤقت من الحالة الوقتية ونظّفها
+        rt = get_runtime(user_id)
+        cancel = rt.get("timer_cancel")
         if cancel:
             cancel.set()
+        clear_runtime(user_id)
+
         bot.answer_callback_query(call.id, "تم الإلغاء.")
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
