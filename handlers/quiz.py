@@ -43,8 +43,6 @@ def _question_markup(item: dict) -> types.InlineKeyboardMarkup:
         types.InlineKeyboardButton(text=o, callback_data=f"quiz_ans:{i}")
         for i, o in enumerate(item["options"])
     ])
-    kb.add(types.InlineKeyboardButton(text="💳 تحويل النقاط", callback_data="quiz_convert"))
-    kb.add(types.InlineKeyboardButton(text="⏸️ أكمل لاحقًا", callback_data="quiz_pause"))
     return kb
 
 def _after_correct_markup() -> types.InlineKeyboardMarkup:
