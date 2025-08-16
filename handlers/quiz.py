@@ -1,8 +1,10 @@
 # handlers/quiz.py
 # زر "🎯 الحزازير (ربحي)" + شاشة تمهيد + عدّاد 60s + استئناف + شرح اللعبة + عرض الرصيد والنقاط
+# + مزاح لبناني/سوري + تنبيه خطأ/نجاح ستايل Windows
 from __future__ import annotations
 import threading
 import time
+import random
 from typing import Optional
 
 from telebot import TeleBot, types
@@ -35,10 +37,8 @@ def _question_text(stage_no: int, q_idx: int, item: dict, settings: dict, second
 
 def _options_markup(item: dict, bal: int | None = None) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
-    opts = item["options"]
-    buttons = [types.InlineKeyboardButton(text=o, callback_data=f"quiz_ans:{i}") for i, o in enumerate(opts)]
+    buttons = [types.InlineKeyboardButton(text=o, callback_data=f"quiz_ans:{i}") for i, o in enumerate(item["options"])]
     kb.add(*buttons)
-    # صف أدوات اللاعب
     if bal is not None:
         kb.add(types.InlineKeyboardButton(text=f"💰 الرصيد: {bal:,} ل.س", callback_data="quiz_balance"))
     kb.add(
@@ -67,6 +67,31 @@ def _intro_markup(resume: bool) -> types.InlineKeyboardMarkup:
     kb.add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
     return kb
 
+# ------------------------ مزاح/تشجيع ------------------------
+def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
+    table = settings.get(group_key, {})
+    if not isinstance(table, dict):
+        return ""
+    candidates = []
+    for rng, msgs in table.items():
+        try:
+            lo, hi = [int(x) for x in rng.split("-")]
+        except Exception:
+            continue
+        if lo <= stage_no <= hi and isinstance(msgs, list) and msgs:
+            candidates.extend(msgs)
+    if not candidates:
+        return ""
+    return random.choice(candidates)
+
+def _windows_error(price: int, settings: dict) -> str:
+    tpl = settings.get("windows_error_template") or "🪟 <b>خطأ - Windows</b>\n<b>الرمز:</b> WRONG_ANSWER\n<b>الوصف:</b> الخيار غير صحيح.\n<b>الإجراء:</b> اضغط «إعادة المحاولة» (سيُخصم {price} ل.س)."
+    return tpl.replace("{price}", str(price))
+
+def _windows_success(award_pts: int, total_pts: int, settings: dict) -> str:
+    tpl = settings.get("windows_success_template") or "🪟 <b>Windows - تهانينا</b>\n<b>الحدث:</b> CORRECT_ANSWER\n<b>الوصف:</b> إجابة صحيحة! (+{award_pts} نقاط)\n<b>إجمالي نقاطك:</b> {total_pts}\n<b>الإجراء:</b> استعد للسؤال التالي 🚀"
+    return tpl.replace("{award_pts}", str(award_pts)).replace("{total_pts}", str(total_pts))
+
 # ------------------------ مؤقّت التحديث (تحرير نفس الرسالة) ------------------------
 def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings: dict):
     total = int(settings["seconds_per_question"])
@@ -80,7 +105,6 @@ def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings
         while left > 0 and not cancel.is_set():
             try:
                 st, item, stage_no, q_idx = next_question(user_id)
-                # نستخدم آخر رصيد معروف لتفادي طلبات كثيرة
                 bal_hint = int(st.get("last_balance", 0))
                 txt = _question_text(stage_no, q_idx, item, settings, left, bal_hint=bal_hint)
                 kb  = _options_markup(item, bal=bal_hint)
@@ -97,15 +121,12 @@ def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings
             st["attempts_on_current"]  = int(st.get("attempts_on_current", 0)) + 1
             user_quiz_state[user_id] = st
 
-            # عرض خيارات المتابعة
             try:
                 _, item, stage_no, _ = next_question(user_id)
                 price = get_attempt_price(stage_no, load_settings())
-                bot.edit_message_text(
-                    "⌛ انتهى الوقت لهذه المحاولة.\n"
-                    f"يمكنك المتابعة، وسيُخصم <b>{price}</b> ل.س عند إعادة المحاولة.",
-                    chat_id, msg_id, reply_markup=_retry_markup(price), parse_mode="HTML"
-                )
+                banter = _pick_banter("banter_wrong_by_stage", stage_no, settings)
+                txt = f"💬 {banter}\n{_windows_error(price, settings)}"
+                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=_retry_markup(price), parse_mode="HTML")
             except Exception:
                 pass
 
@@ -164,7 +185,6 @@ def attach_handlers(bot: TeleBot):
         except Exception:
             pass
 
-        # تأكد من تهيئة العدادات للمرحلة الحالية إن كانت جديدة
         st = user_quiz_state.get(user_id, {}) or reset_progress(user_id)
         st.setdefault("stage_stars", 0)
         st.setdefault("stage_wrong_attempts", 0)
@@ -174,16 +194,13 @@ def attach_handlers(bot: TeleBot):
 
         _send_next_question(bot, chat_id, user_id)
 
-    # استئناف المرحلة من حيث توقفت
+    # استئناف المرحلة
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_resume")
     def resume_stage(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-        # أوقف أي مؤقت سابق
+        try: bot.answer_callback_query(call.id)
+        except: pass
         rt = get_runtime(user_id)
         cancel = rt.get("timer_cancel")
         if cancel: cancel.set()
@@ -191,7 +208,6 @@ def attach_handlers(bot: TeleBot):
 
     def _send_next_question(bot: TeleBot, chat_id: int, user_id: int):
         settings = load_settings()
-        # السؤال الحالي (لا تقدّم المؤشر هنا)
         st, item, stage_no, q_idx = next_question(user_id)
 
         # خصم السعر قبل إظهار السؤال
@@ -207,11 +223,9 @@ def attach_handlers(bot: TeleBot):
             )
             return
 
-        # حفظ آخر رصيد معروف للعرض في السؤال/العداد
         st["last_balance"] = new_bal
         user_quiz_state[user_id] = st
 
-        # إرسال السؤال وبدء المؤقت
         txt = _question_text(stage_no, q_idx, item, settings, settings["seconds_per_question"], bal_hint=new_bal)
         kb  = _options_markup(item, bal=new_bal)
         sent = bot.send_message(chat_id, txt, reply_markup=kb, parse_mode="HTML")
@@ -249,7 +263,7 @@ def attach_handlers(bot: TeleBot):
         attempts_on_current = int(st.get("attempts_on_current", 0))
 
         if is_correct:
-            # احسب النجوم: 3 أول محاولة، 2 ثاني، 1 ثالث، 0 >= رابعة
+            # حساب النجوم والنقاط
             stars_here = max(0, 3 - attempts_on_current)
             pmap = settings.get("points_per_stars", {"3": 3, "2": 2, "1": 1, "0": 0})
             award_pts = int(pmap.get(str(stars_here), stars_here))
@@ -264,18 +278,19 @@ def attach_handlers(bot: TeleBot):
             items = tpl.get("items_by_stage", {}).get(str(stage_no), []) or []
             is_last_in_stage = (q_idx == len(items) - 1)
 
-            # عرض نتيجة سريعة
+            banter_ok = _pick_banter("banter_ok_by_stage", stage_no, settings)
+            success_box = _windows_success(award_pts, pts, settings)
             txt = (
                 f"🎯 <b>المرحلة {stage_no}</b> — السؤال <b>{q_idx+1}</b>\n"
                 f"{item['text']}\n\n"
-                f"✅ صحيح! (+{award_pts} نقاط) — نقاطك الآن: <b>{pts}</b>"
+                f"{success_box}\n"
+                f"💬 {banter_ok}"
             )
             try:
                 bot.edit_message_text(txt, chat_id, call.message.message_id, parse_mode="HTML")
             except Exception:
                 pass
 
-            # تقدم ثم التالي/ملخص المرحلة
             def _after_ok():
                 from services.quiz_service import advance
                 advance(user_id)
@@ -296,49 +311,46 @@ def attach_handlers(bot: TeleBot):
             threading.Timer(2.0, _after_ok).start()
 
         else:
-            # خاطئة: لا نعيد تلقائيًا — نطلب تأكيد المتابعة
             st["stage_wrong_attempts"] = int(st.get("stage_wrong_attempts", 0)) + 1
             st["attempts_on_current"]  = attempts_on_current + 1
             user_quiz_state[user_id] = st
 
             price = get_attempt_price(stage_no, settings)
+            banter = _pick_banter("banter_wrong_by_stage", stage_no, settings)
             txt = (
                 f"🎯 <b>المرحلة {stage_no}</b> — السؤال <b>{q_idx+1}</b>\n"
                 f"{item['text']}\n\n"
-                f"❌ إجابة خاطئة.\n"
-                f"هل تريد المتابعة؟ سيتم خصم <b>{price}</b> ل.س عند إعادة المحاولة."
+                f"💬 {banter}\n"
+                f"{_windows_error(price, settings)}"
             )
             try:
                 bot.edit_message_text(txt, chat_id, call.message.message_id, reply_markup=_retry_markup(price), parse_mode="HTML")
             except Exception:
                 pass
 
-    # إعادة المحاولة بعد الخطأ/انتهاء الوقت
+    # إعادة المحاولة
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_retry")
     def on_retry(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
         except: pass
-        # أوقف أي مؤقت سابق
         rt = get_runtime(user_id)
         cancel = rt.get("timer_cancel")
         if cancel: cancel.set()
         _send_next_question(bot, chat_id, user_id)
 
-    # خروج من السؤال الحالي
+    # خروج
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_exit")
     def on_exit(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id, "تم الإنهاء.")
         except: pass
-        # أوقف المؤقت ونظّف
         rt = get_runtime(user_id)
         cancel = rt.get("timer_cancel")
         if cancel: cancel.set()
         clear_runtime(user_id)
-        # رجّع شاشة تمهيد (مع خيار متابعة إذا لسه في تقدم)
         _intro_screen(bot, chat_id, user_id, resume_only=False)
 
     # تحويل النقاط
@@ -353,7 +365,6 @@ def attach_handlers(bot: TeleBot):
             return
         try: bot.answer_callback_query(call.id, "تم التحويل!", show_alert=False)
         except: pass
-        # حدّث شاشة تمهيدية صغيرة
         bot.send_message(
             chat_id,
             f"💳 تم تحويل <b>{pts_before}</b> نقطة إلى <b>{syp_added}</b> ل.س.\n"
@@ -361,7 +372,7 @@ def attach_handlers(bot: TeleBot):
             parse_mode="HTML"
         )
 
-    # عرض النقاط وقيمتها
+    # عرض النقاط
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_points")
     def on_points(call):
         user_id = call.from_user.id
@@ -369,7 +380,6 @@ def attach_handlers(bot: TeleBot):
         _, pts = get_wallet(user_id)
         syp_val  = get_points_value_syp(pts, settings)
         try:
-            # تنبيه خفيف فوق الأزرار
             call.bot.answer_callback_query(call.id, f"نقاطك: {pts} ≈ {syp_val} ل.س", show_alert=False)
         except Exception:
             pass
@@ -402,7 +412,7 @@ def attach_handlers(bot: TeleBot):
         )
         call.message.bot.send_message(call.message.chat.id, msg, parse_mode="HTML")
 
-    # إلغاء عام
+    # إلغاء
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_cancel")
     def on_cancel(call):
         user_id = call.from_user.id
