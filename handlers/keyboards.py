@@ -7,7 +7,7 @@ def main_menu():
     markup.row("📢 إعلاناتك", "💰 محفظتي")
     markup.row("🛠️ الدعم الفني", "🌐 صفحتنا")
     # ✅ زر اللعبة في القائمة الرئيسية
-    markup.row("🎯 تحدّي الجوائز")
+    markup.row("🎯 الحزازير (ربحي)")
     markup.row("🔄 ابدأ من جديد")
     return markup
 
