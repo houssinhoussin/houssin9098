@@ -1,10 +1,15 @@
 # services/quiz_service.py
 # خدمة مساعدة للعبة: قراءة الإعدادات/القوالب، إدارة حالة اللاعب، والربط مع Supabase (balance/points)
+# ✅ محدثة لإضافة:
+#   - stage_question_count: م1–2=20 ثم +5 كل مرحلة
+#   - عدّادات المرحلة: نجوم/محاولات خاطئة/عدد منجَز
+#   - compute_stage_reward_and_finalize: حساب الجائزة وإيداعها وتسجيل الملخّص
+#   - runtime (timer/cancel) في ذاكرة محلية فقط (لا تُحفظ في Supabase) لمنع خطأ JSON
+#   - get_attempt_price يدعم شكلين: {"range":[lo,hi],"price"} و {"min":..,"max":..,"price"}
 
 from __future__ import annotations
 import json
 import time
-import threading
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -20,8 +25,10 @@ ORDER_PATH = BASE / "templates_order.txt"
 TEMPLATES_DIR = BASE / "templates"
 
 # ------------------------ حالة المستخدم (TTL=120 دقيقة) ------------------------
-user_quiz_state = UserStateDictLike()   # يخزّن: template_id, stage, q_index, active_msg_id, timer_cancel, started_at
-# ✳️ حالة وقتية لا تُحفَظ في Supabase (Timer, etc.)
+# ❗ نحفظ فقط أشياء قابلة للتسلسل JSON هنا (لا نضع threading.Event أو كائنات)
+user_quiz_state = UserStateDictLike()   # يخزّن: template_id, stage, q_index, active_msg_id, ... (قيم بدائية فقط)
+
+# ✳️ حالة وقتية لا تُحفَظ في Supabase (Timer, etc.) حتى نتجنب TypeError: Object of type Event is not JSON serializable
 user_quiz_runtime: dict[int, dict] = {}
 
 def get_runtime(user_id: int) -> dict:
@@ -81,18 +88,42 @@ def sb_update(table: str, filters: Dict[str, Any], patch: Dict[str, Any]) -> Lis
 # ------------------------ إعدادات اللعبة ------------------------
 _DEFAULT_SETTINGS = {
     "seconds_per_question": 60,
-    "timer_tick_seconds": 1,
+    "timer_tick_seconds": 5,  # تحديث كل 5 ثواني آمن للتلغرام
     "timer_bar_full": "🟩",
     "timer_bar_empty": "⬜",
+
+    # خريطة النقاط لكل نجوم (يمكن أن تُستخدم عند الحاجة)
     "points_per_stars": {"3": 3, "2": 2, "1": 1, "0": 0},
-    "points_conversion_rate": {"points_per_unit": 10, "syp_per_unit": 100},  # 10 نقاط = 100 ل.س (عدّلها لاحقًا)
-    # شرائح أسعار افتراضية للمرحلة
+
+    # تحويل النقاط إلى ليرة: كل points_per_unit نقطة = syp_per_unit ل.س
+    "points_conversion_rate": {"points_per_unit": 10, "syp_per_unit": 100},
+
+    # تسعير المحاولة — يدعم الشكلين:
+    #   1) {"range":[lo,hi],"price":..}
+    #   2) {"min":..,"max":..,"price":..}
+    # ضع ما تريد في settings.json وسيُفهم تلقائيًا
     "attempt_price_by_stage": [
-        {"range": [1, 5],   "price": 25},
-        {"range": [6, 10],  "price": 50},
-        {"range": [11, 20], "price": 75},
-        {"range": [21, 30], "price": 100},
+        {"min": 1, "max": 1, "price": 25},
+        {"min": 2, "max": 2, "price": 50},
+        {"min": 3, "max": 4, "price": 75},
+        {"min": 5, "max": 6, "price": 100},
+        {"min": 7, "max": 8, "price": 125},
+        {"min": 9, "max": 10, "price": 150},
+        {"min": 11, "max": 12, "price": 175},
+        {"min": 13, "max": 14, "price": 200},
+        {"min": 15, "max": 16, "price": 225},
+        {"min": 17, "max": 999, "price": 250},
     ],
+
+    # سياسة الجوائز: نسبة دفع قصوى من الدخل المتوقع (≈ 2.5 محاولة/سؤال * سعر المحاولة)
+    "reward_policy": {
+        "target_payout_ratio": 0.30,  # لا ندفع أكثر من 30% كمكافأة مرحلة من R المتوقع
+        "bands": [
+            {"name": "high", "stars_pct_min": 0.70, "payout_ratio": 1.00},  # 100% من الـ 30% = 30% فعليًا
+            {"name": "mid",  "stars_pct_min": 0.50, "payout_ratio": 0.60},  # 60% من 30% = 18%
+            {"name": "low",  "stars_pct_min": 0.33, "payout_ratio": 0.25},  # 25% من 30% = 7.5%
+        ]
+    },
 }
 
 _SETTINGS_CACHE: Dict[str, Any] = {}
@@ -121,14 +152,22 @@ def _read_templates_order() -> List[str]:
         return ids
     return ["T01"]
 
+def _band_contains(stage_no: int, band: Dict[str, Any]) -> bool:
+    if "range" in band and isinstance(band["range"], (list, tuple)) and len(band["range"]) == 2:
+        lo, hi = int(band["range"][0]), int(band["range"][1])
+        return lo <= stage_no <= hi
+    lo = int(band.get("min", 1))
+    hi = int(band.get("max", 999))
+    return lo <= stage_no <= hi
+
 def get_attempt_price(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
+    """يدعم شكلين في settings: 'range':[lo,hi] أو 'min'/'max'."""
     s = settings or load_settings()
     bands = s.get("attempt_price_by_stage") or _DEFAULT_SETTINGS["attempt_price_by_stage"]
     for band in bands:
-        lo, hi = band["range"]
-        if lo <= stage_no <= hi:
+        if _band_contains(stage_no, band):
             return int(band["price"])
-    return int(bands[-1]["price"])
+    return int(bands[-1]["price"]) if bands else 250
 
 def get_points_value_syp(points: int, settings: Dict[str, Any] | None = None) -> int:
     s = settings or load_settings()
@@ -174,18 +213,18 @@ def get_wallet(user_id: int) -> Tuple[int, int]:
 def add_points(user_id: int, delta: int) -> Tuple[int, int]:
     bal, pts = get_wallet(user_id)
     new_pts = max(0, pts + int(delta))
-    rows = sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": new_pts})
+    _ = sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": new_pts})
     return (bal, new_pts)
 
 def change_balance(user_id: int, delta: int) -> Tuple[int, int]:
     bal, pts = get_wallet(user_id)
     new_bal = max(0, bal + int(delta))
-    rows = sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"balance": new_bal})
+    _ = sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"balance": new_bal})
     return (new_bal, pts)
 
 def deduct_fee_for_stage(user_id: int, stage_no: int) -> Tuple[bool, int, int]:
     price = get_attempt_price(stage_no)
-    bal, pts = get_wallet(user_id)
+    bal, _pts = get_wallet(user_id)
     if bal < price:
         return (False, bal, price)
     new_bal, _ = change_balance(user_id, -price)
@@ -198,15 +237,13 @@ def convert_points_to_balance(user_id: int) -> Tuple[int, int, int]:
     if syp <= 0:
         return (pts, 0, pts)
     # صفّر النقاط وأضف الرصيد
-    sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": 0, "balance": bal + syp})
+    _ = sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": 0, "balance": bal + syp})
     return (pts, syp, 0)
 
 # ------------------------ إدارة جلسة اللاعب ------------------------
 def get_progress(user_id: int) -> Dict[str, Any]:
     st = user_quiz_state.get(user_id, {})
-    if not st:
-        st = {}
-    return st
+    return st if st else {}
 
 def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str, Any]:
     t = template_id or pick_template_for_user(user_id)
@@ -215,11 +252,23 @@ def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str,
         "stage": 1,
         "q_index": 0,
         "active_msg_id": None,
-        "timer_cancel": None,
         "started_at": None,
+        # عدّادات المرحلة (نجوم/أخطاء/منجَز) تُصفّر ببداية أي مرحلة
+        "stage_stars": 0,
+        "stage_wrong_attempts": 0,
+        "stage_done": 0,
+        # ❗ لا نضع timer_cancel هنا (غير قابل للتسلسل JSON)
     }
     user_quiz_state[user_id] = state
     return state
+
+def _tpl_items_for_stage(tpl: Dict[str, Any], stage_no: int) -> List[Dict[str, Any]]:
+    # في القالب: items_by_stage مفاتيحها نصوص
+    key = str(stage_no)
+    if "items_by_stage" in tpl and key in tpl["items_by_stage"]:
+        return tpl["items_by_stage"][key]
+    # إن لم توجد، ارجع قائمة فارغة
+    return []
 
 def next_question(user_id: int) -> Tuple[Dict[str, Any], Dict[str, Any], int, int]:
     st = get_progress(user_id)
@@ -228,18 +277,32 @@ def next_question(user_id: int) -> Tuple[Dict[str, Any], Dict[str, Any], int, in
     tpl = load_template(st["template_id"])
     stage_no = int(st.get("stage", 1))
     q_idx = int(st.get("q_index", 0))
-    arr = tpl["items_by_stage"][str(stage_no)]
+    arr = _tpl_items_for_stage(tpl, stage_no)
+
     if q_idx >= len(arr):
         # مرحلة مكتملة → انتقل للمرحلة التالية
         stage_no += 1
         st["stage"] = stage_no
         st["q_index"] = 0
-        if str(stage_no) not in tpl["items_by_stage"]:
-            # لا يوجد مراحل أخرى في هذا القالب → أعد من البداية (أو بدّل القالب)
+        # صفّر عدّادات المرحلة الجديدة
+        st["stage_stars"] = 0
+        st["stage_wrong_attempts"] = 0
+        st["stage_done"] = 0
+
+        # لو القالب انتهى، نعيده لبداية القالب (أو لاحقًا: بدّل القالب)
+        arr = _tpl_items_for_stage(tpl, stage_no)
+        if not arr:
             st["stage"] = 1
             stage_no = 1
-        arr = tpl["items_by_stage"][str(stage_no)]
-        q_idx = 0
+            st["q_index"] = 0
+            arr = _tpl_items_for_stage(tpl, stage_no)
+
+    # ضمان حدود
+    if not arr:
+        # بدون أسئلة — حالة نادرة: ارجع عنصر وهمي لمنع كسر المنطق
+        dummy = {"id": "EMPTY", "text": "لا توجد أسئلة لهذه المرحلة.", "options": ["-"], "correct_index": 0}
+        return st, dummy, stage_no, 0
+
     item = arr[q_idx]
     return st, item, stage_no, q_idx
 
@@ -247,3 +310,105 @@ def advance(user_id: int):
     st = get_progress(user_id)
     st["q_index"] = int(st.get("q_index", 0)) + 1
     user_quiz_state[user_id] = st
+
+# ------------------------ منطق المرحلة: عدد الأسئلة والجائزة ------------------------
+def stage_question_count(stage_no: int) -> int:
+    """م1–2: 20 سؤال. من م3 فأعلى: 20 + (stage_no-2)*5"""
+    return 20 if stage_no <= 2 else 20 + (stage_no - 2) * 5
+
+def _get_stage_counters(user_id: int) -> Tuple[int, int, int]:
+    st = user_quiz_state.get(user_id, {})
+    stars = int(st.get("stage_stars", 0))
+    wrongs = int(st.get("stage_wrong_attempts", 0))
+    done = int(st.get("stage_done", 0))
+    return stars, wrongs, done
+
+def _reset_stage_counters(user_id: int):
+    st = user_quiz_state.get(user_id, {})
+    st["stage_stars"] = 0
+    st["stage_wrong_attempts"] = 0
+    st["stage_done"] = 0
+    st["q_index"] = int(st.get("q_index", 0))  # لا نغيّر المؤشر هنا
+    user_quiz_state[user_id] = st
+
+def _compute_reward_syp(stars: int, questions: int, stage_no: int, settings: dict) -> int:
+    # R المتوقع تقريبًا = 2.5 محاولة/سؤال * سعر المحاولة
+    price = get_attempt_price(stage_no, settings)
+    expected_R = 2.5 * questions * price
+
+    pol = settings.get("reward_policy", _DEFAULT_SETTINGS["reward_policy"])
+    max_payout = float(pol.get("target_payout_ratio", 0.30)) * expected_R
+    bands = pol.get("bands", [])
+
+    # نسبة النجوم من الحد الأقصى (3 نجوم/سؤال)
+    stars_pct = 0.0 if questions <= 0 else (float(stars) / (3.0 * questions))
+    chosen = None
+    # اختر أعلى Band محققة للعتبة
+    for b in sorted(bands, key=lambda x: float(x.get("stars_pct_min", 0.0)), reverse=True):
+        if stars_pct >= float(b.get("stars_pct_min", 0.0)):
+            chosen = b
+            break
+    if not chosen:
+        return 0
+    payout_ratio = float(chosen.get("payout_ratio", 0.0))
+    reward = max_payout * payout_ratio
+    return int(round(reward))
+
+def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: int) -> dict:
+    """
+    يحسب جائزة المرحلة بناءً على:
+      - عدد النجوم المتراكمة في المرحلة
+      - عدد الأسئلة (questions)
+      - سياسة الجوائز في settings
+    ثم يُودع الجائزة في رصيد المستخدم، ويسجّل ملخصًا في جدول quiz_stage_runs (إن وجد)،
+    ويصفّر عدّادات المرحلة.
+    """
+    settings = load_settings()
+    stars, wrongs, done = _get_stage_counters(user_id)
+
+    # لو استدعيت قبل إكمال عدد الأسئلة المتوقع، نستخدم done كمرجع
+    total_q = questions if questions > 0 else done
+    if done < total_q:
+        # مرحلة غير مكتملة — لا مكافأة
+        bal, _ = get_wallet(user_id)
+        return {
+            "questions": done,
+            "wrong_attempts": wrongs,
+            "stars": stars,
+            "reward_syp": 0,
+            "balance_after": bal,
+        }
+
+    reward = _compute_reward_syp(stars, total_q, stage_no, settings)
+    if reward > 0:
+        # أودِع الجائزة
+        new_bal, _ = change_balance(user_id, reward)
+        balance_after = new_bal
+    else:
+        balance_after, _pts = get_wallet(user_id)
+
+    # سجّل (اختياري) في جدول الملخص — لا يوقف التشغيل لو RLS تمنع
+    try:
+        payload = {
+            "user_id": user_id,
+            "stage_no": stage_no,
+            "questions": int(total_q),
+            "stars": int(stars),
+            "wrong_attempts": int(wrongs),
+            "reward_syp": int(reward),
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        _ = sb_upsert("quiz_stage_runs", payload)
+    except Exception:
+        pass
+
+    # صفّر عدّادات المرحلة (ليبدأ التالية نظيفة)
+    _reset_stage_counters(user_id)
+
+    return {
+        "questions": int(total_q),
+        "wrong_attempts": int(wrongs),
+        "stars": int(stars),
+        "reward_syp": int(reward),
+        "balance_after": int(balance_after),
+    }
