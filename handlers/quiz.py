@@ -1,8 +1,11 @@
 # handlers/quiz.py
-# يضيف زر "🎯 تحدّي الجوائز" + منطق عرض السؤال والعداد 60 ثانية وتقييم الإجابة
+# يضيف زر "🎯 تحدّي الجوائز" + عدّاد 60 ثانية بتحرير نفس الرسالة + خصم قبل العرض
+# + حساب النقاط بالنجوم (3/2/1/0) حسب عدد المحاولات على نفس السؤال
+# + منع السبام على الإجابات + خلط ترتيب الخيارات كل إعادة
 from __future__ import annotations
 import threading
 import time
+import random
 from typing import Optional
 
 from telebot import TeleBot, types
@@ -13,12 +16,12 @@ from services.quiz_service import (
 )
 from services.quiz_service import user_quiz_state   # للحالة الدائمة (تُحفظ في القاعدة)
 from services.quiz_service import convert_points_to_balance
-from services.quiz_service import get_runtime, set_runtime, clear_runtime  # للحالة الوقتية (لا تُحفظ في القاعدة)
+from services.quiz_service import get_runtime, set_runtime, clear_runtime  # حالة وقتية (لا تُحفظ)
 
 # ------------------------ أدوات واجهة ------------------------
 def _timer_bar(total: int, left: int, full: str, empty: str) -> str:
-    # طول الشريط = 10 خانات
-    slots = 10
+    # طول الشريط = 12 خطوة (افتراضي: تحديث كل 5 ثواني لـ 60 ثانية)
+    slots = 12
     filled = max(0, min(slots, round((left/total)*slots)))
     return full * filled + empty * (slots - filled)
 
@@ -30,12 +33,9 @@ def _question_text(stage_no: int, q_idx: int, item: dict, settings: dict, second
         f"{item['text']}"
     )
 
-def _options_markup(item: dict) -> types.InlineKeyboardMarkup:
+def _options_markup(option_texts: list[str]) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
-    opts = item["options"]
-    buttons = []
-    for i, o in enumerate(opts):
-        buttons.append(types.InlineKeyboardButton(text=o, callback_data=f"quiz_ans:{i}"))
+    buttons = [types.InlineKeyboardButton(text=o, callback_data=f"quiz_ans:{i}") for i, o in enumerate(option_texts)]
     kb.add(*buttons)
     kb.add(types.InlineKeyboardButton(text="💳 تحويل النقاط إلى رصيد", callback_data="quiz_convert"))
     kb.add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
@@ -46,7 +46,7 @@ def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings
     total = int(settings["seconds_per_question"])
     tick  = int(settings["timer_tick_seconds"])
 
-    # ✳️ خزّن الـ Event في حالة وقتية محلية فقط (لا تُكتب في Supabase)
+    # ✳️ خزّن الـ Event وقتيًا فقط (لا تُكتب في Supabase)
     cancel = threading.Event()
     set_runtime(user_id, timer_cancel=cancel)
 
@@ -54,17 +54,33 @@ def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings
         left = total
         while left > 0 and not cancel.is_set():
             try:
-                # نقرأ السؤال الحالي لإعادة طباعة النص مع الشريط
-                _, item, stage_no, q_idx = next_question(user_id)
+                # نقرأ السؤال الحالي + ترتيب العرض الحالي من الحالة
+                _st, item, stage_no, q_idx = next_question(user_id)
+                st = user_quiz_state.get(user_id, {})
+                perm = st.get("perm") or list(range(len(item["options"])))
+                option_texts = [item["options"][i] for i in perm]
                 txt = _question_text(stage_no, q_idx, item, settings, left)
-                kb  = _options_markup(item)
+                kb  = _options_markup(option_texts)
                 bot.edit_message_text(txt, chat_id, msg_id, reply_markup=kb, parse_mode="HTML")
             except Exception:
                 pass
             time.sleep(tick)
             left -= tick
-        # عند انتهاء الوقت ولم تُجب بعد، لا نفعل شيئًا هنا:
-        # المعالجة النهائية تتم عند ضغطة اللاعب أو استدعاء إعادة السؤال.
+
+        # ⌛ عند انتهاء الوقت ولم تُجب بعد: تُحسب محاولة خاطئة وتُعاد نفس السؤال (بدون خصم هنا،
+        # لأن الخصم للدورة الجديدة سيتم قبل عرض السؤال القادم)
+        if not cancel.is_set():
+            try:
+                # زد عدد المحاولات على هذا السؤال، وامنـع السبام المفتوح
+                st = user_quiz_state.get(user_id, {})
+                attempts = int(st.get("attempts_on_question", 0)) + 1
+                st["attempts_on_question"] = attempts
+                user_quiz_state[user_id] = st
+
+                # أعد إرسال نفس السؤال (الدفع سيتم تلقائيًا قبل العرض القادم)
+                _send_next_question(bot, chat_id, user_id, timed_out=True)
+            except Exception:
+                pass
 
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
@@ -78,17 +94,21 @@ def attach_handlers(bot: TeleBot):
         name = (msg.from_user.first_name or "").strip()
         ensure_user_wallet(user_id, name)
 
-        st = reset_progress(user_id)  # بداية جديدة (نفس القالب المختار للمستخدم)
-        _send_next_question(bot, msg.chat.id, user_id)
+        reset_progress(user_id)  # بداية جديدة (نفس القالب المختار للمستخدم)
+        _send_next_question(bot, msg.chat.id, user_id, first=True)
 
-    def _send_next_question(bot: TeleBot, chat_id: int, user_id: int):
+    def _send_next_question(bot: TeleBot, chat_id: int, user_id: int, first: bool=False, timed_out: bool=False):
         settings = load_settings()
-        # خصم السعر قبل إظهار السؤال
+
+        # جلب السؤال الحالي (لا يتقدم إلا بعد الإجابة الصحيحة)
         st, item, stage_no, q_idx = next_question(user_id)
+
+        # ===== خصم السعر قبل إظهار السؤال (محاولة جديدة) =====
         ok, new_bal, price = deduct_fee_for_stage(user_id, stage_no)
         if not ok:
             bal, pts = get_wallet(user_id)
-            bot.send_message(chat_id,
+            bot.send_message(
+                chat_id,
                 f"❌ رصيدك غير كافٍ لسعر السؤال.\n"
                 f"السعر المطلوب: <b>{price}</b> ل.س\n"
                 f"رصيدك المتاح: <b>{bal}</b> ل.س",
@@ -96,26 +116,59 @@ def attach_handlers(bot: TeleBot):
             )
             return
 
+        # ===== إدارة محاولات السؤال الحالي (للنجوم) =====
+        # المعرّف المنطقي للسؤال الحالي
+        cur_key = f"{stage_no}:{q_idx}"
+        prev_key = st.get("q_key")
+        if cur_key != prev_key:
+            # سؤال جديد فعلاً → صفر عدّاد المحاولات
+            st["attempts_on_question"] = 0
+        st["q_key"] = cur_key
+
+        # ===== خلط ترتيب الخيارات لكل عرض =====
+        n = len(item["options"])
+        perm = list(range(n))
+        random.shuffle(perm)
+        st["perm"] = perm  # للاستخدام عند الردّ والتحرير
+        user_quiz_state[user_id] = st
+
+        option_texts = [item["options"][i] for i in perm]
+
+        # نص السؤال + الكيبورد
         txt = _question_text(stage_no, q_idx, item, settings, settings["seconds_per_question"])
-        kb  = _options_markup(item)
+        if timed_out:
+            txt = "⌛ <b>انتهى الوقت</b> — اعتُبرت المحاولة خاطئة.\n\n" + txt
+        kb  = _options_markup(option_texts)
+
+        # إرسال/تحديث الرسالة
         sent = bot.send_message(chat_id, txt, reply_markup=kb, parse_mode="HTML")
 
-        # خزّن msg_id لنعيد تحرير نفس الرسالة (قِيَم قابلة للتسلسل JSON)
+        # خزن msg_id لباقي التحريرات + بداية المؤقت
         st["active_msg_id"] = sent.message_id
         st["started_at"] = int(time.time()*1000)
         user_quiz_state[user_id] = st
 
-        # شغّل المؤقت (تحرير نفس الرسالة)
         _start_timer(bot, chat_id, sent.message_id, user_id, settings)
 
+    # ------------------------ معالجات الكول باك ------------------------
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("quiz_ans:"))
     def on_answer(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        idx = int(call.data.split(":")[1])
 
-        # أوقف المؤقت (من الحالة الوقتية فقط)
+        # 🔒 Debounce بسيط: تجاهل الضغطات المتتالية في أقل من 1 ثانية
+        now = time.time()
         rt = get_runtime(user_id)
+        last_ts = float(rt.get("ans_ts", 0))
+        if (now - last_ts) < 1.0:
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass
+            return
+        set_runtime(user_id, ans_ts=now)
+
+        # أوقف المؤقت (حالة وقتية فقط)
         cancel = rt.get("timer_cancel")
         if cancel:
             cancel.set()
@@ -123,32 +176,78 @@ def attach_handlers(bot: TeleBot):
         settings = load_settings()
         st, item, stage_no, q_idx = next_question(user_id)
 
-        is_correct = (idx == int(item["correct_index"]))
-        # منح النقاط حسب الصعوبة
-        diff = item.get("difficulty", "medium")
-        award = 1 if diff == "easy" else (2 if diff == "medium" else 3)
+        # استخدم ترتيب العرض الحالي لتحويل الاختيار إلى فهرس حقيقي
+        try:
+            display_idx = int(call.data.split(":")[1])
+        except Exception:
+            display_idx = 0
+        perm = st.get("perm") or list(range(len(item["options"])))
+        original_idx = perm[display_idx] if 0 <= display_idx < len(perm) else display_idx
+
+        is_correct = (original_idx == int(item["correct_index"]))
+
+        # حساب النجوم/النقاط حسب عدد المحاولات على هذا السؤال
+        attempts = int(st.get("attempts_on_question", 0))
         if is_correct:
-            _, pts = add_points(user_id, award)
-            result = f"✅ إجابة صحيحة! (+{award} نقاط) — نقاطك الآن: <b>{pts}</b>"
-            # تقدّم للسؤال التالي
+            # نجوم: 0 محاولات سابقة = 3 نجوم، 1 = 2، 2 = 1، 3+ = 0
+            stars = 3 if attempts == 0 else (2 if attempts == 1 else (1 if attempts == 2 else 0))
+            award_pts = stars  # 3/2/1/0 نقاط
+            if award_pts > 0:
+                _, pts_total = add_points(user_id, award_pts)
+            else:
+                _, pts_total = get_wallet(user_id)  # لجلب الرصيد/النقاط الحالية بدون تغيير
+
+            result = f"✅ إجابة صحيحة! (+{award_pts} نقاط) — نقاطك الآن: <b>{get_wallet(user_id)[1]}</b>"
+
+            # تقدّم للسؤال التالي + صفّر عداد المحاولات
             from services.quiz_service import advance
             advance(user_id)
+            st["attempts_on_question"] = 0
+            user_quiz_state[user_id] = st
+
+            # تحديت النص الحالي ثم عرض السؤال التالي بعد ثانية
+            try:
+                bot.answer_callback_query(call.id, "صحيح!")
+            except Exception:
+                pass
+
+            try:
+                txt = (
+                    f"🎯 <b>المرحلة {stage_no}</b> — السؤال رقم <b>{q_idx+1}</b>\n"
+                    f"{item['text']}\n\n"
+                    f"{result}"
+                )
+                kb  = _options_markup([item["options"][i] for i in perm])
+                bot.edit_message_text(txt, chat_id, call.message.message_id, reply_markup=kb, parse_mode="HTML")
+            except Exception:
+                pass
+
+            threading.Timer(1.0, lambda: _send_next_question(bot, chat_id, user_id)).start()
+
         else:
-            result = "❌ إجابة خاطئة. جرّب من جديد…"
-            # سيُعاد نفس السؤال وسيُخصم عند العرض القادم تلقائيًا
+            # إجابة خاطئة → زد عداد المحاولات لهذا السؤال
+            st["attempts_on_question"] = attempts + 1
+            user_quiz_state[user_id] = st
 
-        kb = _options_markup(item)
-        txt = (
-            f"🎯 <b>المرحلة {stage_no}</b> — السؤال رقم <b>{q_idx+1}</b>\n"
-            f"{item['text']}\n\n"
-            f"{result}"
-        )
-        bot.edit_message_text(txt, chat_id, call.message.message_id, reply_markup=kb, parse_mode="HTML")
+            try:
+                bot.answer_callback_query(call.id, "خاطئة، جرّب مجددًا")
+            except Exception:
+                pass
 
-        # بعد ثانيتين، أعرض السؤال التالي/المعاد
-        def _after():
-            _send_next_question(bot, chat_id, user_id)
-        threading.Timer(2.0, _after).start()
+            # أعِد نفس السؤال (سيتم الخصم قبل العرض التالي تلقائيًا)
+            # نُظهر رسالة صغيرة في نفس النص
+            try:
+                txt = (
+                    f"🎯 <b>المرحلة {stage_no}</b> — السؤال رقم <b>{q_idx+1}</b>\n"
+                    f"{item['text']}\n\n"
+                    f"❌ إجابة خاطئة. سيُعاد السؤال…"
+                )
+                kb  = _options_markup([item["options"][i] for i in perm])
+                bot.edit_message_text(txt, chat_id, call.message.message_id, reply_markup=kb, parse_mode="HTML")
+            except Exception:
+                pass
+
+            threading.Timer(1.0, lambda: _send_next_question(bot, chat_id, user_id)).start()
 
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_convert")
     def on_convert(call):
@@ -177,5 +276,11 @@ def attach_handlers(bot: TeleBot):
             cancel.set()
         clear_runtime(user_id)
 
-        bot.answer_callback_query(call.id, "تم الإلغاء.")
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        try:
+            bot.answer_callback_query(call.id, "تم الإلغاء.")
+        except Exception:
+            pass
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
