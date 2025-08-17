@@ -4,14 +4,13 @@
 from __future__ import annotations
 import json
 import time
-import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
 import httpx
 
 from config import SUPABASE_URL, SUPABASE_KEY
-from services.state_adapter import UserStateDictLike
+from services.state_adapter import UserStateDictLike  # نستخدمه ككاش بالذاكرة فقط
 
 # ------------------------ المسارات ------------------------
 BASE = Path("content/quiz")
@@ -19,10 +18,11 @@ SETTINGS_PATH = BASE / "settings.json"
 ORDER_PATH = BASE / "templates_order.txt"
 TEMPLATES_DIR = BASE / "templates"
 
-# ------------------------ حالة اللاعب (JSON-safe) ------------------------
+# ------------------------ كاش الحالة بالذاكرة ------------------------
+# يُستخدم كذاكرة محلية سريعة فقط، أمّا التخزين الدائم ففي جدول quiz_progress
 user_quiz_state = UserStateDictLike()
 
-# ------------------------ حالة وقتية بالذاكرة (لا تُحفظ) ------------------------
+# ------------------------ حالة وقتية بالذاكرة (timers/debounce) ------------------------
 _user_runtime: dict[int, dict] = {}
 
 def get_runtime(user_id: int) -> dict:
@@ -78,6 +78,37 @@ def sb_update(table: str, filters: Dict[str, Any], patch: Dict[str, Any]) -> Lis
         out = r.json()
         return out if isinstance(out, list) else []
 
+# ------------------------ تقدم اللاعب في قاعدة البيانات (quiz_progress) ------------------------
+def _progress_select(user_id: int) -> Optional[Dict[str, Any]]:
+    return sb_select_one("quiz_progress", {"user_id": f"eq.{user_id}"})
+
+def _progress_upsert(user_id: int, st: Dict[str, Any]) -> Dict[str, Any]:
+    row = {
+        "user_id": user_id,
+        "template_id": st.get("template_id", "T01"),
+        "stage": int(st.get("stage", 1)),
+        "q_index": int(st.get("q_index", 0)),
+        "stage_stars": int(st.get("stage_stars", 0)),
+        "stage_wrong_attempts": int(st.get("stage_wrong_attempts", 0)),
+        "stage_done": int(st.get("stage_done", 0)),
+        "last_balance": int(st.get("last_balance", 0)),
+        "attempts_on_current": int(st.get("attempts_on_current", 0)),
+        "last_click_ts": float(st.get("last_click_ts", 0.0)),
+        "paid_key": st.get("paid_key"),
+    }
+    return sb_upsert("quiz_progress", row, on_conflict="user_id")
+
+def persist_state(user_id: int):
+    st = user_quiz_state.get(user_id, {}) or {}
+    try:
+        _progress_upsert(user_id, st)
+    except Exception as e:
+        print("quiz_progress upsert failed:", e)
+
+def set_and_persist(user_id: int, st: Dict[str, Any]):
+    user_quiz_state[user_id] = st
+    persist_state(user_id)
+
 # ------------------------ إعدادات اللعبة ------------------------
 _DEFAULT_SETTINGS = {
     "seconds_per_question": 60,
@@ -97,7 +128,7 @@ _DEFAULT_SETTINGS = {
         {"min": 15, "max": 16, "price": 225},
         {"min": 17, "max": 999, "price": 250},
     ],
-    # سياسة الجوائز كنقاط (نحسب الإيراد المتوقع ثم نشتق نقاط مكافأة متناسبة)
+    # سياسة الجوائز: نحسب إيرادًا متوقعًا ثم نوزع نسبة منه حسب الأداء
     "reward_policy": {
         "target_payout_ratio": 0.30,
         "bands": [
@@ -140,9 +171,6 @@ def _read_templates_order() -> List[str]:
     return ["T01"]
 
 def _band_contains(stage_no: int, band: Dict[str, Any]) -> bool:
-    if "range" in band and isinstance(band["range"], (list, tuple)) and len(band["range"]) == 2:
-        lo, hi = int(band["range"][0]), int(band["range"][1])
-        return lo <= stage_no <= hi
     lo = int(band.get("min", 1))
     hi = int(band.get("max", 999))
     return lo <= stage_no <= hi
@@ -244,6 +272,9 @@ def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
       - ok=True و reason in {"already","paid","no-questions"}
       - ok=False و reason="insufficient"
     """
+    # تأكد من وجود محفظة للمستخدم
+    ensure_user_wallet(user_id)
+
     st = get_progress(user_id) or reset_progress(user_id)
     tpl_id = st.get("template_id", "T01")
     tpl = load_template(tpl_id)
@@ -268,13 +299,13 @@ def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
     ok, new_bal_or_old, price = deduct_fee_for_stage(user_id, stage_no)
     if not ok:
         st["last_balance"] = new_bal_or_old
-        user_quiz_state[user_id] = st
+        set_and_persist(user_id, st)
         return False, new_bal_or_old, price, "insufficient"
 
     # تمييز هذه النسخة من السؤال كمدفوعة
     st["paid_key"] = q_key
     st["last_balance"] = new_bal_or_old
-    user_quiz_state[user_id] = st
+    set_and_persist(user_id, st)
     return True, new_bal_or_old, price, "paid"
 
 def pause_current_question(user_id: int) -> None:
@@ -282,12 +313,35 @@ def pause_current_question(user_id: int) -> None:
     st = get_progress(user_id)
     if st:
         st.pop("paid_key", None)
-        user_quiz_state[user_id] = st
+        set_and_persist(user_id, st)
 
-# ------------------------ جلسة اللاعب ------------------------
+# ------------------------ جلسة اللاعب (قراءة/كتابة دائمة عبر quiz_progress) ------------------------
 def get_progress(user_id: int) -> Dict[str, Any]:
-    st = user_quiz_state.get(user_id, {}) or {}
-    return st
+    # إن كان في الكاش أعِده
+    st = user_quiz_state.get(user_id)
+    if st:
+        return st
+    # حمّل من قاعدة البيانات
+    row = _progress_select(user_id)
+    if row:
+        st = {
+            "template_id": row.get("template_id", "T01"),
+            "stage": int(row.get("stage", 1)),
+            "q_index": int(row.get("q_index", 0)),
+            "active_msg_id": None,
+            "started_at": None,
+            "stage_stars": int(row.get("stage_stars", 0)),
+            "stage_wrong_attempts": int(row.get("stage_wrong_attempts", 0)),
+            "stage_done": int(row.get("stage_done", 0)),
+            "last_balance": int(row.get("last_balance", 0)),
+            "attempts_on_current": int(row.get("attempts_on_current", 0)),
+            "last_click_ts": float(row.get("last_click_ts", 0.0)),
+            "paid_key": row.get("paid_key"),
+        }
+        user_quiz_state[user_id] = st
+        return st
+    # لا شيء موجود بعد
+    return {}
 
 def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str, Any]:
     t = template_id or pick_template_for_user(user_id)
@@ -305,7 +359,7 @@ def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str,
         "last_click_ts": 0.0,
         "paid_key": None,
     }
-    user_quiz_state[user_id] = state
+    set_and_persist(user_id, state)
     return state
 
 def _tpl_items_for_stage(tpl: Dict[str, Any], stage_no: int) -> List[Dict[str, Any]]:
@@ -334,7 +388,7 @@ def advance(user_id: int):
     st["q_index"] = int(st.get("q_index", 0)) + 1
     # سؤال جديد ⇒ إزالة مفتاح الدفع لضمان خصم جديد
     st.pop("paid_key", None)
-    user_quiz_state[user_id] = st
+    set_and_persist(user_id, st)
 
 # ------------------------ منطق المرحلة والجوائز (كنقاط) ------------------------
 def stage_question_count(stage_no: int) -> int:
@@ -342,16 +396,16 @@ def stage_question_count(stage_no: int) -> int:
     return 20 if stage_no <= 2 else 20 + (stage_no - 2) * 5
 
 def _get_stage_counters(user_id: int) -> Tuple[int, int, int]:
-    st = user_quiz_state.get(user_id, {})
+    st = get_progress(user_id)
     return int(st.get("stage_stars", 0)), int(st.get("stage_wrong_attempts", 0)), int(st.get("stage_done", 0))
 
 def _reset_stage_counters(user_id: int):
-    st = user_quiz_state.get(user_id, {})
+    st = get_progress(user_id)
     st["stage_stars"] = 0
     st["stage_wrong_attempts"] = 0
     st["stage_done"] = 0
     st["attempts_on_current"] = 0
-    user_quiz_state[user_id] = st
+    set_and_persist(user_id, st)
 
 def _compute_reward_syp(stars: int, questions: int, stage_no: int, settings: dict) -> int:
     # إيراد متوقع ≈ 2.5 محاولة/سؤال
@@ -392,34 +446,33 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         _, pts_after = get_wallet(user_id)
 
     # لوج المرحلة في قاعدة البيانات (يتضمن template_id)
+    st = get_progress(user_id)
+    payload = {
+        "user_id": user_id,
+        "template_id": st.get("template_id", "T01"),
+        "stage_no": stage_no,
+        "questions": int(total_q),
+        "stars": int(stars),
+        "wrong_attempts": int(wrongs),
+        "reward_points": int(reward_points),
+        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
     try:
-        st = get_progress(user_id)
-        payload = {
-            "user_id": user_id,
-            "template_id": st.get("template_id", "T01"),
-            "stage_no": stage_no,
-            "questions": int(total_q),
-            "stars": int(stars),
-            "wrong_attempts": int(wrongs),
-            "reward_points": int(reward_points),
-            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
         sb_upsert("quiz_stage_runs", payload)
-    except Exception:
-        pass
+    except Exception as e:
+        print("quiz_stage_runs insert failed:", e, payload)
 
     # جهّز المرحلة التالية ضمن نفس القالب أو أعد للأولى إذا انتهت
-    tpl = load_template(get_progress(user_id)["template_id"])
+    tpl = load_template(st["template_id"])
     next_stage = stage_no + 1
-    st = get_progress(user_id)
     if str(next_stage) in (tpl.get("items_by_stage", {}) or {}):
         st["stage"] = next_stage
     else:
         st["stage"] = 1
     st["q_index"] = 0
-    # بداية مرحلة جديدة ⇒ إزالة paid_key لضمان خصم أول سؤال
+    # بداية مرحلة جديدة ⇒ إزالة paid_key لضمان خصم أول سؤال في المرحلة
     st.pop("paid_key", None)
-    user_quiz_state[user_id] = st
+    set_and_persist(user_id, st)
 
     _reset_stage_counters(user_id)
 
