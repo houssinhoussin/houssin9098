@@ -12,13 +12,11 @@ from telebot import TeleBot, types
 
 from services.quiz_service import (
     load_settings, ensure_user_wallet, get_wallet, get_points_value_syp, get_attempt_price,
-    reset_progress, next_question, deduct_fee_for_stage, add_points,
-    user_quiz_state,
-    convert_points_to_balance,
-    load_template,
-    compute_stage_reward_and_finalize,
-    advance,
+    reset_progress, next_question, add_points,
+    user_quiz_state, convert_points_to_balance, load_template,
+    compute_stage_reward_and_finalize, advance,
     get_runtime, set_runtime, clear_runtime,
+    ensure_paid_before_show, pause_current_question, persist_state,  # 🚀 الجديد
 )
 
 # ------------------------ أدوات واجهة ------------------------
@@ -61,8 +59,8 @@ def _intro_text(stage_no: int, price: int, total_q: int, bal: int, pts: int, syp
     return (
         "ℹ️ <b>شرح سريع</b>\n"
         "• ٤ خيارات لكل سؤال + عدّاد وقت.\n"
-        "• تُخصم كلفة <b>المحاولة الأولى</b> عند الضغط على «ابدأ الآن/التالي» أو «إعادة المحاولة».\n"
-        "• عند الخطأ/انتهاء الوقت، تُعيد نفس السؤال (والخصم عند العرض).\n"
+        "• تُخصم كلفة <b>المحاولة</b> عند «ابدأ الآن/التالي» وأيضًا عند «إعادة المحاولة».\n"
+        "• عند الخطأ/انتهاء الوقت، تعيد نفس السؤال (والخصم عند العرض).\n"
         "• لا تلميح للإجابة الصحيحة.\n\n"
         f"المرحلة: <b>{stage_no}</b> — الأسئلة: <b>{total_q}</b>\n"
         f"💸 سعر المحاولة: <b>{price}</b> ل.س\n"
@@ -164,6 +162,7 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = 
     st.pop("last_info_msg_id", None)
     st["last_click_ts"] = 0.0
     user_quiz_state[user_id] = st
+    persist_state(user_id)  # حفظ فوري
 
     stage_no = int(st.get("stage", 1))
     tpl = load_template(st["template_id"])
@@ -198,6 +197,7 @@ def attach_handlers(bot: TeleBot):
         st.pop("active_msg_id", None)
         st.pop("last_info_msg_id", None)
         user_quiz_state[user_id] = st
+        persist_state(user_id)
         _intro_screen(bot, msg.chat.id, user_id)
 
     # Debounce للنقرات (1s)
@@ -209,6 +209,7 @@ def attach_handlers(bot: TeleBot):
             return True
         st["last_click_ts"] = now
         user_quiz_state[user_id] = st
+        persist_state(user_id)
         return False
 
     # عرض السؤال (خصم مسبق) — من: quiz_next / quiz_retry / quiz_resume
@@ -224,8 +225,8 @@ def attach_handlers(bot: TeleBot):
             except: pass
         clear_runtime(user_id)
 
-        # خصم السعر قبل الإظهار
-        ok, new_bal, price = deduct_fee_for_stage(user_id, stage_no)
+        # ✅ خصم السعر قبل الإظهار (آمن ضد التكرار/الاستئناف)
+        ok, new_bal, price, reason = ensure_paid_before_show(user_id)
         if not ok:
             bal, _ = get_wallet(user_id)
             bot.send_message(
@@ -236,8 +237,10 @@ def attach_handlers(bot: TeleBot):
             )
             return False
 
+        st = user_quiz_state.get(user_id, {})  # قد يكون تغيّر داخل ensure_paid_before_show
         st["last_balance"] = new_bal
         user_quiz_state[user_id] = st
+        persist_state(user_id)
 
         # احذف رسالة النتيجة/المقدمة التي ضغط منها
         if delete_msg_ids:
@@ -257,6 +260,7 @@ def attach_handlers(bot: TeleBot):
         st["active_msg_id"] = sent.message_id
         st["started_at"]    = int(time.time() * 1000)
         user_quiz_state[user_id] = st
+        persist_state(user_id)
 
         _start_timer(bot, chat_id, sent.message_id, user_id, settings)
         return True
@@ -298,7 +302,7 @@ def attach_handlers(bot: TeleBot):
         is_correct = (idx == int(item["correct_index"]))
         attempts_on_current = int(st.get("attempts_on_current", 0))
 
-        # احذف رسالة السؤال فورًا (كما طلبت)
+        # احذف رسالة السؤال فورًا
         active_mid = st.get("active_msg_id")
         if active_mid:
             try: bot.delete_message(chat_id, active_mid)
@@ -317,6 +321,7 @@ def attach_handlers(bot: TeleBot):
             st["stage_done"]  = int(st.get("stage_done", 0)) + 1
             st["attempts_on_current"] = 0
             user_quiz_state[user_id] = st
+            persist_state(user_id)
 
             # هل هو آخر سؤال في المرحلة؟
             tpl = load_template(st["template_id"])
@@ -332,6 +337,7 @@ def attach_handlers(bot: TeleBot):
             )
             st["last_info_msg_id"] = ok_msg.message_id
             user_quiz_state[user_id] = st
+            persist_state(user_id)
 
             # تقدّم المؤشر للسؤال التالي (العرض عند "التالي")
             advance(user_id)
@@ -354,6 +360,7 @@ def attach_handlers(bot: TeleBot):
             st["stage_wrong_attempts"] = int(st.get("stage_wrong_attempts", 0)) + 1
             st["attempts_on_current"]  = attempts_on_current + 1
             user_quiz_state[user_id] = st
+            persist_state(user_id)
 
             price = get_attempt_price(stage_no, settings)
             banter = _pick_banter("banter_wrong_by_stage", stage_no, settings)
@@ -365,6 +372,7 @@ def attach_handlers(bot: TeleBot):
             )
             st["last_info_msg_id"] = wrong_msg.message_id
             user_quiz_state[user_id] = st
+            persist_state(user_id)
 
     # تحويل النقاط → رصيد
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_convert")
@@ -373,6 +381,7 @@ def attach_handlers(bot: TeleBot):
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
         except: pass
+        from services.quiz_service import convert_points_to_balance
         pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
         if syp_added <= 0:
             try: bot.answer_callback_query(call.id, "لا توجد نقاط كافية للتحويل.", show_alert=True)
@@ -408,8 +417,7 @@ def attach_handlers(bot: TeleBot):
         msg = (
             "ℹ️ <b>شرح اللعبة</b>\n"
             f"• لديك عدّاد وقت: <b>{secs} ثانية</b> لكل سؤال.\n"
-            "• عند «ابدأ الآن/التالي» يُخصم ثمن <b>المحاولة الأولى</b> فورًا.\n"
-            "• الخطأ/انتهاء الوقت: تخصم المحاولة عند «إعادة المحاولة» لنفس السؤال.\n"
+            "• عند «ابدأ الآن/التالي» أو «إعادة المحاولة» يُخصم ثمن المحاولة فورًا.\n"
             "• لا نعرض أي تلميح للإجابة الصحيحة.\n"
             f"• مثال السعر (مرحلة 1): {price_hint} ل.س/محاولة (يتغيّر حسب المرحلة)."
         )
@@ -422,6 +430,9 @@ def attach_handlers(bot: TeleBot):
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id, "تم الحفظ. رجعناك لبداية الزر.")
         except: pass
+
+        # ✅ اجعل السؤال غير مدفوع ليُخصم عند الاستئناف
+        pause_current_question(user_id)
 
         # أوقف المؤقّت الحالي إن وُجد
         rt = get_runtime(user_id)
@@ -438,7 +449,8 @@ def attach_handlers(bot: TeleBot):
             try: bot.delete_message(chat_id, last_info)
             except Exception: pass
             st.pop("last_info_msg_id", None)
-        user_quiz_state[user_id] = st
+            user_quiz_state[user_id] = st
+            persist_state(user_id)
 
         _intro_screen(bot, chat_id, user_id, resume_only=False)
 
