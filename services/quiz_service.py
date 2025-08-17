@@ -289,6 +289,13 @@ def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
         q_idx = len(arr) - 1
 
     item = arr[q_idx]
+    # وسم هذا السؤال كمشاهد حتى لا يظهر لاحقًا
+    try:
+        h = q_fingerprint(item)
+        tpl_id = st.get("template_id","T01")
+        seen_add(user_id, h, tpl_id, stage_no)
+    except Exception as e:
+        print("seen_add mark failed:", e)
     q_key = _current_q_key(user_id, tpl_id, stage_no, q_idx, item)
 
     # لو هذا السؤال مدفوع سابقًا لنفس النسخة فلا نكرر الخصم
@@ -373,6 +380,17 @@ def next_question(user_id: int) -> Tuple[Dict[str, Any], Dict[str, Any], int, in
     stage_no = int(st.get("stage", 1))
     q_idx = int(st.get("q_index", 0))
     arr = _tpl_items_for_stage(tpl, stage_no)
+    # فلترة الأسئلة التي شاهدها اللاعب من قبل عبر كل الملفات
+    try:
+        filtered = []
+        for it in arr:
+            h = q_fingerprint(it)
+            if not seen_exists(user_id, h):
+                filtered.append(it)
+        if filtered:
+            arr = filtered
+    except Exception as e:
+        print("filter seen failed:", e)
 
     if not arr:
         dummy = {"id": "EMPTY", "text": "لا توجد أسئلة لهذه المرحلة.", "options": ["-"], "correct_index": 0}
@@ -560,3 +578,74 @@ def _count_completed_files(user_id: int) -> int:
     except Exception as e:
         print("count completed files failed:", e)
         return 0
+
+
+
+# -------- منع تكرار الأسئلة لكل لاعب عبر كل الملفات --------
+
+_ARABIC_DIACRITICS = "".join([
+    "\u064b","\u064c","\u064d","\u064e","\u064f","\u0650","\u0651","\u0652","\u0670",
+    "\u0653","\u0654","\u0655","\u0656","\u0657","\u0658","\u0659","\u065A","\u065B","\u065C","\u065D","\u065E","\u06D6","\u06D7","\u06D8","\u06D9","\u06DA","\u06DB","\u06DC","\u06DF","\u06E0","\u06E1","\u06E2","\u06E3","\u06E4","\u06E5","\u06E6","\u06E7","\u06E8","\u06E9","\u06EA","\u06EB","\u06EC","\u06ED"
+])
+
+def _normalize_q_text(s: str) -> str:
+    if not s:
+        return ""
+    s = str(s)
+    # Unicode NFKC
+    s = unicodedata.normalize("NFKC", s)
+    # إزالة التشكيل والمد
+    for ch in _ARABIC_DIACRITICS:
+        s = s.replace(ch, "")
+    s = s.replace("ـ", "")  # كشيدة
+    # توحيد الألف/الياء/التاء المربوطة
+    s = s.replace("أ","ا").replace("إ","ا").replace("آ","ا")
+    s = s.replace("ى","ي")
+    s = s.replace("ة","ه")
+    # إزالة علامات الترقيم والمسافات الزائدة
+    import re
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"\s+", " ", s, flags=re.UNICODE).strip().lower()
+    # أرقام عربية إلى إنجليزية
+    trans = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+    s = s.translate(trans)
+    return s
+
+def q_fingerprint(item: Dict[str, Any]) -> str:
+    import hashlib, json
+    base = item.get("text") or item.get("question") or ""
+    norm = _normalize_q_text(base)
+    # نضمّن أيضًا الاختيارات بعد التطبيع (لتمييز أسئلة متشابهة النص مختلفة الخيارات)
+    opts = item.get("options") or []
+    opts_norm = [_normalize_q_text(o) for o in opts]
+    payload = json.dumps({"t": norm, "o": opts_norm}, ensure_ascii=False, separators=(",",":"))
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+def seen_exists(user_id: int, q_hash: str) -> bool:
+    try:
+        import httpx
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(_table_url("quiz_seen"), headers=_rest_headers(), params={"user_id": f"eq.{user_id}", "q_hash": f"eq.{q_hash}", "select":"q_hash", "limit":"1"})
+            if r.status_code == 200 and isinstance(r.json(), list) and r.json():
+                return True
+    except Exception as e:
+        print("seen_exists failed:", e)
+    return False
+
+def seen_add(user_id: int, q_hash: str, template_id: str, stage: int):
+    try:
+        import httpx, json
+        with httpx.Client(timeout=10.0) as client:
+            body = {"user_id": int(user_id), "q_hash": q_hash, "template_id": str(template_id), "stage": int(stage)}
+            client.post(_table_url("quiz_seen"), headers=_rest_headers(), json=body)
+    except Exception as e:
+        print("seen_add failed:", e)
+
+def seen_clear_user(user_id: int):
+    try:
+        import httpx
+        with httpx.Client(timeout=10.0) as client:
+            client.delete(_table_url("quiz_seen"), headers=_rest_headers(), params={"user_id": f"eq.{user_id}"})
+    except Exception as e:
+        print("seen_clear_user failed:", e)
+
