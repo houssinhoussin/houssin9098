@@ -483,3 +483,80 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         "reward_points": int(reward_points),
         "points_after": int(pts_after),
     }
+
+def economy_on_file_completed(user_id: int, template_id: str, files_completed_count: int):
+    """
+    يُستدعى عند ختم ملف (30 مرحلة).
+    - يصرف من progress_pools الخاصة بهذا الملف + من progress_balance العام إن لزم.
+    - يعتمد نسب الجوائز: أول ملف 5%، 5 ملفات (ذهبي) 6%، 10 ملفات (ماسي) 9%، جائزة الخاتمة النهائية 15%.
+    - الالتزام: الدفع من المتاح الآن فقط (OP/EAP + Progress). لا نلمس الاحتياطي إلا لو OP < 50k.
+    """
+    s = load_settings()
+    pol = s.get("policy", {})
+    trigger = int(pol.get("reserve_trigger_op", 50000))
+
+    # نسب ثابتة من حصة P0 المُخصصة للتقدم (نموذجية)
+    # سنحوّلها هنا إلى مكافأة ثابتة بالاعتماد على "حجم pool" المتاح لهذا الملف.
+    # مكافأة إكمال ملف:
+    #   - دائماً نعطي Bonus من progress_pool الخاص بالقالب إن وُجد وإلا من progress_balance العام.
+    file_bonus_ratio = 0.05  # 5% لأول ملف؛ نستخدمها كمعامل لسقف الصرف
+    golden_bonus_ratio = 0.06 if files_completed_count == 5 else 0.0
+    diamond_bonus_ratio = 0.09 if files_completed_count == 10 else 0.0
+
+    # تقدير مكافأة هذا الحدث = 5% من إجمالي ما دَخَلَ progress_pools لهذا القالب (سقفًا)
+    per_file_pool = _progress_pool_get(template_id)
+    base_bonus = int(round(per_file_pool * file_bonus_ratio))
+
+    # نعطي المكافآت الخاصة (ذهبي/ماسي) عندما يصل العدّ
+    extra_bonus = 0
+    if golden_bonus_ratio > 0:
+        extra_bonus += int(round(per_file_pool * golden_bonus_ratio))
+    if diamond_bonus_ratio > 0:
+        extra_bonus += int(round(per_file_pool * diamond_bonus_ratio))
+
+    wanted = base_bonus + extra_bonus
+    if wanted <= 0:
+        return
+
+    led = _ledger_get()
+    op_now = int(led.get("op_free_balance",0)) + int(led.get("stage_pool_balance",0)) + int(led.get("progress_balance",0))
+    # ندفع من progress_pool الخاص بالملف أولاً
+    paid_from_file_pool = _progress_pool_consume(template_id, wanted)
+    remaining = wanted - paid_from_file_pool
+
+    # لو نقص: نسحب من progress_balance العام
+    if remaining > 0:
+        take = min(remaining, int(led.get("progress_balance",0)))
+        _ledger_update({"progress_balance": int(led.get("progress_balance",0)) - take})
+        paid_from_progress = take
+        remaining -= take
+    else:
+        paid_from_progress = 0
+
+    total_paid = paid_from_file_pool + paid_from_progress
+
+    # لو ما زال هناك نقص و OP < trigger -> لا نلمس الاحتياطي، ندفع جزئيًا فقط
+    if remaining > 0:
+        # دفع جزئي فقط مما توفر
+        pass
+
+    if total_paid > 0:
+        change_balance(user_id, total_paid)
+        _tx("progress_payout", total_paid, {"template_id": template_id, "files_completed_count": files_completed_count}, user_id=user_id)
+
+
+def _count_completed_files(user_id: int) -> int:
+    """عدد الملفات المختومة لهذا اللاعب (stage>=30)."""
+    try:
+        import httpx
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(_table_url("quiz_progress"), headers=_rest_headers(), params={"user_id": f"eq.{user_id}", "select":"stage", "order":"template_id.asc"})
+            arr = r.json() if r.status_code==200 else []
+            c = 0
+            for row in arr:
+                if int(row.get("stage") or 0) >= 30:
+                    c += 1
+            return c
+    except Exception as e:
+        print("count completed files failed:", e)
+        return 0
