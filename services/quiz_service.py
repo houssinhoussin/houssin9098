@@ -38,7 +38,7 @@ def clear_runtime(user_id: int):
 
 # ------------------------ الإعدادات ------------------------
 _DEFAULT_SETTINGS = {
-    "seconds_per_question": 60,
+    "seconds_per_question": 50,
     "timer_tick_seconds": 5,
     "timer_bar_full": "🟩",
     "timer_bar_empty": "⬜",
