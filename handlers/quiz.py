@@ -132,11 +132,25 @@ def wire_handlers(bot: TeleBot):
     # بدء
     @bot.message_handler(func=lambda m: True, content_types=['text'])
     def _catch_all(m):
-        if m.text == "/quiz":
+        txt = (m.text or "").strip()
+
+        # نفس المعنى لكن بصيغ مختلفة لزر/نص القائمة
+        QUIZ_TRIGGERS = {
+            "/quiz",
+            "🎯 الحزازير (ربحي)",
+            "🎯 الحزازير",
+            "الحزازير (ربحي)",
+            "الحزازير",
+            "quiz",  # احتياط
+        }
+
+        if txt in QUIZ_TRIGGERS:
             chat_id = m.chat.id
             user_id = m.from_user.id
             ensure_user_wallet(user_id, name=(m.from_user.first_name or "").strip())
             _intro_screen(bot, chat_id, user_id)
+            return
+
         # ... باقي الراوترات النصية عندك هنا إن لزم ...
 
     # نقاطي
