@@ -1,481 +1,679 @@
+# services/quiz_service.py
+# خدمة مساعدة للعبة: إعدادات، حالة اللاعب، Supabase، عدّادات المرحلة، وحساب جائزة المرحلة كنقاط
 
 from __future__ import annotations
-
-# Service: Supabase-first storage with local fallback.
-# Guarantees:
-# - Owner takes a hard 35% net on every attempt (never touched).
-# - Player can convert points→balance anytime (1 point = 1 SYP by default).
-# - Stage rewards & template-completion awards pay from *op_free_balance* only (no reserve auto-draw).
-# - Completion award includes soft-cap and cushion to protect liquidity.
-
-import os, json, math, time, random, hashlib
+import json
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import httpx
 
-SUPABASE_URL = os.getenv("SUPABASE_URL","").rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY","")
-USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
+from config import SUPABASE_URL, SUPABASE_KEY
+from services.state_adapter import UserStateDictLike  # نستخدمه ككاش بالذاكرة فقط
 
-def _sb_headers():
+# ------------------------ المسارات ------------------------
+BASE = Path("content/quiz")
+SETTINGS_PATH = BASE / "settings.json"
+ORDER_PATH = BASE / "templates_order.txt"
+TEMPLATES_DIR = BASE / "templates"
+
+# ------------------------ كاش الحالة بالذاكرة ------------------------
+# يُستخدم كذاكرة محلية سريعة فقط، أمّا التخزين الدائم ففي جدول quiz_progress
+user_quiz_state = UserStateDictLike()
+
+# ------------------------ حالة وقتية بالذاكرة (timers/debounce) ------------------------
+_user_runtime: dict[int, dict] = {}
+
+def get_runtime(user_id: int) -> dict:
+    return _user_runtime.get(user_id, {})
+
+def set_runtime(user_id: int, **kwargs) -> dict:
+    r = _user_runtime.get(user_id) or {}
+    r.update(kwargs)
+    _user_runtime[user_id] = r
+    return r
+
+def clear_runtime(user_id: int):
+    _user_runtime.pop(user_id, None)
+
+# ------------------------ الإعدادات ------------------------
+_DEFAULT_SETTINGS = {
+    "seconds_per_question": 60,
+    "timer_tick_seconds": 5,
+    "timer_bar_full": "🟩",
+    "timer_bar_empty": "⬜",
+    "points_per_stars": {"3": 3, "2": 2, "1": 1, "0": 0},
+    "points_conversion_rate": {"points_per_unit": 10, "syp_per_unit": 5},  # مثال: كل 10 نقاط ≈ 5 ل.س
+    "attempt_price_by_stage": [
+        {"min": 1, "max": 2, "price": 25},
+        {"min": 3, "max": 4, "price": 75},
+        {"min": 5, "max": 6, "price": 100},
+        {"min": 7, "max": 8, "price": 125},
+        {"min": 9, "max": 10, "price": 150},
+        {"min": 11, "max": 12, "price": 175},
+        {"min": 13, "max": 14, "price": 200},
+        {"min": 15, "max": 30, "price": 250},
+    ],
+}
+
+_SETTINGS_CACHE: dict | None = None
+_TEMPLATES_CACHE: dict[str, dict] = {}
+
+def _rest_headers() -> Dict[str, str]:
     return {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
-        "Prefer": "return=representation"
+        "Accept": "application/json",
+        "Prefer": "return=representation",
     }
 
-def _sb(table: str, query: str = "") -> str:
-    return f"{SUPABASE_URL}/rest/v1/{table}" + (f"?{query}" if query else "")
+def _table_url(table: str) -> str:
+    return f"{SUPABASE_URL}/rest/v1/{table}"
 
-# ---------- settings ----------
-SETTINGS_PATHS = [
-    Path(__file__).parent / "content/quiz/settings.json",
-    Path(__file__).parent.parent / "content/quiz/settings.json",
-    Path("/mnt/data/final_settings.json"),
-]
-_settings: Dict[str,Any] = {}
-def load_settings() -> Dict[str,Any]:
-    global _settings
-    if _settings: return _settings
-    for p in SETTINGS_PATHS:
-        if p.exists():
-            _settings = json.loads(p.read_text(encoding="utf-8"))
-            return _settings
-    _settings = {
-        "attempts":{"base_price_syp":45,"step_every_stages":2,"step_add_syp":7,"owner_cut_ratio":0.35,"markup_owner_cut_in_price":True},
-        "timer":{"stage_time_s":{"1-2":60,"3-5":50,"6+":45}},
-        "points":{"manual_conversion_syp_per_point":1.0,"forced_convert_after_stage":2,"value_syp_after_force":1.0},
-        "economy":{"winners_ratio":0.65,"reserve_within_winners_ratio":0.30,"progress_pool_ratio":0.0,"min_reserve_draw_threshold":80000,"op_payout_soft_cap_ratio":0.03},
-        "completion_award":{"base_award_syp":5000,"soft_cap_ratio_of_op":0.06,"max_award_syp":15000,"cushion_ratio_of_op":0.25,"expected_concurrency":2,"estimated_award_syp":8000},
-        "announce":{"enabled":True,"channel_id":-1001234567890,"milestones":[1,5,10],"final_message":"🎉 اللاعب ختم كل الملفات!"},
-        "leaderboard":{"top_n":10},
+def sb_select_one(table: str, filters: Dict[str, Any], select: str = "*") -> Optional[Dict[str, Any]]:
+    params = {"select": select}
+    params.update(filters)
+    with httpx.Client(timeout=20.0) as client:
+        r = client.get(_table_url(table), headers=_rest_headers(), params=params)
+        r.raise_for_status()
+        arr = r.json()
+        return arr[0] if arr else None
+
+def sb_upsert(table: str, row: Dict[str, Any], on_conflict: str | None = None) -> Dict[str, Any]:
+    params = {}
+    if on_conflict:
+        params["on_conflict"] = on_conflict
+    with httpx.Client(timeout=20.0) as client:
+        r = client.post(_table_url(table), headers=_rest_headers(), params=params, json=row)
+        r.raise_for_status()
+        out = r.json()
+        return out[0] if isinstance(out, list) and out else row
+
+def sb_update(table: str, filters: Dict[str, Any], patch: Dict[str, Any]) -> List[Dict[str, Any]]:
+    params = {}
+    params.update(filters)
+    with httpx.Client(timeout=20.0) as client:
+        r = client.patch(_table_url(table), headers=_rest_headers(), params=params, json=patch)
+        r.raise_for_status()
+        out = r.json()
+        return out if isinstance(out, list) else []
+
+# ------------------------ تقدم اللاعب في قاعدة البيانات (quiz_progress) ------------------------
+def _progress_select(user_id: int) -> Optional[Dict[str, Any]]:
+    return sb_select_one("quiz_progress", {"user_id": f"eq.{user_id}"})
+
+def _progress_upsert(user_id: int, st: Dict[str, Any]) -> Dict[str, Any]:
+    row = {
+        "user_id": user_id,
+        "template_id": st.get("template_id", "T01"),
+        "stage": int(st.get("stage", 1)),
+        "q_index": int(st.get("q_index", 0)),
+        "stage_stars": int(st.get("stage_stars", 0)),
+        "stage_wrong_attempts": int(st.get("stage_wrong_attempts", 0)),
+        "stage_done": int(st.get("stage_done", 0)),
+        "last_balance": int(st.get("last_balance", 0)),
+        "attempts_on_current": int(st.get("attempts_on_current", 0)),
+        "last_click_ts": float(st.get("last_click_ts", 0.0)),
+        "paid_key": st.get("paid_key"),
     }
-    return _settings
+    return sb_upsert("quiz_progress", row, on_conflict="user_id")
 
-# ---------- helpers ----------
-def _qhash(item: Dict[str,Any]) -> str:
-    src = json.dumps({"t": item.get("text",""), "opt": item.get("options",[])}, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha256(src.encode("utf-8")).hexdigest()
+def persist_state(user_id: int):
+    st = user_quiz_state.get(user_id, {}) or {}
+    try:
+        _progress_upsert(user_id, st)
+    except Exception as e:
+        print("quiz_progress upsert failed:", e)
 
-# ---------- Wallets / Points ----------
-def ensure_user_wallet(user_id: int, name: str):
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            r = cli.get(_sb("houssin363", f"select=*&user_id=eq.{user_id}"), headers=_sb_headers())
-            if r.status_code == 200 and r.json(): return
-            cli.post(_sb("houssin363"), headers=_sb_headers(), json=[{"user_id": user_id, "name": name}])
-    else:
-        db = _ld()
-        db["wallets"].setdefault(str(user_id), {"user_id": user_id, "name": name, "balance": 0, "points": 0})
-        _sd(db)
+def set_and_persist(user_id: int, st: Dict[str, Any]):
+    user_quiz_state[user_id] = st
+    persist_state(user_id)
 
-def get_wallet(user_id: int) -> Dict[str,Any]:
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            r = cli.get(_sb("houssin363", f"select=*&user_id=eq.{user_id}&limit=1"), headers=_sb_headers())
-            if r.status_code == 200 and r.json():
-                return r.json()[0]
-            return {"user_id": user_id, "name": str(user_id), "balance": 0, "points": 0}
-    else:
-        return _ld()["wallets"].get(str(user_id), {"user_id": user_id, "name": str(user_id), "balance": 0, "points": 0})
+# ------------------------ إعدادات ------------------------
+def load_settings(refresh: bool = False) -> Dict[str, Any]:
+    global _SETTINGS_CACHE
+    if (_SETTINGS_CACHE is not None) and not refresh:
+        return _SETTINGS_CACHE
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    merged = dict(_DEFAULT_SETTINGS)
+    merged.update(data or {})
+    _SETTINGS_CACHE = merged
+    return merged
 
-def _set_wallet(user_id: int, data: Dict[str,Any]):
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.patch(_sb("houssin363", f"user_id=eq.{user_id}"), headers=_sb_headers(), json=data)
-    else:
-        db = _ld(); db["wallets"][str(user_id)] = data; _sd(db)
+# ------------------------ ترتيب القوالب ------------------------
+def _read_templates_order() -> List[str]:
+    if not ORDER_PATH.exists():
+        return []
+    arr = [x.strip() for x in ORDER_PATH.read_text(encoding="utf-8").splitlines() if x.strip()]
+    return [x for x in arr if x]
 
-def add_balance(user_id: int, delta: float):
-    w = get_wallet(user_id)
-    w["balance"] = max(0, float(w.get("balance",0)) + float(delta))
-    _set_wallet(user_id, w)
+# ------------------------ محاسبة/اقتصاد ------------------------
+def _band_contains(stage_no: int, band: Dict[str, Any]) -> bool:
+    lo = int(band.get("min", 1))
+    hi = int(band.get("max", 999))
+    return lo <= stage_no <= hi
 
-def add_points(user_id: int, pts: int):
-    w = get_wallet(user_id)
-    w["points"] = max(0, int(w.get("points",0)) + int(pts))
-    _set_wallet(user_id, w)
+def get_attempt_price(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
+    s = settings or load_settings()
+    bands = s.get("attempt_price_by_stage") or _DEFAULT_SETTINGS["attempt_price_by_stage"]
+    for band in bands:
+        if _band_contains(stage_no, band):
+            return int(band["price"])
+    return int(bands[-1]["price"]) if bands else 250
 
-def convert_points_to_balance(user_id: int, all_points: bool = True, pts: Optional[int] = None) -> Tuple[int, float]:
-    st = load_settings()
-    rate = float(st["points"].get("manual_conversion_syp_per_point", 1.0))
-    w = get_wallet(user_id)
-    have = int(w.get("points",0))
-    if not have: return 0, 0.0
-    to_convert = have if all_points else max(0, min(int(pts or 0), have))
-    gained = to_convert * rate
-    w["points"] = have - to_convert
-    w["balance"] = float(w.get("balance",0)) + gained
-    _set_wallet(user_id, w)
-    _tx({"kind":"points_manual_convert","user_id":user_id,"amount":gained,"points":to_convert})
-    return to_convert, gained
+def get_points_value_syp(points: int, settings: Dict[str, Any] | None = None) -> int:
+    s = settings or load_settings()
+    conv = s.get("points_conversion_rate", _DEFAULT_SETTINGS["points_conversion_rate"])
+    ppu = int(conv.get("points_per_unit", 10))
+    spu = int(conv.get("syp_per_unit", 5))
+    if ppu <= 0 or spu <= 0:
+        return 0
+    # كم ل.س تساوي هذه النقاط
+    return (int(points) * spu) // ppu
 
-# ---------- Progress / Seen ----------
-def _first_template_id() -> str:
-    p = Path("/mnt/data/final_templates_order.txt")
-    if not p.exists(): p = Path(__file__).parent / "final_templates_order.txt"
-    if not p.exists(): return "T01"
-    ids = [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-    return ids[0] if ids else "T01"
+def _syp_to_points(syp: int, settings: Dict[str, Any] | None = None) -> int:
+    s = settings or load_settings()
+    conv = s.get("points_conversion_rate", _DEFAULT_SETTINGS["points_conversion_rate"])
+    ppu = int(conv.get("points_per_unit", 10))
+    spu = int(conv.get("syp_per_unit", 5))
+    if ppu <= 0 or spu <= 0:
+        return 0
+    # نقاط مقابلة لـ س.س
+    return (int(syp) * ppu) // spu
 
-def user_quiz_state(user_id: int) -> Dict[str,Any]:
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            r = cli.get(_sb("quiz_progress", f"select=*&user_id=eq.{user_id}&limit=1"), headers=_sb_headers())
-            if r.status_code == 200 and r.json():
-                return r.json()[0]
-            pr = {"user_id": user_id, "template_id": _first_template_id(), "stage": 1, "q_index": 0, "paid_key": "", "wrong_in_q": 0}
-            cli.post(_sb("quiz_progress"), headers=_sb_headers(), json=[pr])
-            return pr
-    else:
-        db = _ld()
-        pr = db["progress"].get(str(user_id))
-        if not pr:
-            pr = {"user_id": user_id, "template_id": _first_template_id(), "stage": 1, "q_index": 0, "paid_key": "", "wrong_in_q": 0}
-            db["progress"][str(user_id)] = pr; _sd(db)
-        return pr
+# ------------------------ القوالب ------------------------
+def load_template(requested_template_id: str, refresh: bool = False) -> Dict[str, Any]:
+    """
+    يحمّل قالب الأسئلة. لو القالب المطلوب غير موجود، نختار أول قالب متاح من templates_order.txt
+    أو من الملفات الموجودة بالمجلد. التخزين المخبئي يتم بالمُعرّف الفعلي الموجود.
+    """
+    global _TEMPLATES_CACHE
+    order = _read_templates_order()
+    real_id = requested_template_id if (TEMPLATES_DIR / f"{requested_template_id}.json").exists() \
+              else (order[0] if order else "T01")
+    if (real_id in _TEMPLATES_CACHE) and not refresh:
+        return _TEMPLATES_CACHE[real_id]
+    path = TEMPLATES_DIR / f"{real_id}.json"
+    if not path.exists():
+        path = TEMPLATES_DIR / "T01.json"
+        real_id = "T01"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    _TEMPLATES_CACHE[real_id] = data
+    return data
 
-def reset_progress(user_id: int):
-    pr = {"user_id": user_id, "template_id": _first_template_id(), "stage": 1, "q_index": 0, "paid_key": "", "wrong_in_q": 0}
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.post(_sb("quiz_progress"), headers=_sb_headers(), json=[pr])
-            cli.delete(_sb("quiz_seen", f"user_id=eq.{user_id}"), headers=_sb_headers())
-    else:
-        db = _ld(); db["progress"][str(user_id)] = pr; db["seen"][str(user_id)] = set(); _sd(db)
+def pick_template_for_user(user_id: int) -> str:
+    order = _read_templates_order()
+    if not order:
+        return "T01"
+    idx = user_id % len(order)
+    return order[idx]
 
-def _update_progress(user_id: int, patch: Dict[str,Any]):
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.patch(_sb("quiz_progress", f"user_id=eq.{user_id}"), headers=_sb_headers(), json=patch)
-    else:
-        db = _ld(); db["progress"][str(user_id)].update(patch); _sd(db)
+# ------------------------ محفظة/نقاط (houssin363) ------------------------
+def ensure_user_wallet(user_id: int, name: str | None = None) -> Dict[str, Any]:
+    row = sb_select_one("houssin363", {"user_id": f"eq.{user_id}"})
+    if row:
+        return row
+    return sb_upsert("houssin363", {"user_id": user_id, "name": name or "", "balance": 0, "points": 0}, on_conflict="user_id")
 
-def seen_clear_user(user_id: int):
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.delete(_sb("quiz_seen", f"user_id=eq.{user_id}"), headers=_sb_headers())
-    else:
-        db = _ld(); db["seen"][str(user_id)] = set(); _sd(db)
+def get_wallet(user_id: int) -> Tuple[int, int]:
+    row = sb_select_one("houssin363", {"user_id": f"eq.{user_id}"}, select="balance,points")
+    if not row:
+        return (0, 0)
+    return int(row.get("balance") or 0), int(row.get("points") or 0)
 
-def _mark_seen(user_id: int, h: str):
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.post(_sb("quiz_seen"), headers=_sb_headers(), json=[{"user_id": user_id, "q_hash": h}])
-    else:
-        db = _ld(); s = db["seen"].setdefault(str(user_id), set()); s.add(h); db["seen"][str(user_id)] = s; _sd(db)
+def add_points(user_id: int, delta: int) -> Tuple[int, int]:
+    bal, pts = get_wallet(user_id)
+    new_pts = max(0, pts + int(delta))
+    sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": new_pts})
+    return (bal, new_pts)
 
-# ---------- Templates & Questions ----------
-def load_template(template_id: str) -> Dict[str,Any]:
-    p = Path(__file__).parent / f"{template_id}.json"
-    if p.exists(): return json.loads(p.read_text(encoding="utf-8"))
-    # fallback generated content (dev only)
-    stages = []
-    for stg in range(1, 4):
-        arr = []
-        for i in range(5):
-            corr = random.randint(0,3)
-            item = {"text": f"[{template_id}] سؤال {stg}-{i+1}", "options": [f"خيار {j+1}" for j in range(4)], "answer": corr}
-            item["hash"] = _qhash(item)
-            arr.append(item)
-        stages.append(arr)
-    return {"stages": stages}
+def change_balance(user_id: int, delta: int) -> Tuple[int, int]:
+    bal, pts = get_wallet(user_id)
+    new_bal = max(0, bal + int(delta))
+    sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"balance": new_bal})
+    return (new_bal, pts)
 
-def next_question(user_id: int) -> Tuple[Dict[str,Any], int, int]:
-    st = user_quiz_state(user_id)
-    tpl = load_template(st["template_id"])
-    stage_no = st["stage"]
-    items = tpl["stages"][stage_no-1]
-    # global dedup
-    seen = set()
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            resp = cli.get(_sb("quiz_seen", f"select=q_hash&user_id=eq.{user_id}"), headers=_sb_headers())
-            if resp.status_code == 200:
-                seen = {r["q_hash"] for r in resp.json()}
-    else:
-        seen = _ld()["seen"].get(str(user_id), set())
-    for idx, it in enumerate(items):
-        h = it.get("hash") or _qhash(it)
-        if h not in seen:
-            _update_progress(user_id, {"q_index": idx})
-            return it, stage_no, idx
-    # stage complete (no more new questions)
-    return {}, stage_no, -1
-
-# ---------- Pricing & Timer ----------
-def get_attempt_price(stage_no: int) -> int:
-    st = load_settings()["attempts"]
-    base = int(st.get("base_price_syp",45))
-    step_every = int(st.get("step_every_stages",2))
-    step_add = int(st.get("step_add_syp",7))
-    steps = max(0, (stage_no-1)//max(1,step_every))
-    price = base + steps*step_add
-    if st.get("markup_owner_cut_in_price", True):
-        price = math.ceil(price * (1.0 + float(st.get("owner_cut_ratio",0.35))))
-    return int(price)
-
-def get_stage_time(stage_no: int) -> int:
-    st = load_settings()["timer"]["stage_time_s"]
-    if stage_no <= 2: return int(st.get("1-2",60))
-    if stage_no <= 5: return int(st.get("3-5",50))
-    return int(st.get("6+",45))
-
-# ---------- Economy ----------
-def _eco_get() -> Dict[str,Any]:
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            r = cli.get(_sb("economy_ledger", "select=*&id=eq.global&limit=1"), headers=_sb_headers())
-            if r.status_code == 200 and r.json():
-                return r.json()[0]
-            # ensure row exists
-            cli.post(_sb("economy_ledger"), headers=_sb_headers(), json=[{"id":"global"}])
-            return {"id":"global","op_free_balance":0.0,"reserve_balance":0.0}
-    else:
-        return _ld()["economy"]
-
-def _eco_set(e: Dict[str,Any]):
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.patch(_sb("economy_ledger", "id=eq.global"), headers=_sb_headers(), json=e)
-    else:
-        db = _ld(); db["economy"] = e; _sd(db)
-
-def _tx(row: Dict[str,Any]):
-    row = dict(row); row["ts"] = int(time.time())
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.post(_sb("transactions"), headers=_sb_headers(), json=[row])
-    else:
-        db = _ld(); db["transactions"].append(row); _sd(db)
-
-def ensure_paid_before_show(user_id: int, stage_no: int) -> Tuple[bool, str]:
+def deduct_fee_for_stage(user_id: int, stage_no: int) -> Tuple[bool, int, int]:
     price = get_attempt_price(stage_no)
-    w = get_wallet(user_id)
-    if w.get("balance",0) < price:
-        return False, f"⚠️ رصيدك لا يكفي ({int(w.get('balance',0))} ل.س) — السعر {price} ل.س"
-    # deduct from wallet
-    w["balance"] = float(w.get("balance",0)) - price
-    _set_wallet(user_id, w)
-    # owner cut 35% hard
-    st = load_settings()["attempts"]
-    owner_cut = price * float(st.get("owner_cut_ratio",0.35))
-    net_after_owner = price - owner_cut
-    eco_conf = load_settings()["economy"]
-    reserve_within = float(eco_conf.get("reserve_within_winners_ratio",0.30))
-    reserved = net_after_owner * reserve_within
-    op_add = net_after_owner - reserved
-    eco = _eco_get()
-    eco["op_free_balance"] = float(eco.get("op_free_balance",0)) + op_add
-    eco["reserve_balance"] = float(eco.get("reserve_balance",0)) + reserved
-    _eco_set(eco)
-    _tx({"kind":"attempt_paid","user_id":user_id,"price":price,"owner_cut":owner_cut,"op_add":op_add,"reserved":reserved})
-    # paid_key
-    pr = user_quiz_state(user_id)
-    pr["paid_key"] = f"{user_id}-{int(time.time()*1000)}"
-    _update_progress(user_id, {"paid_key": pr["paid_key"]})
-    return True, pr["paid_key"]
+    bal, _ = get_wallet(user_id)
+    if bal < price:
+        return (False, bal, price)
+    new_bal, _ = change_balance(user_id, -price)
+    return (True, new_bal, price)
 
-def mark_seen_after_payment(user_id: int, item: Dict[str,Any]):
-    h = item.get("hash") or _qhash(item)
-    _mark_seen(user_id, h)
+# ------------------------ التقدم (ذاكرة) ------------------------
+def get_progress(user_id: int) -> Dict[str, Any]:
+    # أولوية: الكاش بالذاكرة
+    st = user_quiz_state.get(user_id)
+    if st:
+        return st
+    # حمّل من DB
+    row = _progress_select(user_id)
+    if row:
+        st = {
+            "template_id": row.get("template_id") or "T01",
+            "stage": int(row.get("stage") or 1),
+            "q_index": int(row.get("q_index") or 0),
+            "active_msg_id": None,
+            "started_at": None,
+            "stage_stars": int(row.get("stage_stars") or 0),
+            "stage_wrong_attempts": int(row.get("stage_wrong_attempts") or 0),
+            "stage_done": int(row.get("stage_done") or 0),
+            "last_balance": int(row.get("last_balance") or 0),
+            "attempts_on_current": int(row.get("attempts_on_current") or 0),
+            "last_click_ts": float(row.get("last_click_ts") or 0.0),
+            "paid_key": row.get("paid_key"),
+        }
+        user_quiz_state[user_id] = st
+        return st
+    # لا شيء موجود بعد
+    return {}
 
+def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str, Any]:
+    t = template_id or pick_template_for_user(user_id)
+    state = {
+        "template_id": t,
+        "stage": 1,
+        "q_index": 0,
+        "active_msg_id": None,
+        "started_at": None,
+        "stage_stars": 0,
+        "stage_wrong_attempts": 0,
+        "stage_done": 0,
+        "last_balance": 0,
+        "attempts_on_current": 0,
+        "last_click_ts": 0.0,
+        "paid_key": None,
+    }
+    set_and_persist(user_id, state)
+    return state
+
+# ------------------------ أسئلة/مراحل ------------------------
+def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
+    full = settings.get("timer_bar_full", "🟩")
+    empty = settings.get("timer_bar_empty", "⬜")
+    total = 10
+    filled = max(0, min(total, int(round((remaining / max(1, settings.get("seconds_per_question", 60))) * total)))))
+    return full * filled + empty * (total - filled)
+
+def _question_id(tpl_id: str, stage_no: int, item: dict, q_idx: int) -> str:
+    qid = str(item.get("id", q_idx))
+    return f"{tpl_id}:{stage_no}:{qid}"
+
+def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
+    """
+    يحاول خصم سعر المرحلة مرّة واحدة قبل عرض السؤال الحالي.
+    يرجع: (ok, balance_or_new_balance, price, reason)
+      - ok=True و reason in {"already","paid","no-questions"}
+      - ok=False و reason="insufficient"
+    """
+    # تأكد من وجود محفظة للمستخدم
+    ensure_user_wallet(user_id)
+
+    st = get_progress(user_id) or reset_progress(user_id)
+    tpl_id = st.get("template_id", "T01")
+    tpl = load_template(tpl_id)
+    stage_no = int(st.get("stage", 1))
+    q_idx = int(st.get("q_index", 0))
+    items = tpl.get("items_by_stage", {}).get(str(stage_no), []) or []
+    if not items:
+        return (True, st.get("last_balance", 0), 0, "no-questions")
+
+    # خصم لمرة واحدة لكل سؤال
+    if st.get("paid_key") == _question_id(tpl_id, stage_no, items[min(q_idx, len(items)-1)], q_idx):
+        return (True, st.get("last_balance", 0), get_attempt_price(stage_no), "already")
+
+    ok, new_bal, price = deduct_fee_for_stage(user_id, stage_no)
+    if not ok:
+        return (False, new_bal, price, "insufficient")
+
+    st["last_balance"] = new_bal
+    st["paid_key"] = _question_id(tpl_id, stage_no, items[min(q_idx, len(items)-1)], q_idx)
+    set_and_persist(user_id, st)
+    return (True, new_bal, price, "paid")
+
+def next_question(user_id: int) -> Tuple[Dict[str, Any], dict, int, int]:
+    st = get_progress(user_id) or reset_progress(user_id)
+    tpl = load_template(st.get("template_id", "T01"))
+    stage_no = int(st.get("stage", 1))
+    q_idx = int(st.get("q_index", 0))
+    arr = tpl.get("items_by_stage", {}).get(str(stage_no), []) or []
+
+    if not arr:
+        dummy = {"id": "EMPTY", "text": "لا توجد أسئلة لهذه المرحلة.", "options": ["-"], "correct_index": 0}
+        return st, dummy, stage_no, 0
+
+    if q_idx >= len(arr):
+        q_idx = len(arr) - 1  # clamp
+    item = arr[q_idx]
+    return st, item, stage_no, q_idx
+
+def advance(user_id: int):
+    st = get_progress(user_id)
+    st["q_index"] = int(st.get("q_index", 0)) + 1
+    # سؤال جديد ⇒ إزالة مفتاح الدفع لضمان خصم جديد
+    st.pop("paid_key", None)
+    set_and_persist(user_id, st)
+
+# ------------------------ منطق المرحلة والجوائز (كنقاط) ------------------------
+def stage_question_count(stage_no: int) -> int:
+    # م1–2: 20 سؤال، ثم +5 كل مرحلة
+    return 20 if stage_no <= 2 else 20 + (stage_no - 2) * 5
+
+def _get_stage_counters(user_id: int) -> Tuple[int, int, int]:
+    st = get_progress(user_id)
+    return int(st.get("stage_stars", 0)), int(st.get("stage_wrong_attempts", 0)), int(st.get("stage_done", 0))
+
+def _reset_stage_counters(user_id: int):
+    st = get_progress(user_id)
+    st["stage_stars"] = 0
+    st["stage_wrong_attempts"] = 0
+    st["stage_done"] = 0
+    set_and_persist(user_id, st)
+
+def _compute_reward_syp(stars: int, questions: int, stage_no: int, settings: dict) -> int:
+    # مثال بسيط: لكل نجمة × وزن، مضروب في عامل المرحلة، سقف ناعم من الاقتصاد
+    pts_per_star = settings.get("points_per_stars", _DEFAULT_SETTINGS["points_per_stars"])
+    base_points = int(pts_per_star.get(str(max(0, min(3, stars))), 0))
+    # قيمة النقاط بالليرة
+    value_syp = get_points_value_syp(base_points, settings)
+    # عامل مرحلة بسيط
+    factor = 1.0 + (max(1, stage_no) - 1) * 0.1
+    syp = int(round(value_syp * factor))
+    # سقوف اقتصادية اختيارية
+    econ = settings.get("economy", {})
+    soft_cap_ratio = float(econ.get("op_payout_soft_cap_ratio", 0.0))
+    op_free = int(econ.get("op_free_balance", 0))
+    if op_free and soft_cap_ratio:
+        syp = min(syp, int(op_free * soft_cap_ratio))
+    return max(0, syp)
+
+def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: int) -> dict:
+    """
+    يحسب مكافأة المرحلة كنقاط، يضيفها لمحفظة النقاط، ثم يضبط المرحلة التالية ويصفر عدادات المرحلة.
+    يرجع: {questions, wrong_attempts, stars, reward_points, points_after}
+    """
+    settings = load_settings()
+    stars, wrongs, done = _get_stage_counters(user_id)
+    total_q = questions if questions > 0 else done
+    # لو ما خلّص كل أسئلة المرحلة، لا نمنح مكافأة
+    if done < total_q:
+        _, pts_now = get_wallet(user_id)
+        return {"questions": done, "wrong_attempts": wrongs, "stars": stars, "reward_points": 0, "points_after": pts_now}
+
+    # احسب مكافأة بالليرة → حوّلها لنقاط
+    reward_syp = _compute_reward_syp(stars, total_q, stage_no, settings)
+    reward_points = _syp_to_points(reward_syp, settings) if reward_syp > 0 else 0
+
+    # أضِف النقاط
+    _, pts_after_add = add_points(user_id, reward_points)
+
+    # تقدّم المرحلة
+    st = get_progress(user_id)
+    st["stage"] = int(st.get("stage", 1)) + 1
+    st["q_index"] = 0
+    # بداية مرحلة جديدة ⇒ إزالة paid_key لضمان خصم أول سؤال في المرحلة
+    st.pop("paid_key", None)
+    set_and_persist(user_id, st)
+
+    # [PATCH] منح جوائز إضافية عند إكمال القالب أو بعد مرحلة محددة (لا تغييرات على الواجهة):
+    try:
+        st_now = get_progress(user_id) or {}
+        tpl_id = st_now.get("template_id", "T01")
+        _settings = load_settings()
+        _after_stage = int((_settings.get("rewards") or {}).get("top3_after_stage", 10))
+        if int(stage_no) == _after_stage:
+            _bonus = payout_on_template_complete(user_id, tpl_id)
+            _top3 = _maybe_top3_award_on_stage10(user_id, tpl_id, int(stage_no))
+            try:
+                # خزّن أثرًا خفيفًا داخل جدول تشغيل المرحلة
+                sb_upsert("quiz_stage_runs", {
+                    "user_id": user_id,
+                    "template_id": tpl_id,
+                    "stage_no": stage_no,
+                    "bonus_points": int((_bonus or {}).get("award_points", 0)),
+                    "top3_award_points": int((_top3 or {}).get("points", 0))
+                })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    _reset_stage_counters(user_id)
+
+    return {
+        "questions": int(total_q),
+        "wrong_attempts": int(wrongs),
+        "stars": int(stars),
+        "reward_points": int(reward_points),
+        "points_after": int(pts_after_add),
+    }
+
+# ------------------------ عدّادات المرحلة أثناء اللعب ------------------------
 def register_wrong_attempt(user_id: int):
-    st = user_quiz_state(user_id)
-    tries = int(st.get("wrong_in_q", 0)) + 1
-    _update_progress(user_id, {"wrong_in_q": tries})
-    _tx({"kind":"wrong_attempt","user_id":user_id,"tries_in_q":tries})
+    st = get_progress(user_id)
+    st["stage_wrong_attempts"] = int(st.get("stage_wrong_attempts", 0)) + 1
+    st["stage_done"] = int(st.get("stage_done", 0)) + 1
+    set_and_persist(user_id, st)
 
+def register_correct_answer(user_id: int):
+    st = get_progress(user_id)
+    st["stage_stars"] = int(st.get("stage_stars", 0)) + 1
+    st["stage_done"] = int(st.get("stage_done", 0)) + 1
+    set_and_persist(user_id, st)
 
-def compute_stage_reward_syp_safe(stage_no: int) -> float:
-    stg_conf = load_settings().get("rewards", {})
-    milestones = set(stg_conf.get("milestone_stages", [1,5]))
-    if stage_no not in milestones:
-        return 0.0
-    eco = _eco_get()
-    op = float(eco.get("op_free_balance",0.0))
-    if op <= 0:
-        return 0.0
-    per_stage_caps = stg_conf.get("op_soft_cap_ratio_by_stage", {})
-    cap_ratio = float(per_stage_caps.get(str(stage_no), load_settings()["economy"].get("op_payout_soft_cap_ratio", 0.03)))
-    pay = max(0.0, min(op * cap_ratio, op))
-    eco["op_free_balance"] = op - pay
-    _eco_set(eco)
-    if pay > 0:
-        _tx({"kind":"stage_reward","amount":pay,"stage":stage_no})
-    return pay
+# ==== [PATCH] إضافات ميزات الجوائز والاقتصاد (بدون تغييرات على الواجهة) ====
+def get_stage_time(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
+    """
+    وقت المرحلة الاختياري من الإعدادات (timer.stage_time_s: { "1-2": 60, "3-5": 50, "6+": 45 }).
+    إن لم يوجد يرجع seconds_per_question الأساسي.
+    """
+    s = settings or load_settings()
+    timer = (s or {}).get("timer", {})
+    stage_time_obj = (timer or {}).get("stage_time_s", {})
+    if not stage_time_obj:
+        return int((s or {}).get("seconds_per_question", 60))
+    def _match(band: str) -> bool:
+        if "-" in band:
+            lo, hi = band.split("-", 1)
+            return int(lo) <= stage_no <= int(hi)
+        if band.endswith("+"):
+            return stage_no >= int(band[:-1])
+        return False
+    for band, secs in stage_time_obj.items():
+        if _match(band):
+            try:
+                return int(secs)
+            except Exception:
+                continue
+    return int((s or {}).get("seconds_per_question", 60))
 
-def _stage_count(tpl: Dict[str,Any]) -> int: return len(tpl.get("stages",[]))
+def convert_points_to_balance(user_id: int):
+    """
+    تحويل وحدات نقاط → رصيد حسب points_conversion_rate.
+    يرجع (points_before, syp_added, points_after).
+    """
+    s = load_settings()
+    conv = s.get("points_conversion_rate", {"points_per_unit": 10, "syp_per_unit": 5})
+    ppu = int(conv.get("points_per_unit", 10))
+    spu = int(conv.get("syp_per_unit", 5))
+    bal, pts = get_wallet(user_id)
+    if ppu <= 0 or spu <= 0:
+        return pts, 0, pts
+    units = pts // ppu
+    if units <= 0:
+        return pts, 0, pts
+    pts_spent = units * ppu
+    syp_add = units * spu
+    # خصم نقاط + إضافة رصيد
+    add_points(user_id, -pts_spent)
+    change_balance(user_id, syp_add)
+    _, pts_after = get_wallet(user_id)
+    try:
+        sb_upsert("transactions", {
+            "user_id": user_id,
+            "kind": "convert_points_to_balance",
+            "payload": json.dumps({"units": units, "points_spent": pts_spent, "syp_added": syp_add}, ensure_ascii=False)
+        })
+    except Exception:
+        pass
+    return pts, syp_add, pts_after
 
-def _advance_template(user_id: int):
-    order = _templates_order()
-    st = user_quiz_state(user_id)
-    cur = st["template_id"]
-    nxt = order[(order.index(cur)+1) % len(order)] if cur in order else order[0]
-    _update_progress(user_id, {"template_id": nxt, "stage": 1, "q_index": 0})
-
-def _templates_order() -> List[str]:
-    p = Path("/mnt/data/final_templates_order.txt")
-    if not p.exists(): p = Path(__file__).parent / "final_templates_order.txt"
-    if p.exists(): return [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-    return ["T01","T02","T03"]
-
-def _maybe_notify_milestone(user_id: int):
-    ann = load_settings().get("announce",{})
-    if not ann.get("enabled", False): return
-    # push outbox row – your bot should read & send
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.post(_sb("notifications_outbox"), headers=_sb_headers(), json=[{"kind":"milestone_hint","payload":{"user_id":user_id}}])
-    else:
-        _tx({"kind":"announce","user_id":user_id})
-
-def advance_after_correct(user_id: int) -> Tuple[str, Dict[str,Any]]:
-    st = user_quiz_state(user_id)
-    tpl = load_template(st["template_id"])
-    stage_no = st["stage"]
-    st_q = st.get("q_index",0) + 1
-    items = tpl["stages"][stage_no-1]
-    # points based on wrong attempts (3/2/1/0)
-    wrong = int(st.get("wrong_in_q", 0))
-    gained_pts = 3 if wrong <= 0 else (2 if wrong == 1 else (1 if wrong == 2 else 0))
-    if gained_pts > 0:
-        add_points(user_id, gained_pts)
-        _tx({"kind":"points_gain","user_id":user_id,"points":gained_pts,"stage":stage_no,"q_index":st.get("q_index",0)})
-    _update_progress(user_id, {"wrong_in_q": 0})
-    if st_q >= len(items):
-        # stage done
-        reward = compute_stage_reward_syp_safe(stage_no)
-        if reward > 0:
-            add_balance(user_id, reward)
-        extra = 0.0
-        if stage_no == int(load_settings().get("rewards",{}).get("top3_after_stage",10)):
-            extra = _maybe_top3_award_on_stage10(user_id, st["template_id"])
-        _tx({"kind":"stage_done","user_id":user_id,"stage":stage_no,"reward":reward,"extra_top3":extra})
-        _update_progress(user_id, {"stage": stage_no+1, "q_index": 0})
-        # template done?
-        if stage_no + 1 > _stage_count(tpl):
-            award = payout_on_template_complete(user_id, st["template_id"])
-            _maybe_notify_milestone(user_id)
-            _advance_template(user_id)
-            return "template_completed", {"award_syp": award}
-        else:
-            return "stage_completed", {"reward_syp": reward}
-    else:
-        _update_progress(user_id, {"q_index": st_q})
-        return "ok", {"points_gained": gained_pts}
-
-def payout_on_template_complete(user_id: int, template_id: str) -> float:
-    conf = load_settings()["completion_award"]
-    eco = _eco_get()
-    op = float(eco.get("op_free_balance",0.0))
-    if op <= 0: return 0.0
-    target = min(max(float(conf.get("base_award_syp",0.0)), op * float(conf.get("soft_cap_ratio_of_op",0.06))), float(conf.get("max_award_syp",15000)))
-    cushion = op * float(conf.get("cushion_ratio_of_op",0.25)) + int(conf.get("expected_concurrency",2)) * float(conf.get("estimated_award_syp",8000))
-    can_pay_now = max(0.0, op - cushion)
-    pay = min(target, can_pay_now)
-    if pay <= 0:
-        _tx({"kind":"template_complete_pending","user_id":user_id,"template_id":template_id})
-        return 0.0
-    eco["op_free_balance"] = op - pay
-    _eco_set(eco)
-    add_balance(user_id, pay)
-    _tx({"kind":"template_complete_payout","user_id":user_id,"template_id":template_id,"amount":pay})
-    # increment completed counter via templates_completed table
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            cli.post(_sb("quiz_templates_completed"), headers=_sb_headers(), json=[{"user_id": user_id, "template_id": template_id}])
-    return pay
-
-
-def _maybe_top3_award_on_stage10(user_id: int, template_id: str) -> float:
-    conf = load_settings().get("rewards", {})
-    target_stage = int(conf.get("top3_after_stage", 10))
-    eco = _eco_get()
-    op = float(eco.get("op_free_balance", 0.0))
-    if op <= 0:
-        return 0.0
-
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            chk = cli.get(_sb("quiz_stage_runs", f"select=*,ts&template_id=eq.{template_id}&user_id=eq.{user_id}&stage=eq.{target_stage}&limit=1"), headers=_sb_headers())
-            if chk.status_code == 200 and chk.json():
-                return 0.0
-            cli.post(_sb("quiz_stage_runs"), headers=_sb_headers(), json=[{"user_id": user_id, "template_id": template_id, "stage": target_stage, "ts": int(time.time())}])
-            r = cli.get(_sb("quiz_stage_runs", f"select=user_id,ts&template_id=eq.{template_id}&stage=eq.{target_stage}"), headers=_sb_headers())
-            if r.status_code != 200: 
-                return 0.0
-            seen_users = []
-            for row in sorted(r.json(), key=lambda x: x.get("ts", 0)):
-                uid = row.get("user_id")
-                if uid not in seen_users:
-                    seen_users.append(uid)
-            rank = seen_users.index(user_id) + 1 if user_id in seen_users else 999
-    else:
-        db = _ld()
-        runs = db.setdefault("_local_runs", [])
-        if any(rr.get("user_id")==user_id and rr.get("template_id")==template_id and rr.get("stage")==target_stage for rr in runs):
-            return 0.0
-        runs.append({"user_id":user_id,"template_id":template_id,"stage":target_stage,"ts":int(time.time())})
-        _sd(db)
-        seen_users = []
-        for row in sorted(runs, key=lambda x: x["ts"]):
-            if row["template_id"]==template_id and row["stage"]==target_stage:
-                if row["user_id"] not in seen_users:
-                    seen_users.append(row["user_id"])
-        rank = seen_users.index(user_id)+1 if user_id in seen_users else 999
-
-    if rank > 3:
-        return 0.0
-
-    ratios = conf.get("top3_awards_ratio_of_op", [0.012, 0.008, 0.006])
-    caps = conf.get("top3_awards_max_syp", [25000, 18000, 12000])
-    ratio = float(ratios[rank-1]) if rank-1 < len(ratios) else 0.0
-    cap = float(caps[rank-1]) if rank-1 < len(caps) else 0.0
-
-    prize = min(op * ratio, cap, op)
-    if prize <= 0:
-        return 0.0
-
-    eco["op_free_balance"] = float(eco.get("op_free_balance",0.0)) - prize
-    _eco_set(eco)
-    add_balance(user_id, prize)
-    _tx({"kind":"top3_stage10_award","user_id":user_id,"template_id":template_id,"rank":rank,"amount":prize})
-    return prize
-
-
-# ---------- Leaderboard (simple) ----------
-def get_leaderboard_top(n: int) -> List[Dict[str,Any]]:
-    if USE_SUPABASE:
-        with httpx.Client(timeout=10) as cli:
-            r = cli.get(_sb("houssin363", f"select=user_id,name,balance&order=balance.desc&limit={max(1,n)}"), headers=_sb_headers())
-            if r.status_code == 200: return r.json()
-            return []
-    else:
-        db = _ld()
-        rows = [{"user_id": int(uid), "name": w.get("name",""), "balance": w.get("balance",0)} for uid,w in db["wallets"].items()]
-        rows.sort(key=lambda r: r["balance"], reverse=True)
-        return rows[:max(1,n)]
-
-# ---------- Local fallback store ----------
-_LOCAL = Path(__file__).parent / "_local_quiz_db.json"
-def _ld() -> Dict[str,Any]:
-    if _LOCAL.exists():
+def payout_on_template_complete(user_id: int, template_id: str) -> Dict[str, Any]:
+    """
+    يمنح جائزة إكمال القالب وفق settings.completion_award (ليرة → تُحوّل نقاط).
+    يرجع {"award_points": int, "award_syp": int}
+    """
+    out = {"award_points": 0, "award_syp": 0}
+    try:
+        s = load_settings()
+        comp = s.get("completion_award", {})
+        base_syp = int(comp.get("base_award_syp", 0))
+        max_syp = int(comp.get("max_award_syp", base_syp))
+        econ = s.get("economy", {})
+        op_free = int(econ.get("op_free_balance", 0))
+        soft_ratio = float(comp.get("soft_cap_ratio_of_op", 0.0))
+        if op_free and soft_ratio:
+            base_syp = min(base_syp, int(op_free * soft_ratio))
+        base_syp = min(base_syp, max_syp)
+        if base_syp <= 0:
+            return out
+        conv = s.get("points_conversion_rate", {"points_per_unit": 10, "syp_per_unit": 5})
+        pts = (base_syp * int(conv.get("points_per_unit", 10))) // max(1, int(conv.get("syp_per_unit", 5)))
+        if pts > 0:
+            add_points(user_id, int(pts))
         try:
-            data = json.loads(_LOCAL.read_text(encoding="utf-8"))
-            if isinstance(data.get("seen"), dict):
-                for k,v in list(data["seen"].items()):
-                    if isinstance(v, list): data["seen"][k] = set(v)
-            return data
-        except Exception: pass
-    data = {"wallets": {}, "progress": {}, "seen": {}, "transactions": [], "economy": {"op_free_balance": 50000.0, "reserve_balance": 0.0}}
-    _LOCAL.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8"); return data
+            sb_upsert("quiz_templates_completed", {
+                "user_id": user_id,
+                "template_id": template_id,
+                "payload": json.dumps({"award_points": int(pts), "award_syp": int(base_syp)}, ensure_ascii=False)
+            })
+        except Exception:
+            pass
+        out.update({"award_points": int(pts), "award_syp": int(base_syp)})
+    except Exception:
+        pass
+    return out
 
-def _sd(db: Optional[Dict[str,Any]] = None):
-    if db is None: db = _ld()
-    if isinstance(db.get("seen"), dict):
-        for k,v in list(db["seen"].items()):
-            if isinstance(v, set): db["seen"][k] = list(v)
-    _LOCAL.write_text(json.dumps(db, ensure_ascii=False), encoding="utf-8")
+def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) -> Dict[str, Any]:
+    """
+    إذا كانت هذه نهاية المرحلة المحددة (افتراضيًا 10) يمنح جوائز Top3.
+    يرجع {"rank": 1..3 | None, "points": int}
+    """
+    out = {"rank": None, "points": 0}
+    try:
+        s = load_settings()
+        rewards = s.get("rewards", {})
+        after_stage = int(rewards.get("top3_after_stage", 10))
+        if int(stage_no) != after_stage:
+            return out
+        ratios = rewards.get("top3_awards_ratio_of_op", [])
+        maxes = rewards.get("top3_awards_max_syp", [])
+        econ = s.get("economy", {})
+        op_free = int(econ.get("op_free_balance", 0))
+        if not ratios or not maxes or not op_free:
+            return out
+        # رتّب اللاعبين حسب مجموع نقاطهم في هذا القالب داخل جدول quiz_stage_runs
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                url = _table_url("quiz_stage_runs")
+                headers = _rest_headers()
+                params = {"select": "user_id,stage_points,template_id", "template_id": f"eq.{template_id}"}
+                r = client.get(url, headers=headers, params=params); r.raise_for_status()
+                arr = r.json() or []
+        except Exception:
+            arr = []
+        totals = {}
+        for row in arr:
+            uid = int(row.get("user_id"))
+            if row.get("template_id") != template_id:
+                continue
+            totals[uid] = totals.get(uid, 0) + int(row.get("stage_points") or 0)
+        if not totals:
+            return out
+        ranking = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+        rank = None
+        for i,(uid, _) in enumerate(ranking, start=1):
+            if uid == user_id:
+                rank = i; break
+        if not rank or rank > 3:
+            return out
+        i = rank - 1
+        syp_award = int(min(op_free * float(ratios[i]), int(maxes[i])))
+        conv = s.get("points_conversion_rate", {"points_per_unit": 10, "syp_per_unit": 5})
+        pts = (syp_award * int(conv.get("points_per_unit", 10))) // max(1, int(conv.get("syp_per_unit", 5)))
+        if pts > 0:
+            add_points(user_id, int(pts))
+        try:
+            sb_upsert("transactions", {
+                "user_id": user_id,
+                "kind": "top3_award",
+                "payload": json.dumps({"rank": rank, "points": int(pts), "syp": int(syp_award), "template_id": template_id}, ensure_ascii=False)
+            })
+        except Exception:
+            pass
+        out.update({"rank": rank, "points": int(pts)})
+    except Exception:
+        pass
+    return out
+
+def get_leaderboard_top(n: int = 10) -> list[dict]:
+    """
+    قائمة أعلى المستخدمين حسب النقاط من جدول houssin363.
+    """
+    n = int(max(1, min(100, n)))
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            url = _table_url("houssin363")
+            headers = _rest_headers()
+            params = {"select": "user_id,name,points,balance", "order": "points.desc", "limit": str(n)}
+            r = client.get(url, headers=headers, params=params); r.raise_for_status()
+            return r.json() or []
+    except Exception:
+        return []
+
+# ==== [PATCH-2] لوحة ترتيب بالتقدّم (stage, stage_done) ====
+def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
+    """
+    يُرجع أعلى اللاعبين حسب التقدّم: المرحلة ثم عدد الأسئلة المنجزة في المرحلة.
+    البنية: [{"user_id": int, "name": str, "stage": int, "stage_done": int, "points": int, "balance": int}]
+    """
+    n = int(max(1, min(100, n)))
+    rows = []
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            url = _table_url("quiz_progress")
+            headers = _rest_headers()
+            params = {"select": "user_id,stage,stage_done", "order": "stage.desc,stage_done.desc", "limit": str(n)}
+            r = client.get(url, headers=headers, params=params); r.raise_for_status()
+            rows = r.json() or []
+    except Exception:
+        rows = rows or []
+    out = []
+    for r in rows:
+        uid = int(r.get("user_id"))
+        try:
+            wallet = sb_select_one("houssin363", {"user_id": f"eq.{uid}"}, select="name,points,balance")
+        except Exception:
+            wallet = None
+        out.append({
+            "user_id": uid,
+            "name": (wallet or {}).get("name") or f"UID{uid}",
+            "points": int((wallet or {}).get("points") or 0),
+            "balance": int((wallet or {}).get("balance") or 0),
+            "stage": int(r.get("stage") or 0),
+            "stage_done": int(r.get("stage_done") or 0),
+        })
+    return out
+
+# توافق مع نسخة "الخطأ": دوال لا-أثر
+def seen_clear_user(user_id: int):
+    return True
+
+def mark_seen_after_payment(user_id: int):
+    return True
