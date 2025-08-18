@@ -156,7 +156,6 @@ def wire_handlers(bot: TeleBot):
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
         except: pass
-        from services.quiz_service import convert_points_to_balance
         pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
         if syp_added <= 0:
             try: bot.answer_callback_query(call.id, "لا توجد نقاط كافية للتحويل.", show_alert=True)
