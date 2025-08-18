@@ -298,10 +298,6 @@ def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
     full = settings.get("timer_bar_full", "🟩")
     empty = settings.get("timer_bar_empty", "⬜")
     total = 10
-def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
-    full = settings.get("timer_bar_full", "🟩")
-    empty = settings.get("timer_bar_empty", "⬜")
-    total = 10
     # نسبة الوقت المتبقي من قيمة المؤقت
     ratio = remaining / max(1, int(settings.get("seconds_per_question", 60)))
     filled = max(0, min(total, int(round(ratio * total))))
@@ -438,27 +434,6 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
             _top3 = _maybe_top3_award_on_stage10(user_id, tpl_id, int(stage_no))
             try:
                 # خزّن أثرًا خفيفًا داخل جدول تشغيل المرحلة
-                sb_upsert("quiz_stage_runs", {
-                    "user_id": user_id,
-                    "template_id": tpl_id,
-                    "stage_no": stage_no,
-                    "bonus_points": int((_bonus or {}).get("award_points", 0)),
-                    "top3_award_points": int((_top3 or {}).get("points", 0))
-                })
-            except Exception:
-                pass
-    except Exception:
-        pass
-    # [PATCH] جوائز إكمال القالب + Top3 (لا تغييرات على الواجهة)
-    try:
-        st_now = get_progress(user_id) or {}
-        tpl_id = st_now.get("template_id", "T01")
-        _settings = load_settings()
-        _after_stage = int((_settings.get("rewards") or {}).get("top3_after_stage", 10))
-        if int(stage_no) == _after_stage:
-            _bonus = payout_on_template_complete(user_id, tpl_id)
-            _top3 = _maybe_top3_award_on_stage10(user_id, tpl_id, int(stage_no))
-            try:
                 sb_upsert("quiz_stage_runs", {
                     "user_id": user_id,
                     "template_id": tpl_id,
