@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 import threading, time
 from telebot import TeleBot, types
@@ -16,6 +15,29 @@ def _rt(uid: int) -> dict: return _RUNTIME.setdefault(uid, {})
 def _rt_clear(uid: int): _RUNTIME.pop(uid, None)
 
 def start_handlers(bot: TeleBot):
+
+    # === Legacy entry point for old button: "🎯 الحزازير (ربحي)" ===
+    def _norm_text(s: str) -> str:
+        if not isinstance(s, str):
+            return ""
+        s = s.replace("\u00A0", " ")           # NBSP → space
+        s = s.replace("\u200f", "").replace("\u200e", "")  # RTL/LTR markers
+        s = " ".join(s.strip().split())        # normalize spaces
+        return s
+
+    @bot.message_handler(func=lambda m:
+        bool(getattr(m, "text", None)) and (
+            "الحزازير" in _norm_text(m.text) or
+            _norm_text(m.text).startswith("🎯")
+        )
+    )
+    def _legacy_entry(msg):
+        uid = msg.from_user.id
+        ensure_user_wallet(uid, msg.from_user.first_name or str(uid))
+        # بداية جديدة نظيفة (مثل /quiz)
+        seen_clear_user(uid)
+        reset_progress(uid)
+        bot.send_message(msg.chat.id, "🎮 لنبدأ اللعبة من جديد!", reply_markup=_mk_main())
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith('ans:'))
     def on_answer(cb):
@@ -49,7 +71,6 @@ def start_handlers(bot: TeleBot):
             register_wrong_attempt(uid)
             bot.edit_message_text("❌ خطأ — جرّب من جديد", cb.message.chat.id, cb.message.message_id)
             bot.send_message(cb.message.chat.id, "اختر:", reply_markup=_mk_after_wrong())
-
 
     @bot.message_handler(commands=['quiz','start_quiz'])
     def cmd_quiz(msg):
@@ -177,6 +198,7 @@ def _render_q(uid: int, stage_no: int, q_idx: int, item: dict, sec: int=None) ->
     return (f"🎯 <b>المرحلة {stage_no}</b> — السؤال <b>{q_idx+1}</b>\n"
             f"⏱️ {sec:02d}s {bar} — الرصيد {int(w.get('balance',0))} ل.س — السعر {get_attempt_price(stage_no)} ل.س\n\n"
             f"{item.get('text','')}")
+
 # --- Backward compatibility for main.py ---
 from telebot import TeleBot as _TB
 def attach_handlers(bot: _TB):
