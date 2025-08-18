@@ -14,9 +14,10 @@ from services.quiz_service import (
     load_settings, ensure_user_wallet, get_wallet, get_points_value_syp, get_attempt_price,
     reset_progress, next_question, add_points,
     user_quiz_state, ensure_paid_before_show, register_wrong_attempt, register_correct_answer,
-    compute_stage_reward_and_finalize, set_runtime, get_runtime, clear_runtime, pick_template_for_user,
-    get_stage_time, convert_points_to_balance  # convert موجود
+    compute_stage_reward_and_finalize, set_runtime, get_runtime, clear_runtime, pick_template_for_user, persist_state,
+    get_stage_time, convert_points_to_balance
 )
+
 
 # ---------- رسومات المُلخصات والرسائل ----------
 def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
@@ -78,6 +79,8 @@ def _intro_markup(resume: bool) -> types.InlineKeyboardMarkup:
         types.InlineKeyboardButton(text="🏅 نقاطي", callback_data="quiz_points"),
         types.InlineKeyboardButton(text="💳 تحويل النقاط", callback_data="quiz_convert"),
     )
+    kb.add(types.InlineKeyboardButton(text="🏆 الترتيب", callback_data="quiz_rank"))
+
     # [NEW] زر الترتيب حسب التقدّم
     kb.add(types.InlineKeyboardButton(text="🏆 الترتيب", callback_data="quiz_rank"))
     kb.add(types.InlineKeyboardButton(text="ℹ️ شرح اللعبة", callback_data="quiz_help"))
@@ -166,6 +169,25 @@ def wire_handlers(bot: TeleBot):
             f"نقاطك الآن: <b>{pts_after}</b>.",
             parse_mode="HTML"
         )
+    # لوحة الترتيب حسب التقدّم (مرحلة/جولات)
+    @bot.callback_query_handler(func=lambda c: c.data == "quiz_rank")
+    def on_rank(call):
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        try: bot.answer_callback_query(call.id)
+        except: pass
+        from services.quiz_service import get_leaderboard_by_progress
+        top = get_leaderboard_by_progress(10)
+        if not top:
+            bot.send_message(chat_id, "لا توجد بيانات ترتيب بعد.", parse_mode="HTML")
+            return
+        lines = ["🏆 <b>الترتيب حسب التقدّم</b>"]
+        for i, row in enumerate(top, start=1):
+            nm = row.get("name") or f"UID{row.get('user_id')}"
+            stg = row.get("stage", 0)
+            done = row.get("stage_done", 0)
+            lines.append(f"{i}. <b>{nm}</b> — مرحلة <b>{stg}</b>، منجز <b>{done}</b> سؤالًا")
+        bot.send_message(chat_id, "\n".join(lines), parse_mode="HTML")
 
     # [NEW] لوحة الترتيب حسب التقدّم (مرحلة/جولات)
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_rank")
