@@ -298,7 +298,13 @@ def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
     full = settings.get("timer_bar_full", "🟩")
     empty = settings.get("timer_bar_empty", "⬜")
     total = 10
-    filled = max(0, min(total, int(round((remaining / max(1, settings.get("seconds_per_question", 60))) * total)))))
+def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
+    full = settings.get("timer_bar_full", "🟩")
+    empty = settings.get("timer_bar_empty", "⬜")
+    total = 10
+    # نسبة الوقت المتبقي من قيمة المؤقت
+    ratio = remaining / max(1, int(settings.get("seconds_per_question", 60)))
+    filled = max(0, min(total, int(round(ratio * total))))
     return full * filled + empty * (total - filled)
 
 def _question_id(tpl_id: str, stage_no: int, item: dict, q_idx: int) -> str:
@@ -443,6 +449,27 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
                 pass
     except Exception:
         pass
+    # [PATCH] جوائز إكمال القالب + Top3 (لا تغييرات على الواجهة)
+    try:
+        st_now = get_progress(user_id) or {}
+        tpl_id = st_now.get("template_id", "T01")
+        _settings = load_settings()
+        _after_stage = int((_settings.get("rewards") or {}).get("top3_after_stage", 10))
+        if int(stage_no) == _after_stage:
+            _bonus = payout_on_template_complete(user_id, tpl_id)
+            _top3 = _maybe_top3_award_on_stage10(user_id, tpl_id, int(stage_no))
+            try:
+                sb_upsert("quiz_stage_runs", {
+                    "user_id": user_id,
+                    "template_id": tpl_id,
+                    "stage_no": stage_no,
+                    "bonus_points": int((_bonus or {}).get("award_points", 0)),
+                    "top3_award_points": int((_top3 or {}).get("points", 0))
+                })
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     _reset_stage_counters(user_id)
 
@@ -466,6 +493,200 @@ def register_correct_answer(user_id: int):
     st["stage_stars"] = int(st.get("stage_stars", 0)) + 1
     st["stage_done"] = int(st.get("stage_done", 0)) + 1
     set_and_persist(user_id, st)
+def get_stage_time(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
+    s = settings or load_settings()
+    timer = (s or {}).get("timer", {})
+    stage_time_obj = (timer or {}).get("stage_time_s", {})
+    if not stage_time_obj:
+        return int((s or {}).get("seconds_per_question", 60))
+    def _match(band: str) -> bool:
+        if "-" in band:
+            lo, hi = band.split("-", 1)
+            return int(lo) <= stage_no <= int(hi)
+        if band.endswith("+"):
+            return stage_no >= int(band[:-1])
+        return False
+    for band, secs in stage_time_obj.items():
+        if _match(band):
+            try:
+                return int(secs)
+            except Exception:
+                continue
+    return int((s or {}).get("seconds_per_question", 60))
+
+
+def convert_points_to_balance(user_id: int):
+    s = load_settings()
+    conv = s.get("points_conversion_rate", {"points_per_unit": 10, "syp_per_unit": 5})
+    ppu = int(conv.get("points_per_unit", 10))
+    spu = int(conv.get("syp_per_unit", 5))
+    bal, pts = get_wallet(user_id)
+    if ppu <= 0 or spu <= 0:
+        return pts, 0, pts
+    units = pts // ppu
+    if units <= 0:
+        return pts, 0, pts
+    pts_spent = units * ppu
+    syp_add = units * spu
+    # خصم نقاط + إضافة رصيد
+    add_points(user_id, -pts_spent)
+    change_balance(user_id, syp_add)
+    _, pts_after = get_wallet(user_id)
+    try:
+        sb_upsert("transactions", {
+            "user_id": user_id,
+            "kind": "convert_points_to_balance",
+            "payload": json.dumps({"units": units, "points_spent": pts_spent, "syp_added": syp_add}, ensure_ascii=False)
+        })
+    except Exception:
+        pass
+    return pts, syp_add, pts_after
+
+
+def payout_on_template_complete(user_id: int, template_id: str) -> Dict[str, Any]:
+    out = {"award_points": 0, "award_syp": 0}
+    try:
+        s = load_settings()
+        comp = s.get("completion_award", {})
+        base_syp = int(comp.get("base_award_syp", 0))
+        max_syp = int(comp.get("max_award_syp", base_syp))
+        econ = s.get("economy", {})
+        op_free = int(econ.get("op_free_balance", 0))
+        soft_ratio = float(comp.get("soft_cap_ratio_of_op", 0.0))
+        if op_free and soft_ratio:
+            base_syp = min(base_syp, int(op_free * soft_ratio))
+        base_syp = min(base_syp, max_syp)
+        if base_syp <= 0:
+            return out
+        conv = s.get("points_conversion_rate", {"points_per_unit": 10, "syp_per_unit": 5})
+        pts = (base_syp * int(conv.get("points_per_unit", 10))) // max(1, int(conv.get("syp_per_unit", 5)))
+        if pts > 0:
+            add_points(user_id, int(pts))
+        try:
+            sb_upsert("quiz_templates_completed", {
+                "user_id": user_id,
+                "template_id": template_id,
+                "payload": json.dumps({"award_points": int(pts), "award_syp": int(base_syp)}, ensure_ascii=False)
+            })
+        except Exception:
+            pass
+        out.update({"award_points": int(pts), "award_syp": int(base_syp)})
+    except Exception:
+        pass
+    return out
+
+
+def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) -> Dict[str, Any]:
+    out = {"rank": None, "points": 0}
+    try:
+        s = load_settings()
+        rewards = s.get("rewards", {})
+        after_stage = int(rewards.get("top3_after_stage", 10))
+        if int(stage_no) != after_stage:
+            return out
+        ratios = rewards.get("top3_awards_ratio_of_op", [])
+        maxes = rewards.get("top3_awards_max_syp", [])
+        econ = s.get("economy", {})
+        op_free = int(econ.get("op_free_balance", 0))
+        if not ratios or not maxes or not op_free:
+            return out
+        # نجمع نقاط اللاعبين من جدول quiz_stage_runs
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                url = _table_url("quiz_stage_runs")
+                headers = _rest_headers()
+                params = {"select": "user_id,stage_points,template_id", "template_id": f"eq.{template_id}"}
+                r = client.get(url, headers=headers, params=params); r.raise_for_status()
+                arr = r.json() or []
+        except Exception:
+            arr = []
+        totals = {}
+        for row in arr:
+            uid = int(row.get("user_id"))
+            if row.get("template_id") != template_id:
+                continue
+            totals[uid] = totals.get(uid, 0) + int(row.get("stage_points") or 0)
+        if not totals:
+            return out
+        ranking = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+        rank = None
+        for i,(uid, _) in enumerate(ranking, start=1):
+            if uid == user_id:
+                rank = i; break
+        if not rank or rank > 3:
+            return out
+        i = rank - 1
+        syp_award = int(min(op_free * float(ratios[i]), int(maxes[i])))
+        conv = s.get("points_conversion_rate", {"points_per_unit": 10, "syp_per_unit": 5})
+        pts = (syp_award * int(conv.get("points_per_unit", 10))) // max(1, int(conv.get("syp_per_unit", 5)))
+        if pts > 0:
+            add_points(user_id, int(pts))
+        try:
+            sb_upsert("transactions", {
+                "user_id": user_id,
+                "kind": "top3_award",
+                "payload": json.dumps({"rank": rank, "points": int(pts), "syp": int(syp_award), "template_id": template_id}, ensure_ascii=False)
+            })
+        except Exception:
+            pass
+        out.update({"rank": rank, "points": int(pts)})
+    except Exception:
+        pass
+    return out
+
+
+def get_leaderboard_top(n: int = 10) -> list[dict]:
+    n = int(max(1, min(100, n)))
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            url = _table_url("houssin363")
+            headers = _rest_headers()
+            params = {"select": "user_id,name,points,balance", "order": "points.desc", "limit": str(n)}
+            r = client.get(url, headers=headers, params=params); r.raise_for_status()
+            return r.json() or []
+    except Exception:
+        return []
+
+
+def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
+    """
+    ترتيب حسب المرحلة ثم عدد الأسئلة المنجزة داخل المرحلة.
+    """
+    n = int(max(1, min(100, n)))
+    rows = []
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            url = _table_url("quiz_progress")
+            headers = _rest_headers()
+            params = {"select": "user_id,stage,stage_done", "order": "stage.desc,stage_done.desc", "limit": str(n)}
+            r = client.get(url, headers=headers, params=params); r.raise_for_status()
+            rows = r.json() or []
+    except Exception:
+        rows = rows or []
+    out = []
+    for r in rows:
+        uid = int(r.get("user_id"))
+        try:
+            wallet = sb_select_one("houssin363", {"user_id": f"eq.{uid}"}, select="name,points,balance")
+        except Exception:
+            wallet = None
+        out.append({
+            "user_id": uid,
+            "name": (wallet or {}).get("name") or f"UID{uid}",
+            "points": int((wallet or {}).get("points") or 0),
+            "balance": int((wallet or {}).get("balance") or 0),
+            "stage": int(r.get("stage") or 0),
+            "stage_done": int(r.get("stage_done") or 0),
+        })
+    return out
+
+
+# توافق لا-أثر
+def seen_clear_user(user_id: int):
+    return True
+
+def mark_seen_after_payment(user_id: int):
+    return True
 
 # ==== [PATCH] إضافات ميزات الجوائز والاقتصاد (بدون تغييرات على الواجهة) ====
 def get_stage_time(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
