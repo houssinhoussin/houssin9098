@@ -285,6 +285,12 @@ def wire_handlers(bot: TeleBot):
 
         # صح
         register_correct_answer(user_id)
+        rt = get_runtime(user_id)
+        cancel = rt.get("timer_cancel")
+        if cancel:
+            try: cancel.set()
+            except: pass
+
         # منطق إنهاء المرحلة (لو انتهت)
         tpl = load_template(st["template_id"])
         total_q = len(tpl.get("items_by_stage", {}).get(str(stage_no), []) or [])
@@ -325,5 +331,5 @@ def wire_handlers(bot: TeleBot):
         clear_runtime(user_id)
         try: bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         except: pass
-    # توافق مع الاستدعاء في main.py
-    attach_handlers = wire_handlers
+# توافق مع الاستدعاء في main.py
+attach_handlers = wire_handlers
