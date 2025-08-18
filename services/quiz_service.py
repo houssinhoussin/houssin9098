@@ -81,11 +81,37 @@ def sb_select_one(table: str, filters: Dict[str, Any], select: str = "*") -> Opt
         return arr[0] if arr else None
 
 def sb_upsert(table: str, row: Dict[str, Any], on_conflict: str | None = None) -> Dict[str, Any]:
+    """
+    Upsert سليم:
+    - يضيف Prefer: resolution=merge-duplicates,return=representation على POST
+    - إن رجع 409 (مثلاً السيرفر لم يدمج) نعمل PATCH بالـ filters المبنية من on_conflict
+    """
     params = {}
     if on_conflict:
         params["on_conflict"] = on_conflict
+
+    headers = _rest_headers().copy()
+    if on_conflict:
+        headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+    else:
+        headers["Prefer"] = "return=representation"
+
     with httpx.Client(timeout=20.0) as client:
-        r = client.post(_table_url(table), headers=_rest_headers(), params=params, json=row)
+        r = client.post(_table_url(table), headers=headers, params=params, json=row)
+        if r.status_code == 409 and on_conflict:
+            # Fallback: PATCH على مفاتيح on_conflict (قد تكون "user_id" أو "col1,col2")
+            filters = {}
+            keys = [k.strip() for k in on_conflict.split(",") if k.strip()]
+            for k in keys:
+                v = row.get(k)
+                if v is None:
+                    continue
+                filters[k] = f"eq.{v}"
+            r2 = client.patch(_table_url(table), headers=_rest_headers(), params=filters, json=row)
+            r2.raise_for_status()
+            out2 = r2.json()
+            return out2[0] if isinstance(out2, list) and out2 else row
+
         r.raise_for_status()
         out = r.json()
         return out[0] if isinstance(out, list) and out else row
@@ -422,7 +448,7 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
     st.pop("paid_key", None)
     set_and_persist(user_id, st)
 
-    # [PATCH] منح جوائز إضافية عند إكمال القالب أو بعد مرحلة محددة (لا تغييرات على الواجهة):
+    # [PATCH] منح جوائز إضافية عند إكمال القالب أو بعد مرحلة محددة + تسجيل stage_points ليدعم ترتيب Top3
     try:
         st_now = get_progress(user_id) or {}
         tpl_id = st_now.get("template_id", "T01")
@@ -431,17 +457,22 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         if int(stage_no) == _after_stage:
             _bonus = payout_on_template_complete(user_id, tpl_id)
             _top3 = _maybe_top3_award_on_stage10(user_id, tpl_id, int(stage_no))
-            try:
-                # خزّن أثرًا خفيفًا داخل جدول تشغيل المرحلة
-                sb_upsert("quiz_stage_runs", {
-                    "user_id": user_id,
-                    "template_id": tpl_id,
-                    "stage_no": stage_no,
-                    "bonus_points": int((_bonus or {}).get("award_points", 0)),
-                    "top3_award_points": int((_top3 or {}).get("points", 0))
-                })
-            except Exception:
-                pass
+        else:
+            _bonus = {}
+            _top3 = {}
+
+        try:
+            # خزّن أثرًا خفيفًا داخل جدول تشغيل المرحلة
+            sb_upsert("quiz_stage_runs", {
+                "user_id": user_id,
+                "template_id": tpl_id,
+                "stage_no": stage_no,
+                "stage_points": int(reward_points),  # <— مضاف لدعم التجميع لاحقًا
+                "bonus_points": int((_bonus or {}).get("award_points", 0)),
+                "top3_award_points": int((_top3 or {}).get("points", 0))
+            })
+        except Exception:
+            pass
     except Exception:
         pass
 
