@@ -36,6 +36,19 @@ def set_runtime(user_id: int, **kwargs) -> dict:
 def clear_runtime(user_id: int):
     _user_runtime.pop(user_id, None)
 
+# ------------------------ إعداد httpx ثابت ------------------------
+def _http_client() -> httpx.Client:
+    """
+    عميل HTTP ثابت:
+    - تعطيل HTTP/2 (بعض المزودين يسببون ReadError تحته).
+    - تفعيل retries=3 على مستوى النقل.
+    """
+    return httpx.Client(
+        timeout=20.0,
+        http2=False,
+        transport=httpx.HTTPTransport(retries=3)
+    )
+
 # ------------------------ الإعدادات ------------------------
 _DEFAULT_SETTINGS = {
     "seconds_per_question": 50,
@@ -74,7 +87,7 @@ def _table_url(table: str) -> str:
 def sb_select_one(table: str, filters: Dict[str, Any], select: str = "*") -> Optional[Dict[str, Any]]:
     params = {"select": select}
     params.update(filters)
-    with httpx.Client(timeout=20.0) as client:
+    with _http_client() as client:
         r = client.get(_table_url(table), headers=_rest_headers(), params=params)
         r.raise_for_status()
         arr = r.json()
@@ -96,7 +109,7 @@ def sb_upsert(table: str, row: Dict[str, Any], on_conflict: str | None = None) -
     else:
         headers["Prefer"] = "return=representation"
 
-    with httpx.Client(timeout=20.0) as client:
+    with _http_client() as client:
         r = client.post(_table_url(table), headers=headers, params=params, json=row)
         if r.status_code == 409 and on_conflict:
             # Fallback: PATCH على مفاتيح on_conflict (قد تكون "user_id" أو "col1,col2")
@@ -119,7 +132,7 @@ def sb_upsert(table: str, row: Dict[str, Any], on_conflict: str | None = None) -
 def sb_update(table: str, filters: Dict[str, Any], patch: Dict[str, Any]) -> List[Dict[str, Any]]:
     params = {}
     params.update(filters)
-    with httpx.Client(timeout=20.0) as client:
+    with _http_client() as client:
         r = client.patch(_table_url(table), headers=_rest_headers(), params=params, json=patch)
         r.raise_for_status()
         out = r.json()
@@ -612,7 +625,7 @@ def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) 
             return out
         # رتّب اللاعبين حسب مجموع نقاطهم في هذا القالب داخل جدول quiz_stage_runs
         try:
-            with httpx.Client(timeout=20.0) as client:
+            with _http_client() as client:
                 url = _table_url("quiz_stage_runs")
                 headers = _rest_headers()
                 params = {"select": "user_id,stage_points,template_id", "template_id": f"eq.{template_id}"}
@@ -660,7 +673,7 @@ def get_leaderboard_top(n: int = 10) -> list[dict]:
     """
     n = int(max(1, min(100, n)))
     try:
-        with httpx.Client(timeout=20.0) as client:
+        with _http_client() as client:
             url = _table_url("houssin363")
             headers = _rest_headers()
             params = {"select": "user_id,name,points,balance", "order": "points.desc", "limit": str(n)}
@@ -678,7 +691,7 @@ def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
     n = int(max(1, min(100, n)))
     rows = []
     try:
-        with httpx.Client(timeout=20.0) as client:
+        with _http_client() as client:
             url = _table_url("quiz_progress")
             headers = _rest_headers()
             params = {"select": "user_id,stage,stage_done", "order": "stage.desc,stage_done.desc", "limit": str(n)}
