@@ -11,24 +11,24 @@ import random
 from telebot import TeleBot, types
 
 from services.quiz_service import (
+    get_seconds_for_stage, must_convert_now, set_flag,
     load_settings, ensure_user_wallet, get_wallet, get_points_value_syp, get_attempt_price,
     reset_progress, next_question, add_points,
     user_quiz_state, convert_points_to_balance, load_template,
     compute_stage_reward_and_finalize, advance,
     get_runtime, set_runtime, clear_runtime,
-    ensure_paid_before_show, pause_current_question, persist_state,
-    get_seconds_for_stage,  # ✅ زمن السؤال حسب المرحلة
+    ensure_paid_before_show, pause_current_question, persist_state,  # 🚀 الجديد
 )
 
 # ------------------------ أدوات واجهة ------------------------
 def _timer_bar(total: int, left: int, full: str, empty: str) -> str:
-    # شريط 12 خانة (كل خانة ~ خمس ثوانٍ تقريباً)
+    # شريط 12 خانة (كل خانة = ~5 ثوانٍ إذا total=60)
     slots = max(6, total // 5)
     filled = max(0, min(slots, round((left / total) * slots)))
     return full * filled + empty * (slots - filled)
 
 def _question_text(stage_no: int, q_idx: int, item: dict, settings: dict, seconds_left: int, bal_hint: int | None = None) -> str:
-    bar = _timer_bar(int(get_seconds_for_stage(stage_no, settings)), seconds_left, settings["ui"]["timer_bar_full"], settings["ui"]["timer_bar_empty"])
+    bar = _timer_bar(int(settings["seconds_per_question"]), seconds_left, settings["timer_bar_full"], settings["timer_bar_empty"])
     bal_line = f"\n💰 رصيدك: <b>{bal_hint:,}</b> ل.س" if bal_hint is not None else ""
     return (
         f"🎯 <b>المرحلة {stage_no}</b> — السؤال <b>{q_idx+1}</b>\n"
@@ -97,7 +97,7 @@ def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
     return random.choice(acc) if acc else ""
 
 def _windows_error(price: int, settings: dict) -> str:
-    tpl = settings["ui"].get("windows_error_template") or (
+    tpl = settings.get("windows_error_template") or (
         "🪟 <b>خطأ - Windows</b>\n"
         "<b>الرمز:</b> WRONG_ANSWER\n"
         "<b>الوصف:</b> الخيار غير صحيح أو انتهى الوقت.\n"
@@ -106,7 +106,7 @@ def _windows_error(price: int, settings: dict) -> str:
     return tpl.replace("{price}", str(price))
 
 def _windows_success(award_pts: int, total_pts: int, settings: dict) -> str:
-    tpl = settings["ui"].get("windows_success_template") or (
+    tpl = settings.get("windows_success_template") or (
         "🪟 <b>Windows - تهانينا</b>\n"
         "<b>الحدث:</b> CORRECT_ANSWER\n"
         "<b>الوصف:</b> إجابة صحيحة! (+{award_pts} نقاط)\n"
@@ -117,10 +117,8 @@ def _windows_success(award_pts: int, total_pts: int, settings: dict) -> str:
 
 # ------------------------ مؤقّت السؤال (تحرير نفس الرسالة) ------------------------
 def _start_timer(bot: TeleBot, chat_id: int, msg_id: int, user_id: int, settings: dict):
-    # نجلب المرحلة الحالية كي نحسب زمن السؤال حسب المرحلة
-    st, _item, stage_no, _ = next_question(user_id)
-    total = int(get_seconds_for_stage(stage_no, settings))
-    tick  = int(settings.get("timer_tick_seconds", settings["ui"].get("tick_seconds", 1)))
+    total = int(settings.get("seconds_per_question", 60))
+    tick  = int(settings.get("timer_tick_seconds", 5))
 
     cancel = threading.Event()
     set_runtime(user_id, timer_cancel=cancel, last_answer_ts=0.0)
@@ -257,8 +255,7 @@ def attach_handlers(bot: TeleBot):
             except Exception: pass
 
         # أرسل السؤال + عدّاد
-        total_secs = int(get_seconds_for_stage(stage_no, settings))
-        txt = _question_text(stage_no, q_idx, item, settings, total_secs, bal_hint=new_bal)
+        txt = _question_text(stage_no, q_idx, item, settings, int(settings.get("seconds_per_question", 60)), bal_hint=new_bal)
         sent = bot.send_message(chat_id, txt, parse_mode="HTML", reply_markup=_question_markup(item))
 
         st["active_msg_id"] = sent.message_id
@@ -385,6 +382,7 @@ def attach_handlers(bot: TeleBot):
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
         except: pass
+        from services.quiz_service import convert_points_to_balance
         pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
         if syp_added <= 0:
             try: bot.answer_callback_query(call.id, "لا توجد نقاط كافية للتحويل.", show_alert=True)
@@ -415,15 +413,14 @@ def attach_handlers(bot: TeleBot):
         try: bot.answer_callback_query(call.id)
         except: pass
         settings = load_settings()
-        st, _item, stage_no, _ = next_question(call.from_user.id)
-        secs = int(get_seconds_for_stage(stage_no, settings))
-        price_hint = get_attempt_price(stage_no, settings)
+        secs = int(settings.get("seconds_per_question", 60))
+        price_hint = get_attempt_price(1, settings)
         msg = (
             "ℹ️ <b>شرح اللعبة</b>\n"
-            f"• لديك عدّاد وقت: <b>{secs} ثانية</b> للسؤال الحالي.\n"
+            f"• لديك عدّاد وقت: <b>{secs} ثانية</b> لكل سؤال.\n"
             "• عند «ابدأ الآن/التالي» أو «إعادة المحاولة» يُخصم ثمن المحاولة فورًا.\n"
             "• لا نعرض أي تلميح للإجابة الصحيحة.\n"
-            f"• سعر المحاولة الحالي: {price_hint} ل.س (يتغيّر حسب المرحلة)."
+            f"• مثال السعر (مرحلة 1): {price_hint} ل.س/محاولة (يتغيّر حسب المرحلة)."
         )
         bot.send_message(call.message.chat.id, msg, parse_mode="HTML")
 
