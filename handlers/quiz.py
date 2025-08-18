@@ -177,3 +177,8 @@ def _render_q(uid: int, stage_no: int, q_idx: int, item: dict, sec: int=None) ->
     return (f"🎯 <b>المرحلة {stage_no}</b> — السؤال <b>{q_idx+1}</b>\n"
             f"⏱️ {sec:02d}s {bar} — الرصيد {int(w.get('balance',0))} ل.س — السعر {get_attempt_price(stage_no)} ل.س\n\n"
             f"{item.get('text','')}")
+# --- Backward compatibility for main.py ---
+from telebot import TeleBot as _TB
+def attach_handlers(bot: _TB):
+    # alias حتى يبقى الاستيراد القديم يعمل
+    start_handlers(bot)
