@@ -33,8 +33,8 @@ def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
 def _fmt_error(price: int, settings: dict, banter: str | None = None) -> str:
     """
     قالب خطأ احترافي بدون كلمة Windows.
-    يستخدم settings["windows_error_template"] إن وُجد (بعد تحديثه في settings.json)،
-    وإلا يستعمل بديلًا افتراضيًا.
+    إن وُجد قالب مخصص في settings["windows_error_template"] نستخدمه،
+    وإلا نستخدم الافتراضي أدناه.
     """
     tpl = settings.get("windows_error_template") or (
         "❌ <b>خطأ</b>\n"
@@ -46,7 +46,7 @@ def _fmt_error(price: int, settings: dict, banter: str | None = None) -> str:
 
 def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str | None = None) -> str:
     """
-    رسالة نجاح نهاية المرحلة (تستخدم windows_success_template بعد تعديلها لتصبح عامة).
+    رسالة نجاح نهاية المرحلة (تستخدم windows_success_template إن وُجد).
     """
     tpl = settings.get("windows_success_template") or (
         "✅ <b>تهانينا</b>\n"
@@ -63,7 +63,7 @@ def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str
 def _fmt_success_mid(price: int, settings: dict, banter: str | None = None) -> str:
     """
     رسالة نجاح بعد إجابة صحيحة أثناء المرحلة (قبل السؤال التالي) مع تنبيه الخصم.
-    تسمح بالتخصيص عبر settings["mid_success_template"] إذا رغبت.
+    تسمح بالتخصيص عبر settings["mid_success_template"] إذا وجدت.
     """
     tpl = settings.get("mid_success_template") or (
         "✅ <b>إجابة صحيحة</b>\n"
@@ -84,7 +84,7 @@ def _timer_bar(remaining: int, full_seconds: int, settings: dict) -> str:
 
 def _question_text(item: dict, stage_no: int, q_idx: int, seconds_left: int, full_seconds: int, settings: dict, bal_hint: int | None) -> str:
     """
-    bal_hint != None يعني تم الخصم الآن؛ نعرض معه سطر تنبيه الخصم.
+    bal_hint != None يعني تم الخصم الآن؛ نعرض معه سطر تنبيه الخصم + الرصيد.
     """
     bar = _timer_bar(seconds_left, full_seconds, settings)
     charge_line = ""
@@ -156,7 +156,7 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = 
     st.setdefault("stage_wrong_attempts", 0)
     st.setdefault("stage_done", 0)
     st.setdefault("attempts_on_current", 0)
-    st.pop("active_msg_id", None)
+    # لا نحذف active_msg_id — حتى نُحرّر نفس الرسالة ونحافظ على شاشة واحدة
     st.pop("last_info_msg_id", None)
     st["last_click_ts"] = 0.0
     user_quiz_state[user_id] = st
@@ -177,11 +177,12 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = 
         f"سعر المحاولة: <b>{price}</b> ل.س\n"
         f"رصيدك: <b>{bal}</b> ل.س — نقاطك: <b>{pts}</b>\n"
     )
-    # هل يمكن المتابعة؟
     can_resume = bool(q_count and st.get("q_index", 0) < q_count)
     kb = _intro_markup(resume=can_resume)
-    m = bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
-    st["active_msg_id"] = m.message_id
+
+    # حرّر نفس الرسالة إن وُجدت، وإلا أنشئ واحدة
+    msg_id = _edit_or_send(bot, chat_id, st, text, kb)
+    st["active_msg_id"] = msg_id
     user_quiz_state[user_id] = st
     persist_state(user_id)
 
@@ -451,7 +452,7 @@ def wire_handlers(bot: TeleBot):
         try: bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         except: pass
 
-        # شاشة تمهيد بزر واحد مناسب للحالة
+        # شاشة تمهيد بزر واحد مناسب للحالة (تحرير نفس الرسالة)
         _intro_screen(bot, chat_id, user_id, resume_only=True)
 
 # توافق مع الاستدعاء في main.py
