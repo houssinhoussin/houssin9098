@@ -119,5 +119,12 @@
     "op_free_balance": 50000,
     "reserve_balance": 0,
     "op_payout_soft_cap_ratio": 0.03
+  },
+
+  "fixed_awards": {
+    "t01_syp": 12000,
+    "t05_syp": 45000,
+    "t10_syp": 500000,
+    "t10_top_n": 3
   }
 }
