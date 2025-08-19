@@ -412,7 +412,10 @@ def wire_handlers(bot: TeleBot):
 
         st["active_msg_id"] = msg_id
         st["started_at"] = time.time()
-        st["attempts_on_current"] = 0  # بداية سؤال جديد
+        # 🔧 مهم: لا نصفر عدّاد المحاولات عند إعادة المحاولة لنفس السؤال.
+        # نصفره فقط عند الانتقال لسؤال جديد (بعد إجابة صحيحة)، والسبب سيظهر "skip-charge".
+        if reason == "skip-charge":
+            st["attempts_on_current"] = 0
         user_quiz_state[user_id] = st
         persist_state(user_id)
 
@@ -545,7 +548,7 @@ def wire_handlers(bot: TeleBot):
             except Exception:
                 pass
         else:
-            # نجاح وسطي: إعفاء الخصم للسؤال التالي مُفعّل (إذا انتقل فورًا)
+            # نجاح وسطي: إعفاء الخصم للسؤال التالي مُفعّل (إذا انتقلت فورًا)
             mid_text = _fmt_success_mid(settings, ok_line, delta_pts, bal_now, pts_now)
             try:
                 bot.edit_message_text(
@@ -576,15 +579,25 @@ def wire_handlers(bot: TeleBot):
 
         # امسح paid_key و ألغِ إعفاء الخصم لضمان الخصم عند العودة
         st = user_quiz_state.get(user_id) or {}
+        # احذف واجهة اللعب الحالية لضمان الانتقال إلى القائمة الرئيسية فعليًا
+        old_msg_id = st.get("active_msg_id")
         st.pop("paid_key", None)
         st["no_charge_next"] = 0
+        st["active_msg_id"] = None  # حتى لا يتم التحرير على نفس الرسالة
         user_quiz_state[user_id] = st
         persist_state(user_id)
 
-        # حذف الأزرار
-        try: bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        except: pass
+        # حذف الأزرار / الرسالة القديمة إن أمكن
+        try:
+            if old_msg_id:
+                bot.delete_message(chat_id, old_msg_id)
+        except Exception:
+            try:
+                bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+            except Exception:
+                pass
 
+        # عرض القائمة الرئيسية برسالة جديدة
         _intro_screen(bot, chat_id, user_id)
 
 # توافق مع الاستدعاء في main.py
