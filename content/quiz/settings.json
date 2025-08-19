@@ -12,8 +12,8 @@
   },
 
   "points_conversion_rate": {
-    "points_per_unit": 10,
-    "syp_per_unit": 5
+    "points_per_unit": 1,
+    "syp_per_unit": 2
   },
 
   "attempt_price_by_stage": [
@@ -217,7 +217,7 @@
 
   "windows_success_template": "✅ <b>تهانينا</b>\n<b>الحدث:</b> إتمام المرحلة\n<b>المكافأة:</b> +{award_pts} نقاط\n<b>إجمالي نقاطك:</b> {total_pts}\n<b>التالي:</b> اضغط «متابعة» للانتقال.",
 
-  "mid_success_template": "✅ <b>إجابة صحيحة</b>\n{banter}<b>التنبيه:</b> سيتم خصم {price} ل.س عند متابعة السؤال التالي.",
+  "mid_success_template": "✅ <b>إجابة صحيحة</b>\n{banter}<b>التنبيه:</b> لن يتم الخصم في السؤال التالي إذا انتقلت الآن.",
 
   "fixed_awards": {
     "t01_syp": 12000,
