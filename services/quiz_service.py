@@ -56,7 +56,7 @@ def _http_client() -> httpx.Client:
 
 # ------------------------ الإعدادات ------------------------
 _DEFAULT_SETTINGS = {
-    "seconds_per_question": 50,
+    "seconds_per_question": 40,
     "timer_tick_seconds": 5,
     "timer_bar_full": "🟩",
     "timer_bar_empty": "⬜",
@@ -82,9 +82,9 @@ _DEFAULT_SETTINGS = {
     # fallback في حال عدم وجود "timer.stage_time_s" بالملف
     "timer": {
         "stage_time_s": {
-            "1-2": 50,
-            "3-5": 45,
-            "6+": 40
+            "1-2": 40,
+            "3-5": 35,
+            "6+": 30
         }
     }
 }
