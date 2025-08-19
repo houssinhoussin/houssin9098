@@ -38,20 +38,17 @@ def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
     return random.choice(acc) if acc else ""
 
 def _fmt_error(kind: str, price: int, settings: dict, banter: str | None, bal: int, pts: int) -> str:
-    """
-    قالب خطأ احترافي:
-    kind in {"wrong","timeout"}
-    يعرض الرصيد والنقاط دائمًا.
-    """
-    if kind == "timeout":
-        body = ("❌ <b>انتهى الوقت</b>\n"
-                "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
-    else:
-        body = ("❌ <b>إجابة خاطئة</b>\n"
-                "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
+    tpl = settings.get("windows_error_template") or (
+        "❌ <b>خطأ</b>\n"
+        "<b>الوصف:</b> الخيار غير صحيح أو انتهى الوقت.\n"
+        "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س."
+    )
+    reason_line = "❌ <b>انتهى الوقت</b>" if kind == "timeout" else "❌ <b>إجابة خاطئة</b>"
     head = (banter + "\n\n") if banter else ""
+    body = tpl.replace("{price}", str(price))
     footer = f"\n\n💰 رصيدك: <b>{bal:,}</b> ل.س — 🏅 نقاطك: <b>{pts:,}</b>"
-    return head + body.replace("{price}", str(price)) + footer
+    return head + reason_line + "\n" + body + footer
+
 
 def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str | None, bal: int) -> str:
     tpl = settings.get("windows_success_template") or (
@@ -68,12 +65,14 @@ def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str
     return (banter + "\n\n" + body if banter else body) + footer
 
 def _fmt_success_mid(settings: dict, banter: str | None, delta_pts: int, bal: int, pts: int) -> str:
-    # نص واضح: السؤال التالي بدون خصم
-    head = "✅ <b>إجابة صحيحة</b>\n"
-    banter_txt = (banter + "\n") if banter else ""
-    info = f"🏅 +{delta_pts} نقاط (الإجمالي: <b>{pts:,}</b>) — 💰 رصيدك: <b>{bal:,}</b> ل.س\n"
-    tail = "ℹ️ لن يتم الخصم في <b>السؤال التالي</b> إذا انتقلت الآن."
-    return head + banter_txt + info + tail
+    tpl = settings.get("mid_success_template") or (
+        "✅ <b>إجابة صحيحة</b>\n{banter}"
+        "<b>التنبيه:</b> لن يتم الخصم في السؤال التالي إذا انتقلت الآن."
+    )
+    banter_block = (banter + "\n") if banter else ""
+    body = tpl.replace("{banter}", banter_block)
+    info = f"\n\n🏅 +{delta_pts} نقاط (الإجمالي: <b>{pts:,}</b>) — 💰 رصيدك: <b>{bal:,}</b> ل.س"
+    return body + info
 
 def _timer_bar(remaining: int, full_seconds: int, settings: dict) -> str:
     full = settings.get("timer_bar_full", "🟩")
