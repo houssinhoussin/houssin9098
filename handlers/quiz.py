@@ -30,24 +30,21 @@ def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
             acc.extend(msgs)
     return random.choice(acc) if acc else ""
 
-def _fmt_error(price: int, settings: dict, banter: str | None = None) -> str:
+def _fmt_error(kind: str, price: int, settings: dict, banter: str | None = None) -> str:
     """
-    قالب خطأ احترافي بدون كلمة Windows.
-    إن وُجد قالب مخصص في settings["windows_error_template"] نستخدمه،
-    وإلا نستخدم الافتراضي أدناه.
+    قالب خطأ احترافي:
+    kind in {"wrong","timeout"}
     """
-    tpl = settings.get("windows_error_template") or (
-        "❌ <b>خطأ</b>\n"
-        "<b>الوصف:</b> الخيار غير صحيح أو انتهى الوقت.\n"
-        "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س."
-    )
+    if kind == "timeout":
+        body = ("❌ <b>انتهى الوقت</b>\n"
+                "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
+    else:
+        body = ("❌ <b>إجابة خاطئة</b>\n"
+                "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
     head = (banter + "\n\n") if banter else ""
-    return head + tpl.replace("{price}", str(price))
+    return head + body.replace("{price}", str(price))
 
 def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str | None = None) -> str:
-    """
-    رسالة نجاح نهاية المرحلة (تستخدم windows_success_template إن وُجد).
-    """
     tpl = settings.get("windows_success_template") or (
         "✅ <b>تهانينا</b>\n"
         "<b>الحدث:</b> إتمام المرحلة\n"
@@ -61,10 +58,6 @@ def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str
     return (banter + "\n\n" + body) if banter else body
 
 def _fmt_success_mid(price: int, settings: dict, banter: str | None = None) -> str:
-    """
-    رسالة نجاح بعد إجابة صحيحة أثناء المرحلة (قبل السؤال التالي) مع تنبيه الخصم.
-    تسمح بالتخصيص عبر settings["mid_success_template"] إذا وجدت.
-    """
     tpl = settings.get("mid_success_template") or (
         "✅ <b>إجابة صحيحة</b>\n"
         "{banter}"
@@ -121,11 +114,6 @@ def _edit_or_send(bot: TeleBot, chat_id: int, st: dict, text: str, markup: types
         return int(m.message_id)
 
 def _intro_markup(resume: bool) -> types.InlineKeyboardMarkup:
-    """
-    يظهر زر واحد فقط:
-    - إذا resume=True ⇒ يظهر «▶️ متابعة»
-    - إذا resume=False ⇒ يظهر «🚀 ابدأ الآن»
-    """
     kb = types.InlineKeyboardMarkup()
     if resume:
         kb.add(types.InlineKeyboardButton(text="▶️ متابعة", callback_data="quiz_resume"))
@@ -156,7 +144,7 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = 
     st.setdefault("stage_wrong_attempts", 0)
     st.setdefault("stage_done", 0)
     st.setdefault("attempts_on_current", 0)
-    # لا نحذف active_msg_id — حتى نُحرّر نفس الرسالة ونحافظ على شاشة واحدة
+    st["no_charge_next"] = 0  # بداية جديدة تلغي أي إعفاء سابق
     st.pop("last_info_msg_id", None)
     st["last_click_ts"] = 0.0
     user_quiz_state[user_id] = st
@@ -180,7 +168,6 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int, resume_only: bool = 
     can_resume = bool(q_count and st.get("q_index", 0) < q_count)
     kb = _intro_markup(resume=can_resume)
 
-    # حرّر نفس الرسالة إن وُجدت، وإلا أنشئ واحدة
     msg_id = _edit_or_send(bot, chat_id, st, text, kb)
     st["active_msg_id"] = msg_id
     user_quiz_state[user_id] = st
@@ -212,19 +199,23 @@ def wire_handlers(bot: TeleBot):
         except: pass
         bot.send_message(call.message.chat.id, f"🏅 نقاطك: <b>{pts}</b> (≈ {syp_val} ل.س)\n💰 رصيدك: <b>{bal}</b> ل.س", parse_mode="HTML")
 
-    # تحويل النقاط إلى رصيد
+    # تحويل النقاط إلى رصيد — Alert دائمًا
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_convert")
     def on_convert(call):
         user_id = call.from_user.id
-        chat_id = call.message.chat.id
-        try: bot.answer_callback_query(call.id)
-        except: pass
-        pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
-        if syp_added <= 0:
-            try: bot.answer_callback_query(call.id, "لا توجد نقاط كافية للتحويل.", show_alert=True)
+        try:
+            pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
+            if syp_added <= 0:
+                bot.answer_callback_query(call.id, "لا توجد نقاط كافية للتحويل.", show_alert=True)
+            else:
+                bot.answer_callback_query(
+                    call.id,
+                    f"✅ تم التحويل!\nحُوِّل {pts_before - pts_after} نقطة إلى {syp_added} ل.س.\nنقاطك الآن: {pts_after}.",
+                    show_alert=True
+                )
+        except Exception:
+            try: bot.answer_callback_query(call.id, "تعذّر التحويل مؤقتًا. حاول لاحقًا.", show_alert=True)
             except: pass
-            return
-        bot.send_message(chat_id, f"💳 تم تحويل <b>{pts_before - pts_after}</b> نقطة إلى <b>{syp_added}</b> ل.س.\nنقاطك الآن: <b>{pts_after}</b>.", parse_mode="HTML")
 
     # الترتيب
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_rank")
@@ -251,7 +242,7 @@ def wire_handlers(bot: TeleBot):
         except: pass
         bot.send_message(call.message.chat.id, _help_text(load_settings()), parse_mode="HTML")
 
-    # التالي/متابعة: شاشة واحدة + عداد متحرك وتحرير دوري
+    # التالي/متابعة
     @bot.callback_query_handler(func=lambda c: c.data in ("quiz_next", "quiz_resume"))
     def on_next(call):
         user_id = call.from_user.id
@@ -265,7 +256,7 @@ def wire_handlers(bot: TeleBot):
             try: cancel_prev.set()
             except: pass
 
-        # خصم هذه المحاولة إن لزم
+        # خصم هذه المحاولة إن لزم (يحترم no_charge_next)
         ok, bal_or_new, price, reason = ensure_paid_before_show(user_id)
         if not ok:
             try: bot.answer_callback_query(call.id, "رصيدك غير كافٍ لهذه المحاولة.", show_alert=True)
@@ -281,7 +272,7 @@ def wire_handlers(bot: TeleBot):
         kb = _question_markup(item)
         txt = _question_text(
             item, stage_no, q_idx, remain, seconds_total, settings,
-            bal_or_new if reason == "paid" else None  # عند الدفع نُظهر سطر الخصم + الرصيد
+            bal_or_new if reason in ("paid", "skip-charge") else None
         )
         msg_id = _edit_or_send(bot, chat_id, st, txt, kb)
 
@@ -294,7 +285,7 @@ def wire_handlers(bot: TeleBot):
         # مؤقّت يُحرّك العداد
         cancel = threading.Event()
         set_runtime(user_id, timer_cancel=cancel)
-        tick = max(1, int(settings.get("timer_tick_seconds", 5)))  # اضبطها 5 أو 1 كما في settings.json
+        tick = max(1, int(settings.get("timer_tick_seconds", 5)))
 
         def _timer():
             nonlocal remain
@@ -305,7 +296,7 @@ def wire_handlers(bot: TeleBot):
                     return
                 try:
                     new_txt = _question_text(item, stage_no, q_idx, remain, seconds_total, settings,
-                                             bal_or_new if reason == "paid" else None)
+                                             bal_or_new if reason in ("paid", "skip-charge") else None)
                     bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=new_txt, parse_mode="HTML", reply_markup=kb)
                 except Exception:
                     pass
@@ -313,16 +304,17 @@ def wire_handlers(bot: TeleBot):
             if cancel.is_set():
                 return
 
-            # انتهى الوقت ⇒ خطأ + مسح paid_key
+            # انتهى الوقت ⇒ خطأ + مسح paid_key + إلغاء إعفاء الخصم
             register_wrong_attempt(user_id)
             st_end = user_quiz_state.get(user_id) or {}
             st_end.pop("paid_key", None)
+            st_end["no_charge_next"] = 0
             user_quiz_state[user_id] = st_end
             persist_state(user_id)
 
             wrong_line = _pick_banter("banter_wrong_by_stage", stage_no, settings)
             price_now = get_attempt_price(stage_no, settings)
-            text_err = _fmt_error(price_now, settings, wrong_line)
+            text_err = _fmt_error("timeout", price_now, settings, wrong_line)
             try:
                 bot.edit_message_text(
                     chat_id=chat_id, message_id=msg_id, text=text_err, parse_mode="HTML",
@@ -361,16 +353,17 @@ def wire_handlers(bot: TeleBot):
         settings = load_settings()
 
         if chosen != int(item.get("correct_index", -1)):
-            # خطأ ⇒ تحرير نفس الرسالة + مسح paid_key لضمان الخصم عند الإعادة
+            # خطأ ⇒ تحرير نفس الرسالة + مسح paid_key + إلغاء إعفاء الخصم
             register_wrong_attempt(user_id)
             st_bad = user_quiz_state.get(user_id) or {}
             st_bad.pop("paid_key", None)
+            st_bad["no_charge_next"] = 0
             user_quiz_state[user_id] = st_bad
             persist_state(user_id)
 
             wrong_line = _pick_banter("banter_wrong_by_stage", stage_no, settings)
             price_now = get_attempt_price(stage_no, settings)
-            text_err = _fmt_error(price_now, settings, wrong_line)
+            text_err = _fmt_error("wrong", price_now, settings, wrong_line)
             try:
                 bot.edit_message_text(
                     chat_id=chat_id, message_id=msg_id, text=text_err, parse_mode="HTML",
@@ -397,7 +390,7 @@ def wire_handlers(bot: TeleBot):
         ok_line = _pick_banter("banter_correct_by_stage", stage_no, settings)
 
         if st["q_index"] >= total_q:
-            # نهاية المرحلة ⇒ رسالة نجاح احترافية
+            # نهاية المرحلة
             result = compute_stage_reward_and_finalize(user_id, stage_no, total_q)
             _, pts_now = get_wallet(user_id)
             success_text = _fmt_success_end(result.get("reward_points", 0), pts_now, settings, ok_line)
@@ -412,8 +405,8 @@ def wire_handlers(bot: TeleBot):
             except Exception:
                 pass
         else:
-            # لم تنتهِ المرحلة ⇒ رسالة نجاح وسطية + تنبيه خصم للسؤال التالي
-            price_next = get_attempt_price(stage_no, settings)  # نفس نطاق المرحلة
+            # لم تنتهِ المرحلة ⇒ نجاح وسطي + تنبيه أن الخصم سيكون عند "متابعة"
+            price_next = get_attempt_price(stage_no, settings)
             mid_text = _fmt_success_mid(price_next, settings, ok_line)
             try:
                 bot.edit_message_text(
@@ -442,17 +435,17 @@ def wire_handlers(bot: TeleBot):
             except: pass
         clear_runtime(user_id)
 
-        # امسح paid_key لضمان الخصم عند العودة
+        # امسح paid_key و ألغِ إعفاء الخصم لضمان الخصم عند العودة
         st = user_quiz_state.get(user_id) or {}
         st.pop("paid_key", None)
+        st["no_charge_next"] = 0
         user_quiz_state[user_id] = st
         persist_state(user_id)
 
-        # احذف الأزرار من الرسالة الحالية
+        # حذف الأزرار
         try: bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         except: pass
 
-        # شاشة تمهيد بزر واحد مناسب للحالة (تحرير نفس الرسالة)
         _intro_screen(bot, chat_id, user_id, resume_only=True)
 
 # توافق مع الاستدعاء في main.py
