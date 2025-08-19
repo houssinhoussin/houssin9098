@@ -23,10 +23,17 @@ def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
     acc = []
     for rng, msgs in table.items():
         try:
-            lo, hi = [int(x) for x in rng.split("-")]
+            if rng.endswith("+"):
+                lo = int(rng[:-1])
+                ok = (stage_no >= lo)
+            elif "-" in rng:
+                lo, hi = [int(x) for x in rng.split("-", 1)]
+                ok = (lo <= stage_no <= hi)
+            else:
+                ok = (int(rng) == stage_no)
         except Exception:
-            continue
-        if lo <= stage_no <= hi and isinstance(msgs, list):
+            ok = False
+        if ok and isinstance(msgs, list):
             acc.extend(msgs)
     return random.choice(acc) if acc else ""
 
@@ -40,13 +47,13 @@ def _fmt_error(kind: str, price: int, settings: dict, banter: str | None = None)
                 "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
     else:
         body = ("❌ <b>إجابة خاطئة</b>\n"
-                "<b>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
+                "<ب>التنبيه:</b> بالضغط على «إعادة المحاولة» سيتم خصم {price} ل.س.")
     head = (banter + "\n\n") if banter else ""
     return head + body.replace("{price}", str(price))
 
 def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str | None = None) -> str:
     tpl = settings.get("windows_success_template") or (
-        "✅ <b>تهانينا</b>\n"
+        "✅ <ب>تهانينا</b>\n"
         "<b>الحدث:</b> إتمام المرحلة\n"
         "<b>المكافأة:</b> +{award_pts} نقاط\n"
         "<b>إجمالي نقاطك:</b> {total_pts}\n"
@@ -187,7 +194,7 @@ def wire_handlers(bot: TeleBot):
             ensure_user_wallet(user_id, name=(m.from_user.first_name or "").strip())
             _intro_screen(bot, chat_id, user_id)
             return
-        # ... باقي الراوترات إن لزم ...
+        # هنا ممكن تضيف باقي الراوترات العامة...
 
     # نقاطي
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_points")
@@ -220,7 +227,6 @@ def wire_handlers(bot: TeleBot):
     # الترتيب
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_rank")
     def on_rank(call):
-        user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
         except: pass
