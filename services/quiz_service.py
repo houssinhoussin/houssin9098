@@ -155,6 +155,19 @@ def sb_update(table: str, filters: Dict[str, Any], patch: Dict[str, Any]) -> Lis
         out = r.json()
         return out if isinstance(out, list) else []
 
+def sb_delete(table: str, filters: Dict[str, Any]) -> int:
+    """حذف صفوف من جدول بحسب فلاتر PostgREST (eq. / lt. ...)."""
+    params = {}
+    params.update(filters or {})
+    with _http_client() as client:
+        r = client.delete(_table_url(table), headers=_rest_headers(), params=params)
+        try:
+            r.raise_for_status()
+        except Exception as e:
+            logger.warning("delete from %s failed: %s", table, e)
+            return 0
+        return 0
+
 # ------------------------ تقدم اللاعب في DB (quiz_progress) ------------------------
 def _progress_select(user_id: int) -> Optional[Dict[str, Any]]:
     return sb_select_one("quiz_progress", {"user_id": f"eq.{user_id}"})
@@ -465,6 +478,7 @@ def _reset_stage_counters(user_id: int):
     st["stage_stars"] = 0
     st["stage_wrong_attempts"] = 0
     st["stage_done"] = 0
+    st["attempts_on_current"] = 0
     set_and_persist(user_id, st)
 
 def register_wrong_attempt(user_id: int):
@@ -472,6 +486,8 @@ def register_wrong_attempt(user_id: int):
     try:
         st = get_progress(user_id) or reset_progress(user_id)
         st["stage_wrong_attempts"] = int(st.get("stage_wrong_attempts", 0)) + 1
+        # نعدّ عدد المحاولات لهذا السؤال لنحسب نقاط أول صح لاحقًا
+        st["attempts_on_current"] = int(st.get("attempts_on_current", 0)) + 1
         st["no_charge_next"] = 0  # لا إعفاء بعد خطأ
         set_and_persist(user_id, st)
     except Exception as e:
@@ -483,10 +499,48 @@ def register_correct_answer(user_id: int):
         st = get_progress(user_id) or reset_progress(user_id)
         st["stage_stars"] = int(st.get("stage_stars", 0)) + 1
         st["stage_done"] = int(st.get("stage_done", 0)) + 1
-        st["no_charge_next"] = 1  # إعفاء للسؤال التالي
+        st["no_charge_next"] = 1  # إعفاء للسؤال التالي (ما لم يضغط أكمل لاحقًا)
         set_and_persist(user_id, st)
     except Exception as e:
         logger.warning("register_correct_answer failed: %s", e)
+
+def award_points_for_correct(user_id: int, template_id: str, stage_no: int, item: dict, q_idx: int) -> Tuple[int, int, int]:
+    """
+    يمنح نقاطًا فورية عند أول إجابة صحيحة لسؤال معيّن بحسب ترتيب المحاولة:
+      1st: +3، 2nd: +2، 3rd: +1، 4+: 0
+    يُسجّل في transactions(kind='points_award', payload={delta, stage_no, qid})
+    يرجع (delta_points, new_points, balance)
+    """
+    st = get_progress(user_id) or reset_progress(user_id)
+    wrong_before = int(st.get("attempts_on_current", 0))  # عدد محاولات هذا السؤال قبل أول صح
+    if wrong_before <= 0:
+        delta = 3
+    elif wrong_before == 1:
+        delta = 2
+    elif wrong_before == 2:
+        delta = 1
+    else:
+        delta = 0
+
+    # أضف النقاط فورًا
+    _, new_pts = add_points(user_id, delta)
+    bal, pts = get_wallet(user_id)
+
+    # سجّل العملية
+    try:
+        sb_upsert("transactions", {
+            "user_id": user_id,
+            "kind": "points_award",
+            "payload": {
+                "delta": int(delta),
+                "stage_no": int(stage_no),
+                "qid": _question_id(template_id, stage_no, item, q_idx)
+            }
+        })
+    except Exception as e:
+        logger.warning("log points_award failed: %s", e)
+
+    return int(delta), int(pts), int(bal)
 
 # ------------------------ إدارة دورة المسابقة (T10) ------------------------
 def _comp_state_get() -> Dict[str, Any]:
@@ -608,7 +662,10 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
     if int(stage_no) != _last_stage_of_template(tpl_id):
         _, pts_now = get_wallet(user_id)
         st = get_progress(user_id); st["stage"] = int(st.get("stage", 1)) + 1; st["q_index"] = 0
-        st.pop("paid_key", None); st["no_charge_next"] = 0; set_and_persist(user_id, st)
+        st.pop("paid_key", None)
+        # مهم: إجابة صحيحة أنهت المرحلة ⇒ إعفاء لسؤال البداية القادم إذا انتقل فورًا
+        st["no_charge_next"] = 1
+        set_and_persist(user_id, st)
         _reset_stage_counters(user_id)
         return {"questions": int(total_q), "wrong_attempts": int(wrongs), "stars": int(stars), "reward_points": 0, "points_after": int(pts_now)}
 
@@ -644,7 +701,8 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
     st["stage"] = int(st.get("stage", 1)) + 1
     st["q_index"] = 0
     st.pop("paid_key", None)
-    st["no_charge_next"] = 0
+    # مهم: انتهت المرحلة بإجابة صحيحة ⇒ إعفاء للسؤال الأول في المرحلة التالية
+    st["no_charge_next"] = 1
     set_and_persist(user_id, st)
 
     _reset_stage_counters(user_id)
@@ -747,6 +805,20 @@ def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
             "stage_done": int((r.get("stage_done") or 0)),
         })
     return out
+
+# أدوات بدء جديد
+def wipe_user_for_fresh_start(user_id: int):
+    """
+    يصفر نقاط اللاعب ويحذف تقدّمه (لا يمس رصيده النقدي).
+    """
+    try:
+        sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"points": 0})
+        sb_delete("quiz_progress", {"user_id": f"eq.{user_id}"})
+        sb_delete("quiz_templates_completed", {"user_id": f"eq.{user_id}"})
+    except Exception as e:
+        logger.warning("wipe_user_for_fresh_start failed: %s", e)
+    user_quiz_state.pop(user_id, None)
+    reset_progress(user_id)
 
 # توافق
 def seen_clear_user(user_id: int): return True
