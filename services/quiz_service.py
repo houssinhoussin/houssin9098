@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
+import time
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -67,6 +69,16 @@ _DEFAULT_SETTINGS = {
         {"min": 13, "max": 14, "price": 200},
         {"min": 15, "max": 30, "price": 250},
     ],
+    # يمكنك ضبط هذه النوافذ/الحدود من settings.json إن رغبت
+    "rewards": {
+        "window_minutes_t01": 60,
+        "window_minutes_t05": 120,
+        "t10_daily_top_n": 5,
+        # حدود أمان اختيارية لكل صرف (بالليرة) — 0 يعني لا حد
+        "t01_max_syp_per_claim": 0,
+        "t05_max_syp_per_claim": 0,
+        "t10_max_syp_per_claim": 0,
+    }
 }
 
 _SETTINGS_CACHE: dict | None = None
@@ -85,13 +97,22 @@ def _table_url(table: str) -> str:
     return f"{SUPABASE_URL}/rest/v1/{table}"
 
 def sb_select_one(table: str, filters: Dict[str, Any], select: str = "*") -> Optional[Dict[str, Any]]:
-    params = {"select": select}
+    params = {"select": select, "limit": 1}
     params.update(filters)
     with _http_client() as client:
         r = client.get(_table_url(table), headers=_rest_headers(), params=params)
         r.raise_for_status()
         arr = r.json()
         return arr[0] if arr else None
+
+def sb_list(table: str, filters: Dict[str, Any], select: str = "*", limit: int = 10000) -> List[Dict[str, Any]]:
+    params = {"select": select, "limit": str(limit)}
+    params.update(filters or {})
+    with _http_client() as client:
+        r = client.get(_table_url(table), headers=_rest_headers(), params=params)
+        r.raise_for_status()
+        arr = r.json()
+        return arr if isinstance(arr, list) else []
 
 def sb_upsert(table: str, row: Dict[str, Any], on_conflict: str | None = None) -> Dict[str, Any]:
     """
@@ -155,6 +176,7 @@ def _progress_upsert(user_id: int, st: Dict[str, Any]) -> Dict[str, Any]:
         "attempts_on_current": int(st.get("attempts_on_current", 0)),
         "last_click_ts": float(st.get("last_click_ts", 0.0)),
         "paid_key": st.get("paid_key"),
+        "no_charge_next": int(st.get("no_charge_next", 0)),
     }
     return sb_upsert("quiz_progress", row, on_conflict="user_id")
 
@@ -276,12 +298,24 @@ def change_balance(user_id: int, delta: int) -> Tuple[int, int]:
     sb_update("houssin363", {"user_id": f"eq.{user_id}"}, {"balance": new_bal})
     return (new_bal, pts)
 
+# === [جديد] تسجيل دخل المحاولات كمعاملة =====================
+def _log_attempt_fee(user_id: int, stage_no: int, amount: int):
+    try:
+        sb_upsert("transactions", {
+            "user_id": user_id,
+            "kind": "attempt_fee",
+            "payload": json.dumps({"stage_no": int(stage_no), "amount": int(amount)}, ensure_ascii=False)
+        })
+    except Exception:
+        pass
+
 def deduct_fee_for_stage(user_id: int, stage_no: int) -> Tuple[bool, int, int]:
     price = get_attempt_price(stage_no)
     bal, _ = get_wallet(user_id)
     if bal < price:
         return (False, bal, price)
     new_bal, _ = change_balance(user_id, -price)
+    _log_attempt_fee(user_id, stage_no, price)  # <— تسجيل الدخل
     return (True, new_bal, price)
 
 # ------------------------ التقدم (ذاكرة) ------------------------
@@ -303,9 +337,10 @@ def get_progress(user_id: int) -> Dict[str, Any]:
             "stage_wrong_attempts": int(row.get("stage_wrong_attempts") or 0),
             "stage_done": int(row.get("stage_done") or 0),
             "last_balance": int(row.get("last_balance") or 0),
-            "attempts_on_current": int(row.get("attempts_on_current") or 0),
+            "attempts_on_current": int(row.get("attempts_on_current", 0)),
             "last_click_ts": float(row.get("last_click_ts") or 0.0),
             "paid_key": row.get("paid_key"),
+            "no_charge_next": int(row.get("no_charge_next", 0)),
         }
         user_quiz_state[user_id] = st
         return st
@@ -327,6 +362,7 @@ def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str,
         "attempts_on_current": 0,
         "last_click_ts": 0.0,
         "paid_key": None,
+        "no_charge_next": 0,
     }
     set_and_persist(user_id, state)
     return state
@@ -336,7 +372,6 @@ def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
     full = settings.get("timer_bar_full", "🟩")
     empty = settings.get("timer_bar_empty", "⬜")
     total = 10
-    # نسبة الوقت المتبقي من قيمة المؤقت
     ratio = remaining / max(1, int(settings.get("seconds_per_question", 60)))
     filled = max(0, min(total, int(round(ratio * total))))
     return full * filled + empty * (total - filled)
@@ -349,10 +384,9 @@ def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
     """
     يحاول خصم سعر المرحلة مرّة واحدة قبل عرض السؤال الحالي.
     يرجع: (ok, balance_or_new_balance, price, reason)
-      - ok=True و reason in {"already","paid","no-questions"}
+      - ok=True و reason in {"already","paid","no-questions","skip-charge"}
       - ok=False و reason="insufficient"
     """
-    # تأكد من وجود محفظة للمستخدم
     ensure_user_wallet(user_id)
 
     st = get_progress(user_id) or reset_progress(user_id)
@@ -363,6 +397,17 @@ def ensure_paid_before_show(user_id: int) -> Tuple[bool, int, int, str]:
     items = tpl.get("items_by_stage", {}).get(str(stage_no), []) or []
     if not items:
         return (True, st.get("last_balance", 0), 0, "no-questions")
+
+    # دعم إعفاء مرة واحدة بعد الإجابة الصحيحة — أو إعفاء مفروض من الهاندلر
+    if int(st.get("no_charge_next", 0)) == 1 or get_runtime(user_id).get("force_skip_charge"):
+        rt = get_runtime(user_id)
+        if "force_skip_charge" in rt:
+            rt.pop("force_skip_charge", None)
+            _user_runtime[user_id] = rt
+        st["no_charge_next"] = 0
+        st["paid_key"] = _question_id(tpl_id, stage_no, items[min(q_idx, len(items)-1)], q_idx)
+        set_and_persist(user_id, st)
+        return (True, st.get("last_balance", 0), get_attempt_price(stage_no), "skip-charge")
 
     # خصم لمرة واحدة لكل سؤال
     if st.get("paid_key") == _question_id(tpl_id, stage_no, items[min(q_idx, len(items)-1)], q_idx):
@@ -416,26 +461,237 @@ def _reset_stage_counters(user_id: int):
     st["stage_done"] = 0
     set_and_persist(user_id, st)
 
-def _compute_reward_syp(stars: int, questions: int, stage_no: int, settings: dict) -> int:
-    # مثال بسيط: لكل نجمة × وزن، مضروب في عامل المرحلة، سقف ناعم من الاقتصاد
-    pts_per_star = settings.get("points_per_stars", _DEFAULT_SETTINGS["points_per_stars"])
-    base_points = int(pts_per_star.get(str(max(0, min(3, stars))), 0))
-    # قيمة النقاط بالليرة
-    value_syp = get_points_value_syp(base_points, settings)
-    # عامل مرحلة بسيط
-    factor = 1.0 + (max(1, stage_no) - 1) * 0.1
-    syp = int(round(value_syp * factor))
-    # سقوف اقتصادية اختيارية
-    econ = settings.get("economy", {})
-    soft_cap_ratio = float(econ.get("op_payout_soft_cap_ratio", 0.0))
+# --------- [قديم احتياطي] حساب نقاط الجائزة مباشرة (للجولة/الملف) ---------
+def _compute_reward_points_direct(template_id: str, stage_no: int, settings: dict) -> int:
+    """
+    (احتياطي) كان يحسب نقاطًا عند إنهاء الملفات 1/5/10 بناءً على op_free_balance.
+    أبقيناه كـ fallback إذا لم يتوفر أي رصيد في أحواض الجوائز الجديدة.
+    """
+    order = _read_templates_order()
+    try:
+        t_index = order.index(template_id) + 1  # 1-based
+    except ValueError:
+        t_index = 0
+
+    tpl = load_template(template_id)
+    try:
+        last_stage = max(int(k) for k in (tpl.get("items_by_stage") or {}).keys())
+    except Exception:
+        last_stage = 20
+    if stage_no != last_stage:
+        return 0
+
+    rewards = settings.get("rewards", {}) or {}
+    milestones = rewards.get("round_award_on_templates", [1, 5, 10])
+    if t_index not in milestones:
+        return 0
+
+    econ = settings.get("economy", {}) or {}
     op_free = int(econ.get("op_free_balance", 0))
-    if op_free and soft_cap_ratio:
-        syp = min(syp, int(op_free * soft_cap_ratio))
-    return max(0, syp)
+    ratio = float(rewards.get("round_award_ratio_of_op", 0.60))
+    max_syp_cap = int(rewards.get("round_award_max_syp", 0))  # 0 = لا سقف
+    syp_award = int(op_free * max(0.0, ratio))
+    if max_syp_cap > 0:
+        syp_award = min(syp_award, max_syp_cap)
+    if syp_award <= 0:
+        return 0
+    return _syp_to_points(syp_award, settings)
+
+# ======== [جديد] اقتصاد الجوائز وفق 35%/65% وتقسيم T01/T05/T10/الاحتياطي ========
+def _econ_shares() -> Dict[str, float]:
+    """
+    نسب التوزيع من إجمالي الدخل (attempt_fee):
+    - owner: 0.35 (لا يُصرف، فقط للعلم)
+    - t01: 0.10
+    - t05: 0.20
+    - t10: 0.15
+    - reserve_points: 0.20  (لتغطية تحويل النقاط إلى رصيد)
+    المجموع = 1.00
+    """
+    return {"owner": 0.35, "t01": 0.10, "t05": 0.20, "t10": 0.15, "reserve_points": 0.20}
+
+def _sum_transactions(kind: str) -> int:
+    """
+    يجمع المبالغ (amount) من جدول transactions بحسب kind.
+    نعتمد تخزين المبلغ داخل payload.amount.
+    """
+    try:
+        rows = sb_list("transactions", {"kind": f"eq.{kind}"}, select="payload", limit=10000)
+    except Exception:
+        rows = []
+    s = 0
+    for r in rows:
+        try:
+            p = r.get("payload")
+            if isinstance(p, str):
+                p = json.loads(p)
+            amt = int(p.get("amount", 0))
+            s += max(0, int(amt))
+        except Exception:
+            continue
+    return int(s)
+
+def _sum_convert_spent() -> int:
+    """
+    مجموع ما صُرف فعليًا في التحويل إلى رصيد (syp_added).
+    """
+    try:
+        rows = sb_list("transactions", {"kind": "eq.convert_points_to_balance"}, select="payload", limit=10000)
+    except Exception:
+        rows = []
+    s = 0
+    for r in rows:
+        try:
+            p = r.get("payload")
+            if isinstance(p, str):
+                p = json.loads(p)
+            s += int(p.get("syp_added", 0))
+        except Exception:
+            continue
+    return int(max(0, s))
+
+def _pools_available() -> Dict[str, int]:
+    """
+    يحسب الميزانيات المتاحة (بالليرة):
+      - t01_avail, t05_avail, t10_avail, reserve_avail
+
+    المتوفر = الحصة الإجمالية (من attempt_fee) - المصروف سابقًا لهذا الحوض.
+    """
+    shares = _econ_shares()
+    total_fee = _sum_transactions("attempt_fee")  # إجمالي الدخل
+    total_t01 = int(total_fee * shares["t01"])
+    total_t05 = int(total_fee * shares["t05"])
+    total_t10 = int(total_fee * shares["t10"])
+    total_reserve = int(total_fee * shares["reserve_points"])
+
+    spent_t01 = _sum_transactions("award_t01")
+    spent_t05 = _sum_transactions("award_t05")
+    spent_t10 = _sum_transactions("award_t10")
+    spent_conv = _sum_convert_spent()
+
+    return {
+        "t01_avail": max(0, total_t01 - spent_t01),
+        "t05_avail": max(0, total_t05 - spent_t05),
+        "t10_avail": max(0, total_t10 - spent_t10),
+        "reserve_avail": max(0, total_reserve - spent_conv),
+    }
+
+def _count_completions_recent(template_id: str, minutes_window: int) -> int:
+    """
+    يحصي عدد من أكملوا هذا القالب خلال نافذة زمنية حديثة (يعتمد created_at من الجدول quiz_templates_completed).
+    إن لم يتوفر الحقل، لن يؤثر؛ سنعيد 0.
+    """
+    try:
+        since = (datetime.utcnow() - timedelta(minutes=max(1, int(minutes_window)))).isoformat()
+        rows = sb_list("quiz_templates_completed", {
+            "template_id": f"eq.{template_id}",
+            "created_at": f"gte.{since}"
+        }, select="template_id,created_at", limit=10000)
+        return len(rows or [])
+    except Exception:
+        return 0
+
+def _count_completions_today(template_id: str) -> int:
+    try:
+        today0 = datetime.utcnow().date().isoformat() + "T00:00:00"
+        rows = sb_list("quiz_templates_completed", {
+            "template_id": f"eq.{template_id}",
+            "created_at": f"gte.{today0}"
+        }, select="template_id,created_at", limit=10000)
+        return len(rows or [])
+    except Exception:
+        return 0
+
+def _log_award(kind: str, user_id: int, template_id: str, syp: int, points: int, extra: Dict[str, Any] | None = None):
+    payload = {"template_id": template_id, "amount": int(syp), "points": int(points)}
+    if extra:
+        payload.update(extra)
+    try:
+        sb_upsert("transactions", {
+            "user_id": user_id,
+            "kind": kind,
+            "payload": json.dumps(payload, ensure_ascii=False)
+        })
+    except Exception:
+        pass
+
+def _record_completion(user_id: int, template_id: str, award_points: int, award_syp: int):
+    try:
+        sb_upsert("quiz_templates_completed", {
+            "user_id": user_id,
+            "template_id": template_id,
+            "payload": json.dumps({"award_points": int(award_points), "award_syp": int(award_syp)}, ensure_ascii=False)
+        })
+    except Exception:
+        pass
+
+def _cap_by(x: int, cap: int) -> int:
+    return min(int(x), int(cap)) if int(cap) > 0 else int(x)
+
+# ======== [مهم] صرف الجوائز الديناميكي للحظات إنهاء T01 / T05 / T10 ========
+def _compute_dynamic_award_syp(user_id: int, template_id: str, stage_no: int, settings: dict) -> int:
+    """
+    يقرر كم ل.س تُصرف الآن عند إنهاء ملف معيّن (T01 أو T05 أو T10) وفق الأحواض المتاحة.
+    T01: تقسيم لحظي على نافذة زمنية قصيرة.
+    T05: مثلها لكن نافذة أطول.
+    T10: لأول 5 يوميًا فقط.
+    """
+    order = _read_templates_order()
+    try:
+        t_index = order.index(template_id) + 1
+    except ValueError:
+        t_index = 0
+
+    tpl = load_template(template_id)
+    try:
+        last_stage = max(int(k) for k in (tpl.get("items_by_stage") or {}).keys())
+    except Exception:
+        last_stage = 20
+    if int(stage_no) != int(last_stage):
+        return 0  # ليس عند نهاية الملف
+
+    pools = _pools_available()
+    rew = settings.get("rewards", {}) or {}
+
+    if t_index == 1:  # T01
+        avail = pools["t01_avail"]
+        win_minutes = int(rew.get("window_minutes_t01", 60))
+        n_recent = _count_completions_recent(template_id, win_minutes)
+        denom = max(1, n_recent + 1)  # نقسّم على عدد الحاليّين + هذا اللاعب
+        base = avail // denom
+        base = max(0, base)
+        cap = int(rew.get("t01_max_syp_per_claim", 0))
+        return _cap_by(base, cap)
+
+    if t_index == 5:  # T05
+        avail = pools["t05_avail"]
+        win_minutes = int(rew.get("window_minutes_t05", 120))
+        n_recent = _count_completions_recent(template_id, win_minutes)
+        denom = max(1, n_recent + 1)
+        base = avail // denom
+        base = max(0, base)
+        cap = int(rew.get("t05_max_syp_per_claim", 0))
+        return _cap_by(base, cap)
+
+    if t_index == 10:  # T10
+        avail = pools["t10_avail"]
+        top_n = int(rew.get("t10_daily_top_n", 5))
+        done_today = _count_completions_today(template_id)
+        if done_today >= top_n:
+            return 0
+        # نضمن عدم تجاوز الحوض: نقسّم ما تبقى على المقاعد المتبقية
+        remaining_slots = max(1, top_n - done_today)
+        base = avail // remaining_slots
+        base = max(0, base)
+        cap = int(rew.get("t10_max_syp_per_claim", 0))
+        return _cap_by(base, cap)
+
+    return 0
 
 def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: int) -> dict:
     """
-    يحسب مكافأة المرحلة كنقاط، يضيفها لمحفظة النقاط، ثم يضبط المرحلة التالية ويصفر عدادات المرحلة.
+    يحسب مكافأة المرحلة كنقاط (عند نهاية الملف T01/T05/T10 وفق الأحواض)،
+    يضيفها لمحفظة النقاط، ثم يضبط المرحلة التالية ويصفر عدادات المرحلة.
     يرجع: {questions, wrong_attempts, stars, reward_points, points_after}
     """
     settings = load_settings()
@@ -446,48 +702,54 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         _, pts_now = get_wallet(user_id)
         return {"questions": done, "wrong_attempts": wrongs, "stars": stars, "reward_points": 0, "points_after": pts_now}
 
-    # احسب مكافأة بالليرة → حوّلها لنقاط
-    reward_syp = _compute_reward_syp(stars, total_q, stage_no, settings)
-    reward_points = _syp_to_points(reward_syp, settings) if reward_syp > 0 else 0
+    # مكافأة الجولة (الملف) عند نهاية الملف — توزيع ديناميكي حسب الأحواض
+    st_now = get_progress(user_id) or {}
+    tpl_id = st_now.get("template_id", "T01")
 
-    # أضِف النقاط
-    _, pts_after_add = add_points(user_id, reward_points)
+    syp_award = _compute_dynamic_award_syp(user_id, tpl_id, stage_no, settings)
+    if syp_award <= 0:
+        # Fallback قديم (إن رغبتَ) — أو تبقى صفر
+        pts_award = _compute_reward_points_direct(tpl_id, stage_no, settings)
+        _, pts_after_add = add_points(user_id, int(pts_award))
+        # تقدم المرحلة
+        st = get_progress(user_id)
+        st["stage"] = int(st.get("stage", 1)) + 1
+        st["q_index"] = 0
+        st.pop("paid_key", None)
+        st["no_charge_next"] = 0
+        set_and_persist(user_id, st)
+        _reset_stage_counters(user_id)
+        # سجل إتمام الملف (حتى لو 0)
+        _record_completion(user_id, tpl_id, int(pts_award), int(get_points_value_syp(pts_award, settings)))
+        return {
+            "questions": int(total_q),
+            "wrong_attempts": int(wrongs),
+            "stars": int(stars),
+            "reward_points": int(pts_award),
+            "points_after": int(pts_after_add),
+        }
+
+    pts_award = _syp_to_points(syp_award, settings)
+    _, pts_after_add = add_points(user_id, int(pts_award))
+    # سجل الصرف من أي حوض
+    order = _read_templates_order()
+    try:
+        t_index = order.index(tpl_id) + 1
+    except ValueError:
+        t_index = 0
+    kind = "award_t01" if t_index == 1 else ("award_t05" if t_index == 5 else ("award_t10" if t_index == 10 else "award_other"))
+    _log_award(kind, user_id, tpl_id, int(syp_award), int(pts_award), extra={"stage_no": int(stage_no)})
+
+    # سجل إتمام الملف (يفيد العدّ اللحظي/اليومي)
+    _record_completion(user_id, tpl_id, int(pts_award), int(syp_award))
 
     # تقدّم المرحلة
     st = get_progress(user_id)
     st["stage"] = int(st.get("stage", 1)) + 1
     st["q_index"] = 0
-    # بداية مرحلة جديدة ⇒ إزالة paid_key لضمان خصم أول سؤال في المرحلة
-    st.pop("paid_key", None)
+    st.pop("paid_key", None)        # بداية سؤال جديد ⇒ إزالة مفتاح الدفع
+    st["no_charge_next"] = 0        # مع بداية مرحلة جديدة نزيل الإعفاء
     set_and_persist(user_id, st)
-
-    # [PATCH] منح جوائز إضافية عند إكمال القالب أو بعد مرحلة محددة + تسجيل stage_points ليدعم ترتيب Top3
-    try:
-        st_now = get_progress(user_id) or {}
-        tpl_id = st_now.get("template_id", "T01")
-        _settings = load_settings()
-        _after_stage = int((_settings.get("rewards") or {}).get("top3_after_stage", 10))
-        if int(stage_no) == _after_stage:
-            _bonus = payout_on_template_complete(user_id, tpl_id)
-            _top3 = _maybe_top3_award_on_stage10(user_id, tpl_id, int(stage_no))
-        else:
-            _bonus = {}
-            _top3 = {}
-
-        try:
-            # خزّن أثرًا خفيفًا داخل جدول تشغيل المرحلة
-            sb_upsert("quiz_stage_runs", {
-                "user_id": user_id,
-                "template_id": tpl_id,
-                "stage_no": stage_no,
-                "stage_points": int(reward_points),  # <— مضاف لدعم التجميع لاحقًا
-                "bonus_points": int((_bonus or {}).get("award_points", 0)),
-                "top3_award_points": int((_top3 or {}).get("points", 0))
-            })
-        except Exception:
-            pass
-    except Exception:
-        pass
 
     _reset_stage_counters(user_id)
 
@@ -495,7 +757,7 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         "questions": int(total_q),
         "wrong_attempts": int(wrongs),
         "stars": int(stars),
-        "reward_points": int(reward_points),
+        "reward_points": int(pts_award),
         "points_after": int(pts_after_add),
     }
 
@@ -504,20 +766,18 @@ def register_wrong_attempt(user_id: int):
     st = get_progress(user_id)
     st["stage_wrong_attempts"] = int(st.get("stage_wrong_attempts", 0)) + 1
     st["stage_done"] = int(st.get("stage_done", 0)) + 1
+    st["no_charge_next"] = 0  # أي خطأ يلغي الإعفاء
     set_and_persist(user_id, st)
 
 def register_correct_answer(user_id: int):
     st = get_progress(user_id)
     st["stage_stars"] = int(st.get("stage_stars", 0)) + 1
     st["stage_done"] = int(st.get("stage_done", 0)) + 1
+    st["no_charge_next"] = 1  # إعفاء خصم لمرة واحدة للسؤال التالي
     set_and_persist(user_id, st)
 
 # ==== [PATCH] إضافات ميزات الجوائز والاقتصاد (بدون تغييرات على الواجهة) ====
 def get_stage_time(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
-    """
-    وقت المرحلة الاختياري من الإعدادات (timer.stage_time_s: { "1-2": 60, "3-5": 50, "6+": 45 }).
-    إن لم يوجد يرجع seconds_per_question الأساسي.
-    """
     s = settings or load_settings()
     timer = (s or {}).get("timer", {})
     stage_time_obj = (timer or {}).get("stage_time_s", {})
@@ -540,7 +800,7 @@ def get_stage_time(stage_no: int, settings: Dict[str, Any] | None = None) -> int
 
 def convert_points_to_balance(user_id: int):
     """
-    تحويل وحدات نقاط → رصيد حسب points_conversion_rate.
+    تحويل وحدات نقاط → رصيد حسب points_conversion_rate مع سقف يراعي الاحتياطي (20% من الدخل).
     يرجع (points_before, syp_added, points_after).
     """
     s = load_settings()
@@ -550,12 +810,19 @@ def convert_points_to_balance(user_id: int):
     bal, pts = get_wallet(user_id)
     if ppu <= 0 or spu <= 0:
         return pts, 0, pts
-    units = pts // ppu
+
+    pools = _pools_available()
+    reserve_left = int(pools.get("reserve_avail", 0))
+
+    # كم يمكننا تحويله فعليًا الآن حسب الاحتياطي؟
+    max_units_by_reserve = reserve_left // max(1, spu)
+    units_by_points = pts // ppu
+    units = max(0, min(units_by_points, max_units_by_reserve))
     if units <= 0:
         return pts, 0, pts
+
     pts_spent = units * ppu
     syp_add = units * spu
-    # خصم نقاط + إضافة رصيد
     add_points(user_id, -pts_spent)
     change_balance(user_id, syp_add)
     _, pts_after = get_wallet(user_id)
@@ -569,11 +836,9 @@ def convert_points_to_balance(user_id: int):
         pass
     return pts, syp_add, pts_after
 
+# (الإبقاء على دوال الجوائز الإضافية للمرونة مستقبلاً)
 def payout_on_template_complete(user_id: int, template_id: str) -> Dict[str, Any]:
-    """
-    يمنح جائزة إكمال القالب وفق settings.completion_award (ليرة → تُحوّل نقاط).
-    يرجع {"award_points": int, "award_syp": int}
-    """
+    # لم نعد نستخدمها لصرف رئيسي، لكنها تبقى متاحة للاستخدامات الجانبية/التجريبية.
     out = {"award_points": 0, "award_syp": 0}
     try:
         s = load_settings()
@@ -606,10 +871,7 @@ def payout_on_template_complete(user_id: int, template_id: str) -> Dict[str, Any
     return out
 
 def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) -> Dict[str, Any]:
-    """
-    إذا كانت هذه نهاية المرحلة المحددة (افتراضيًا 10) يمنح جوائز Top3.
-    يرجع {"rank": 1..3 | None, "points": int}
-    """
+    # أبقيناها كما هي (غير مستخدمة حاليًا)، للمرونة لاحقًا.
     out = {"rank": None, "points": 0}
     try:
         s = load_settings()
@@ -623,7 +885,6 @@ def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) 
         op_free = int(econ.get("op_free_balance", 0))
         if not ratios or not maxes or not op_free:
             return out
-        # رتّب اللاعبين حسب مجموع نقاطهم في هذا القالب داخل جدول quiz_stage_runs
         try:
             with _http_client() as client:
                 url = _table_url("quiz_stage_runs")
@@ -643,7 +904,7 @@ def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) 
             return out
         ranking = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
         rank = None
-        for i,(uid, _) in enumerate(ranking, start=1):
+        for i, (uid, _) in enumerate(ranking, start=1):
             if uid == user_id:
                 rank = i; break
         if not rank or rank > 3:
@@ -668,9 +929,6 @@ def _maybe_top3_award_on_stage10(user_id: int, template_id: str, stage_no: int) 
     return out
 
 def get_leaderboard_top(n: int = 10) -> list[dict]:
-    """
-    قائمة أعلى المستخدمين حسب النقاط من جدول houssin363.
-    """
     n = int(max(1, min(100, n)))
     try:
         with _http_client() as client:
@@ -682,12 +940,7 @@ def get_leaderboard_top(n: int = 10) -> list[dict]:
     except Exception:
         return []
 
-# ==== [PATCH-2] لوحة ترتيب بالتقدّم (stage, stage_done) ====
 def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
-    """
-    يُرجع أعلى اللاعبين حسب التقدّم: المرحلة ثم عدد الأسئلة المنجزة في المرحلة.
-    البنية: [{"user_id": int, "name": str, "stage": int, "stage_done": int, "points": int, "balance": int}]
-    """
     n = int(max(1, min(100, n)))
     rows = []
     try:
@@ -712,7 +965,7 @@ def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
             "points": int((wallet or {}).get("points") or 0),
             "balance": int((wallet or {}).get("balance") or 0),
             "stage": int(r.get("stage") or 0),
-            "stage_done": int(r.get("stage_done") or 0),
+            "stage_done": int((r.get("stage_done") or 0)),
         })
     return out
 
