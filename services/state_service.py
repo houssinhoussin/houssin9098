@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
 from database.db import get_table
+import logging, time  # ← إضافة
 
 TABLE = "user_state"
 DEFAULT_STATE_KEY = "global"
@@ -45,9 +46,25 @@ def _expires_from_ttl(ttl_minutes: Optional[int]) -> Optional[datetime]:
 
 # ===================== Low-level DB =====================
 
+# ← إضافة: منطق إعادة المحاولة مع backoff خفيف
+_RETRIES = 3
+_BACKOFF = 0.8  # seconds
+
+def _with_retry(op, *args, **kwargs):
+    for i in range(_RETRIES):
+        try:
+            return op(*args, **kwargs)
+        except Exception as e:
+            if i == _RETRIES - 1:
+                raise
+            logging.warning("state_service retry %s/%s: %s", i + 1, _RETRIES, e)
+            time.sleep(_BACKOFF * (i + 1))
+
 def _select_row(user_id: int, *, state_key: str = DEFAULT_STATE_KEY) -> Optional[Dict[str, Any]]:
     tbl = get_table(TABLE)
-    resp = tbl.select("*").eq("user_id", user_id).eq("state_key", state_key).limit(1).execute()
+    resp = _with_retry(
+        tbl.select("*").eq("user_id", user_id).eq("state_key", state_key).limit(1).execute
+    )
     data = getattr(resp, "data", None) or []
     return data[0] if data else None
 
@@ -61,12 +78,12 @@ def _upsert_row(user_id: int, *, vars_dict: Dict[str, Any], expires_at: Optional
     if expires_at is not None:
         payload["expires_at"] = _to_iso(expires_at)
     # on_conflict requires UNIQUE(user_id,state_key)
-    resp = tbl.upsert(payload, on_conflict="user_id,state_key").execute()
+    resp = _with_retry(tbl.upsert(payload, on_conflict="user_id,state_key").execute)
     return getattr(resp, "data", None) or []
 
 def _delete_row(user_id: int, *, state_key: str = DEFAULT_STATE_KEY) -> None:
     tbl = get_table(TABLE)
-    tbl.delete().eq("user_id", user_id).eq("state_key", state_key).execute()
+    _with_retry(tbl.delete().eq("user_id", user_id).eq("state_key", state_key).execute)
 
 # ===================== Vars helpers =====================
 
@@ -158,10 +175,34 @@ def set_var(user_id: int, key: str, value, *, state_key: str = DEFAULT_STATE_KEY
 # ====== واجهة مستوى أعلى لتعامل القاموس بالكامل (باستثناء المفاتيح الداخلية) ======
 _INTERNAL_KEYS = {"__state", "__state_exp"}
 
+# ← إضافة: كاش خفيف لقراءات get_data فقط
+_CACHE = {}
+_CACHE_TTL = 2.0  # ثانيتان
+
+def _cache_key(user_id, state_key):
+    return f"{user_id}:{state_key or 'global'}"
+
+def _cache_get(user_id, state_key):
+    t, val = _CACHE.get(_cache_key(user_id, state_key), (0, None))
+    return val if (time.time() - t) < _CACHE_TTL else None
+
+def _cache_set(user_id, state_key, val):
+    _CACHE[_cache_key(user_id, state_key)] = (time.time(), val)
+
 def get_data(user_id: int, *, state_key: str = DEFAULT_STATE_KEY) -> Dict[str, Any]:
     """يرجع نسخة من المتغيرات العامة (بدون مفاتيح النظام)."""
-    vars_dict = _get_vars(user_id, state_key=state_key)
-    return {k: v for k, v in vars_dict.items() if k not in _INTERNAL_KEYS}
+    cached = _cache_get(user_id, state_key)
+    if cached is not None:
+        return cached
+    try:
+        row = _select_row(user_id, state_key=state_key)
+    except Exception:
+        # فشل الشبكة: ارجع حالة فارغة بدل الكراش
+        return {}
+    vars_dict = dict(row.get("vars") or {}) if row else {}
+    result = {k: v for k, v in vars_dict.items() if k not in _INTERNAL_KEYS}
+    _cache_set(user_id, state_key, result)
+    return result
 
 def set_data(user_id: int, data: Dict[str, Any], *, state_key: str = DEFAULT_STATE_KEY, ttl_minutes: int = 120) -> None:
     """يحفظ القاموس كاملاً مع الإبقاء على مفاتيح النظام كما هي وتحديث وقت الانتهاء."""
