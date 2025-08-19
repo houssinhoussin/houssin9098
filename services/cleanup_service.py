@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import threading
+import time
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from database.db import get_table
@@ -36,6 +38,20 @@ ACTIVITY_TABLES = {
     "purchases": "created_at",
 }
 
+# ====== منطق إعادة المحاولة (backoff خفيف) للتعامل مع أخطاء الشبكة/HTTP2 ======
+_RETRIES = 3
+_BACKOFF = 0.8  # ثوانٍ
+
+def _with_retry(op, *args, **kwargs):
+    for i in range(_RETRIES):
+        try:
+            return op(*args, **kwargs)
+        except Exception as e:
+            if i == _RETRIES - 1:
+                raise
+            logging.warning("cleanup_service retry %s/%s: %s", i + 1, _RETRIES, e)
+            time.sleep(_BACKOFF * (i + 1))
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -52,7 +68,7 @@ def _cutoff(hours: Optional[int] = None, days: Optional[int] = None) -> datetime
 
 def _safe_delete_by(table_name: str, col: str, cutoff_iso: str) -> int:
     try:
-        resp = get_table(table_name).delete().lte(col, cutoff_iso).execute()
+        resp = _with_retry(get_table(table_name).delete().lte(col, cutoff_iso).execute)
         data = getattr(resp, "data", None)
         return len(data) if isinstance(data, list) else -1
     except Exception as e:
@@ -90,7 +106,9 @@ def purge_ephemeral_after(hours: int = 14) -> Dict[str, int]:
 def _has_activity_since(user_id: int, since_iso: str) -> bool:
     for tbl, col in ACTIVITY_TABLES.items():
         try:
-            r = (get_table(tbl).select("id").eq("user_id", user_id).gte(col, since_iso).limit(1).execute())
+            r = _with_retry(
+                get_table(tbl).select("id").eq("user_id", user_id).gte(col, since_iso).limit(1).execute
+            )
             if getattr(r, "data", None):
                 return True
         except Exception as e:
@@ -103,11 +121,15 @@ def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[st
     cutoff_iso = _iso(_cutoff(days=days))
     rows: List[Dict[str, Any]] = []
     try:
-        resp = get_table("houssin363").select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute()
+        resp = _with_retry(
+            get_table("houssin363").select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute
+        )
         rows = getattr(resp, "data", None) or []
     except Exception:
         try:
-            resp = get_table("houssin363").select("user_id, created_at").lte("created_at", cutoff_iso).limit(limit).execute()
+            resp = _with_retry(
+                get_table("houssin363").select("user_id, created_at").lte("created_at", cutoff_iso).limit(limit).execute
+            )
             rows = getattr(resp, "data", None) or []
         except Exception as e:
             print(f"[cleanup] select houssin363 failed: {e}")
@@ -131,7 +153,7 @@ def delete_inactive_users(days: int = 33, batch_size: int = 500) -> List[int]:
     for i in range(0, len(ids), batch_size):
         chunk = ids[i:i+batch_size]
         try:
-            get_table("houssin363").delete().in_("user_id", chunk).execute()
+            _with_retry(get_table("houssin363").delete().in_("user_id", chunk).execute)
             deleted.extend(chunk)
         except Exception as e:
             print(f"[cleanup] delete houssin363 chunk failed: {e}")
