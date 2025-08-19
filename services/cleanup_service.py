@@ -66,32 +66,41 @@ def _cutoff(hours: Optional[int] = None, days: Optional[int] = None) -> datetime
         return base - timedelta(days=days)
     return base
 
-def _safe_delete_by(table_name: str, col: str, cutoff_iso: str) -> int:
+def _safe_delete_by(table_name: str, col: str, cutoff_iso: str) -> tuple[bool, int]:
+    """
+    يرجع (executed_ok, count)
+    - executed_ok=True يعني تم تنفيذ DELETE على هذا العمود بدون خطأ،
+      حتى لو لم تُرجِع Supabase صفوفًا (count=0).
+    - executed_ok=False يعني فشل (عمود غير موجود أو خطأ آخر) وننتقل للفallback التالي.
+    """
     try:
         resp = _with_retry(get_table(table_name).delete().lte(col, cutoff_iso).execute)
         data = getattr(resp, "data", None)
-        return len(data) if isinstance(data, list) else -1
+        count = len(data) if isinstance(data, list) else 0
+        return True, count
     except Exception as e:
         print(f"[cleanup] delete error on {table_name}.{col}: {e}")
-        return 0
+        return False, 0
 
 def _delete_with_fallbacks(table_name: str, cutoff_iso: str, now_iso: str) -> int:
     """
     منطق الحذف:
       1) إن وُجد عمود expire_at نحذف ما انتهى (expire_at <= الآن).
-      2) وإلا نحذف الأقدم من مدة القطع عبر created_at أو timestamp أو updated_at.
+         نتوقّف عند أول تنفيذ ناجح (حتى لو صفر صفوف).
+      2) وإلا نحذف الأقدم من مدة القطع عبر created_at ثم timestamp ثم updated_at.
+         نتوقّف عند أول تنفيذ ناجح بدون خطأ.
     """
-    count = _safe_delete_by(table_name, "expire_at", now_iso)
-    if count != 0:
-        return max(count, 0)
-    count = _safe_delete_by(table_name, "created_at", cutoff_iso)
-    if count > 0:
-        return count
-    count = _safe_delete_by(table_name, "timestamp", cutoff_iso)
-    if count > 0:
-        return count
-    count = _safe_delete_by(table_name, "updated_at", cutoff_iso)
-    return max(count, 0)
+    order = [
+        ("expire_at", now_iso),
+        ("created_at", cutoff_iso),
+        ("timestamp", cutoff_iso),
+        ("updated_at", cutoff_iso),
+    ]
+    for col, when in order:
+        executed, count = _safe_delete_by(table_name, col, when)
+        if executed:
+            return max(count, 0)
+    return 0
 
 def purge_ephemeral_after(hours: int = 14) -> Dict[str, int]:
     """حذف سجلات الجداول المؤقتة بعد 14 ساعة."""
