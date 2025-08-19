@@ -738,3 +738,65 @@ def seen_clear_user(user_id: int):
 
 def mark_seen_after_payment(user_id: int):
     return True
+# --- [Compat Shim] add_pending_request ---------------------------------------
+# يوفّر add_pending_request حتى لو كان اسم الدالة مختلفًا داخل هذا الملف
+# (enqueue_request / enqueue_pending_request / push_pending_request / add_job)
+
+# ملاحظة: هذه إضافة فقط (append-only) ولا تغيّر أي سلوك قائم إن وُجد تنفيذ فعلي.
+
+# ابحث عن تنفيذ موجود مسبقًا إن وُجد:
+_KNOWN_IMPL = None
+for _name in ("enqueue_request", "enqueue_pending_request", "push_pending_request", "add_job"):
+    _fn = globals().get(_name)
+    if callable(_fn):
+        _KNOWN_IMPL = _fn
+        break
+
+# بديل خفيف داخل الذاكرة (يُستخدم فقط عند عدم وجود تنفيذ حقيقي)
+import threading as _th, time as _time, itertools as _it, collections as _co
+
+_LOCK = _th.Lock()
+_QUEUE = _co.deque()
+_COUNTER = _it.count(1)
+
+def _fallback_add_pending_request(user_id: int, action: str = "wallet_op",
+                                  payload: dict | None = None, run_at: float | None = None) -> dict:
+    """
+    إضافة طلب مُعلّق إلى صفّ داخلي بالذاكرة — حل مؤقت لمنع توقف البوت.
+    يمكنك لاحقًا استبداله بربط حقيقي مع قاعدة البيانات أو ووركر.
+    """
+    with _LOCK:
+        job = {
+            "id": f"Q{next(_COUNTER)}",
+            "user_id": int(user_id),
+            "action": str(action),
+            "payload": dict(payload or {}),
+            "status": "pending",
+            "created_at": _time.time(),
+            "run_at": float(run_at) if run_at else None,
+        }
+        _QUEUE.append(job)
+        return job
+
+def add_pending_request(*args, **kwargs):
+    """
+    دالة متوافقة تُستخدم من handlers/wallet.py.
+    إن وُجد تنفيذ فعلي معروف، نستخدمه؛ وإلا نستخدم البديل داخل الذاكرة.
+    """
+    if callable(_KNOWN_IMPL):
+        return _KNOWN_IMPL(*args, **kwargs)
+    return _fallback_add_pending_request(*args, **kwargs)
+
+# (اختياري) توابع مساعدة للصف الداخلي — قد تفيدك مؤقتًا أثناء التطوير
+def fetch_next_pending():
+    with _LOCK:
+        return _QUEUE[0] if _QUEUE else None
+
+def pop_pending_request():
+    with _LOCK:
+        return _QUEUE.popleft() if _QUEUE else None
+
+def pending_count():
+    with _LOCK:
+        return len(_QUEUE)
+# -------------------------------------------------------------------------------
