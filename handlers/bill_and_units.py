@@ -21,6 +21,7 @@ from database.db import get_table  # موجود للتوافق لو احتجته
 # جديد: فحص الصيانة + أعلام المزايا (Feature Flags)
 from services.system_service import is_maintenance, maintenance_message
 from services.feature_flags import block_if_disabled, is_feature_enabled
+from services.feature_flags import slugify
 
 # ========== إعدادات عامة ==========
 BAND = "━━━━━━━━━━━━━━━━"
@@ -69,9 +70,7 @@ def _features_tbl():
     return get_table(_FEATURES_TABLE)
 
 def key_units(carrier: str, unit_name: str) -> str:
-    slug = (unit_name or "").strip().replace(" ", "-")
-    carr = (carrier or "").strip().lower()
-    return f"units:{carr}:{slug}"
+    return f"units:{slugify(carrier)}:{slugify(unit_name)}"
 
 def ensure_feature(key: str, label: str, default_active: bool = True) -> None:
     """يزرع سطر في features إن لم يوجد (idempotent)."""
