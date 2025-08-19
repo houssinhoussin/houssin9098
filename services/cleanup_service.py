@@ -47,6 +47,10 @@ def _with_retry(op, *args, **kwargs):
         try:
             return op(*args, **kwargs)
         except Exception as e:
+            # أخطاء المخطط (كالعمود غير الموجود) ليست مؤقتة: لا نعيد المحاولة عليها
+            msg = str(e)
+            if "42703" in msg or "does not exist" in msg.lower():
+                raise
             if i == _RETRIES - 1:
                 raise
             logging.warning("cleanup_service retry %s/%s: %s", i + 1, _RETRIES, e)
@@ -66,19 +70,44 @@ def _cutoff(hours: Optional[int] = None, days: Optional[int] = None) -> datetime
         return base - timedelta(days=days)
     return base
 
+# ====== فحص وجود العمود قبل التنفيذ لتجنب أخطاء 42703 ======
+def _column_exists(table_name: str, col: str) -> bool:
+    try:
+        # حدّ علوي صفر: استعلام خفيف فقط لاختبار وجود العمود
+        get_table(table_name).select(col).limit(0).execute()
+        return True
+    except Exception as e:
+        msg = str(e)
+        if "42703" in msg or "does not exist" in msg.lower():
+            # عمود غير موجود: نُعلم المنادي كي يتخطّاه بدون أي إعادة محاولات
+            return False
+        # خطأ آخر مؤقت (شبكة/تحميل): لا نعرقل المنادي؛ نعتبره موجودًا ونترك
+        # عملية DELETE تتولّى إعادة المحاولة عبر _with_retry.
+        print(f"[cleanup] column probe {table_name}.{col} error (ignored): {e}")
+        return True
+
 def _safe_delete_by(table_name: str, col: str, cutoff_iso: str) -> tuple[bool, int]:
     """
     يرجع (executed_ok, count)
     - executed_ok=True يعني تم تنفيذ DELETE على هذا العمود بدون خطأ،
       حتى لو لم تُرجِع Supabase صفوفًا (count=0).
-    - executed_ok=False يعني فشل (عمود غير موجود أو خطأ آخر) وننتقل للفallback التالي.
+    - executed_ok=False يعني أن العمود غير موجود أو فشل غير قابل لإعادة المحاولة،
+      وعلى المنادي تجربة عمود احتياطي.
     """
+    # أولًا: لا نجرب الحذف إن كان العمود غير موجود
+    if not _column_exists(table_name, col):
+        return False, 0
     try:
         resp = _with_retry(get_table(table_name).delete().lte(col, cutoff_iso).execute)
         data = getattr(resp, "data", None)
         count = len(data) if isinstance(data, list) else 0
         return True, count
     except Exception as e:
+        msg = str(e)
+        # أخطاء المخطط: نُشير للمنادي ليتحوّل إلى عمودٍ احتياطي دون تحذيرات متكررة
+        if "42703" in msg or "does not exist" in msg.lower():
+            print(f"[cleanup] skip non-existent column {table_name}.{col}")
+            return False, 0
         print(f"[cleanup] delete error on {table_name}.{col}: {e}")
         return False, 0
 
@@ -86,9 +115,9 @@ def _delete_with_fallbacks(table_name: str, cutoff_iso: str, now_iso: str) -> in
     """
     منطق الحذف:
       1) إن وُجد عمود expire_at نحذف ما انتهى (expire_at <= الآن).
-         نتوقّف عند أول تنفيذ ناجح (حتى لو صفر صفوف).
       2) وإلا نحذف الأقدم من مدة القطع عبر created_at ثم timestamp ثم updated_at.
-         نتوقّف عند أول تنفيذ ناجح بدون خطأ.
+      * نتوقّف عند أول تنفيذ ناجح (حتى لو صفر صفوف).
+      * عند عدم وجود العمود، نتخطّاه فورًا بدون إعادة محاولات مزعجة.
     """
     order = [
         ("expire_at", now_iso),
@@ -114,6 +143,9 @@ def purge_ephemeral_after(hours: int = 14) -> Dict[str, int]:
 
 def _has_activity_since(user_id: int, since_iso: str) -> bool:
     for tbl, col in ACTIVITY_TABLES.items():
+        # إذا كان عمود النشاط غير موجود في الجدول، نتخطّاه
+        if not _column_exists(tbl, col):
+            continue
         try:
             r = _with_retry(
                 get_table(tbl).select("id").eq("user_id", user_id).gte(col, since_iso).limit(1).execute
