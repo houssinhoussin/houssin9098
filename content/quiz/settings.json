@@ -1,5 +1,5 @@
 {
-  "seconds_per_question": 50,
+  "seconds_per_question": 45,
   "timer_tick_seconds": 5,
   "timer_bar_full": "🟩",
   "timer_bar_empty": "⬜",
@@ -29,9 +29,9 @@
 
   "timer": {
     "stage_time_s": {
-      "1-2": 50,
-      "3-5": 45,
-      "6+": 40
+      "1-2": 45,
+      "3-5": 40,
+      "6+": 35
     }
   },
 
