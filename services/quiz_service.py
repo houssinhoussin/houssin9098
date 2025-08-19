@@ -610,12 +610,15 @@ def _log_award(kind: str, user_id: int, template_id: str, syp: int, points: int,
         logger.warning("log award failed: %s", e)
 
 def _record_completion(user_id: int, template_id: str, award_points: int, award_syp: int):
+    """
+    يسجّل الإتمام لأول مرة فقط لكل template_id لكل لاعب (منع التكرار).
+    """
     try:
         sb_upsert("quiz_templates_completed", {
             "user_id": user_id,
             "template_id": template_id,
             "payload": {"award_points": int(award_points), "award_syp": int(award_syp)}
-        })
+        }, on_conflict="user_id,template_id")
     except Exception as e:
         logger.warning("record completion failed: %s", e)
 
@@ -626,28 +629,40 @@ def _last_stage_of_template(template_id: str) -> int:
     except Exception:
         return 20
 
-def _award_fixed_syp_for_template(template_id: str) -> Tuple[int, str]:
+def _user_completed_set(user_id: int) -> set[str]:
     """
-    يرجع (syp, kind) حسب T01/T05/T10، وإلا (0,"award_other")
+    يرجّع مجموعة القوالب التي أكملها اللاعب سابقًا (Distinct).
     """
-    s = load_settings()
+    try:
+        rows = sb_list("quiz_templates_completed", {"user_id": f"eq.{user_id}"}, select="template_id", limit=10000)
+        return {str(r.get("template_id")) for r in rows if r.get("template_id")}
+    except Exception:
+        return set()
+
+def _award_fixed_syp_for_completion_index(n_completed_after: int, settings: Dict[str, Any] | None = None) -> Tuple[int, str]:
+    """
+    يمنح جوائز ثابتة حسب ترتيب الإكمال الإجمالي للاعب:
+      1st completion  -> t01_syp
+      5th completion  -> t05_syp
+      10th completion -> t10_syp
+    """
+    s = settings or load_settings()
     f = (s.get("fixed_awards") or {})
-    idx = _tpl_index(template_id)
-    if idx == 1:
+    if n_completed_after == 1:
         return int(f.get("t01_syp", 12000)), "award_t01"
-    if idx == 5:
+    if n_completed_after == 5:
         return int(f.get("t05_syp", 45000)), "award_t05"
-    if idx == 10:
+    if n_completed_after == 10:
         return int(f.get("t10_syp", 500000)), "award_t10"
     return 0, "award_other"
 
 def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: int) -> dict:
     """
-    عند نهاية الملف:
-      - T01: 12,000 ل.س ثابتة
-      - T05: 45,000 ل.س ثابتة
-      - T10: 500,000 ل.س لثلاثة فائزين فقط، ثم يُقفل السباق ويُبلغ الإدمن
-    تُصرف كـ نقاط (وفق التحويل) وتُسجل العمليات وتُقدَّم المرحلة.
+    عند نهاية القالب (Template):
+      - أول إكمال في تاريخ اللاعب: 12,000 ل.س ثابتة
+      - خامس إكمال: 45,000 ل.س ثابتة
+      - عاشر إكمال: 500,000 ل.س لأول 3 فقط، ثم يُقفل السباق ويُبلغ الإدمن
+    تُصرف كـ نقاط (وفق التحويل) وتُسجّل العمليات وتُقدَّم المرحلة.
     """
     settings = load_settings()
     stars, wrongs, done = _get_stage_counters(user_id)
@@ -669,32 +684,46 @@ def compute_stage_reward_and_finalize(user_id: int, stage_no: int, questions: in
         _reset_stage_counters(user_id)
         return {"questions": int(total_q), "wrong_attempts": int(wrongs), "stars": int(stars), "reward_points": 0, "points_after": int(pts_now)}
 
-    syp_award, kind = _award_fixed_syp_for_template(tpl_id)
+    # --- منطق الجوائز الجديد حسب عدد القوالب المكتملة ---
+    completed_before = _user_completed_set(user_id)
+    already_done_this_template = (tpl_id in completed_before)
 
-    # T10: تحقق من عدد الفائزين وإقفال المسابقة بعد الثالث
-    if kind == "award_t10":
-        comp = _comp_state_get()
-        top_n = int((settings.get("fixed_awards") or {}).get("t10_top_n", 3))
-        if comp.get("locked"):
-            syp_award = 0  # مقفلة
-        elif int(comp.get("t10_winners", 0)) >= top_n:
-            comp["locked"] = True
-            _comp_state_set(comp)
-            syp_award = 0
-        else:
-            comp["t10_winners"] = int(comp.get("t10_winners", 0)) + 1
-            if comp["t10_winners"] >= top_n:
+    syp_award = 0
+    kind = "award_other"
+
+    if not already_done_this_template:
+        n_after = len(completed_before) + 1
+        syp_award, kind = _award_fixed_syp_for_completion_index(n_after, settings)
+
+        # جائزة الإكمال العاشر: طبّق حدّ top_n وإقفال المسابقة كما في السابق
+        if kind == "award_t10":
+            comp = _comp_state_get()
+            top_n = int((settings.get("fixed_awards") or {}).get("t10_top_n", 3))
+            if comp.get("locked"):
+                syp_award = 0  # مقفلة
+            elif int(comp.get("t10_winners", 0)) >= top_n:
                 comp["locked"] = True
-                _notify_admin_restart({"reason": "t10_winners_reached", "cycle": int(comp.get("cycle", 1)), "winners": comp["t10_winners"]})
-            _comp_state_set(comp)
+                _comp_state_set(comp)
+                syp_award = 0
+            else:
+                comp["t10_winners"] = int(comp.get("t10_winners", 0)) + 1
+                if comp["t10_winners"] >= top_n:
+                    comp["locked"] = True
+                    _notify_admin_restart({"reason": "t10_winners_reached", "cycle": int(comp.get("cycle", 1)), "winners": comp["t10_winners"]})
+                _comp_state_set(comp)
 
-    # صرف كنقاط (وفق معدّل التحويل)
-    pts_award = _syp_to_points(int(max(0, syp_award)), settings)
-    _, pts_after_add = add_points(user_id, int(pts_award))
+    # صرف كنقاط (وفق معدّل التحويل) إن وُجدت جائزة
+    pts_award = _syp_to_points(int(max(0, syp_award)), settings) if syp_award > 0 else 0
+    if pts_award > 0:
+        _, pts_after_add = add_points(user_id, int(pts_award))
+    else:
+        _, pts_after_add = get_wallet(user_id)
 
     # سجل المعاملة والإتمام
     _log_award(kind, user_id, tpl_id, int(syp_award), int(pts_award), extra={"stage_no": int(stage_no)})
-    _record_completion(user_id, tpl_id, int(pts_award), int(syp_award))
+
+    if not already_done_this_template:
+        _record_completion(user_id, tpl_id, int(pts_award), int(syp_award))
 
     # تقدّم المرحلة
     st = get_progress(user_id)
