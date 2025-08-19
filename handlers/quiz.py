@@ -253,7 +253,6 @@ def wire_handlers(bot: TeleBot):
 
         st["active_msg_id"] = msg_id
         st["started_at"] = time.time()
-        st["attempts_on_current"] = 0  # بداية سؤال جديد
         user_quiz_state[user_id] = st
         persist_state(user_id)
 
