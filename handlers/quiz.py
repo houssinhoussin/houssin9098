@@ -109,7 +109,7 @@ def _question_markup(item: dict) -> types.InlineKeyboardMarkup:
     ])
     return kb
 
-def _edit_or_send(bot: TeleBot, chat_id: int, st: dict, text: str, markup: types.InlineKeyboardMarkup) -> int:
+def _edit_or_send(bot: TeleBot, chat_id: int, st: dict, text: str, markup: types.InlineKeyboardMarkup | None) -> int:
     """
     يحاول التحرير للحفاظ على شاشة واحدة. عند الفشل يُرسل رسالة جديدة
     ويحذف الرسالة السابقة إن وجدت لضمان عدم تراكم الواجهة.
@@ -144,7 +144,7 @@ def _intro_markup(can_resume: bool) -> types.InlineKeyboardMarkup:
     )
     kb.add(types.InlineKeyboardButton(text="🏆 الترتيب", callback_data="quiz_rank"))
     kb.add(types.InlineKeyboardButton(text="ℹ️ شرح اللعبة", callback_data="quiz_help"))
-    kb.add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
+    # ملاحظة: لا نعرض زر "إلغاء" ضمن واجهة المقدّمة كي لا يعيدها لنفسها
     return kb
 
 def _help_text(settings: dict) -> str:
@@ -412,10 +412,7 @@ def wire_handlers(bot: TeleBot):
 
         st["active_msg_id"] = msg_id
         st["started_at"] = time.time()
-        # 🔧 مهم: لا نصفر عدّاد المحاولات عند إعادة المحاولة لنفس السؤال.
-        # نصفره فقط عند الانتقال لسؤال جديد (بعد إجابة صحيحة)، والسبب سيظهر "skip-charge".
-        if reason == "skip-charge":
-            st["attempts_on_current"] = 0
+        st["attempts_on_current"] = 0  # بداية سؤال جديد
         user_quiz_state[user_id] = st
         persist_state(user_id)
 
@@ -548,7 +545,7 @@ def wire_handlers(bot: TeleBot):
             except Exception:
                 pass
         else:
-            # نجاح وسطي: إعفاء الخصم للسؤال التالي مُفعّل (إذا انتقلت فورًا)
+            # نجاح وسطي: إعفاء الخصم للسؤال التالي مُفعّل (إذا انتقل فورًا)
             mid_text = _fmt_success_mid(settings, ok_line, delta_pts, bal_now, pts_now)
             try:
                 bot.edit_message_text(
@@ -561,7 +558,7 @@ def wire_handlers(bot: TeleBot):
             except Exception:
                 pass
 
-    # إلغاء
+    # إلغاء — يعيد إلى "القائمة الرئيسية" بتحديث نفس الشاشة
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_cancel")
     def on_cancel(call):
         user_id = call.from_user.id
@@ -577,28 +574,28 @@ def wire_handlers(bot: TeleBot):
             except: pass
         clear_runtime(user_id)
 
-        # امسح paid_key و ألغِ إعفاء الخصم لضمان الخصم عند العودة
+        # امسح paid_key وألغِ إعفاء الخصم + فك ارتباط الرسالة النشطة
         st = user_quiz_state.get(user_id) or {}
-        # احذف واجهة اللعب الحالية لضمان الانتقال إلى القائمة الرئيسية فعليًا
-        old_msg_id = st.get("active_msg_id")
+        msg_id = st.get("active_msg_id") or call.message.message_id
         st.pop("paid_key", None)
         st["no_charge_next"] = 0
-        st["active_msg_id"] = None  # حتى لا يتم التحرير على نفس الرسالة
+        st["active_msg_id"] = None
         user_quiz_state[user_id] = st
         persist_state(user_id)
 
-        # حذف الأزرار / الرسالة القديمة إن أمكن
+        # استبدال الواجهة الحالية بواجهة "القائمة الرئيسية" (بدون أزرار)
         try:
-            if old_msg_id:
-                bot.delete_message(chat_id, old_msg_id)
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text="🏠 <b>القائمة الرئيسية</b>\nللبدء مجددًا أرسل «🎯 الحزازير (ربحي)» أو /quiz.",
+                parse_mode="HTML",
+                reply_markup=None
+            )
         except Exception:
-            try:
-                bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-            except Exception:
-                pass
-
-        # عرض القائمة الرئيسية برسالة جديدة
-        _intro_screen(bot, chat_id, user_id)
+            # في حال تعذّر التحرير نحذف الرسالة للحفاظ على شاشة واحدة
+            try: bot.delete_message(chat_id, msg_id)
+            except Exception: pass
 
 # توافق مع الاستدعاء في main.py
 attach_handlers = wire_handlers
