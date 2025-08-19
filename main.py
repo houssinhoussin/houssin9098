@@ -306,7 +306,7 @@ def start_polling():
     while True:
         try:
             bot.infinity_polling(
-                none_stop=True,
+                non_stop=True,
                 skip_pending=True,
                 long_polling_timeout=40,
             )
@@ -319,8 +319,9 @@ def start_polling():
                 time.sleep(5)
                 continue
         except Exception as e:
-            logging.critical(f"❌ خطأ غير متوقع، سيُعاد تشغيل البوت: {e}")
-            restart_bot()
-            break
+            logging.error(f"⚠️ انقطاع مؤقت في الاتصال: {e} — إعادة المحاولة بعد 10 ثوانٍ")
+            time.sleep(10)
+            continue
+
 
 start_polling()
