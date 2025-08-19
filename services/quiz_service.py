@@ -6,7 +6,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
+import logging
 
 import httpx
 
@@ -18,6 +19,9 @@ try:
     from services.queue_service import add_pending_request as _enqueue_admin
 except Exception:
     _enqueue_admin = None
+
+# ------------------------ إعداد لوجر بسيط ------------------------
+logger = logging.getLogger("quiz_service")
 
 # ------------------------ المسارات ------------------------
 BASE = Path("content/quiz")
@@ -74,6 +78,14 @@ _DEFAULT_SETTINGS = {
         "t05_syp": 45000,
         "t10_syp": 500000,
         "t10_top_n": 3
+    },
+    # fallback في حال عدم وجود "timer.stage_time_s" بالملف
+    "timer": {
+        "stage_time_s": {
+            "1-2": 50,
+            "3-5": 45,
+            "6+": 40
+        }
     }
 }
 
@@ -169,7 +181,7 @@ def persist_state(user_id: int):
     try:
         _progress_upsert(user_id, st)
     except Exception as e:
-        print("quiz_progress upsert failed:", e)
+        logger.warning("quiz_progress upsert failed: %s", e)
 
 def set_and_persist(user_id: int, st: Dict[str, Any]):
     user_quiz_state[user_id] = st
@@ -188,6 +200,34 @@ def load_settings(refresh: bool = False) -> Dict[str, Any]:
     merged.update(data or {})
     _SETTINGS_CACHE = merged
     return merged
+
+# ------------------------ زمن كل سؤال حسب المرحلة ------------------------
+def get_stage_time(stage_no: int, settings: Dict[str, Any] | None = None) -> int:
+    """
+    يقرأ settings['timer']['stage_time_s'] بنطاقات مثل:
+      "1-2": 50,  "3-5": 45,  "6+": 40
+    وإلا يرجع seconds_per_question الافتراضي.
+    """
+    s = settings or load_settings()
+    default_s = int(s.get("seconds_per_question", _DEFAULT_SETTINGS["seconds_per_question"]))
+    timer_cfg = (s.get("timer") or {}).get("stage_time_s") or {}
+    try:
+        stage_no = int(stage_no)
+    except Exception:
+        stage_no = 1
+    for rng, val in timer_cfg.items():
+        try:
+            if rng.endswith("+"):
+                lo = int(rng[:-1])
+                if stage_no >= lo:
+                    return int(val)
+            elif "-" in rng:
+                lo, hi = [int(x) for x in rng.split("-", 1)]
+                if lo <= stage_no <= hi:
+                    return int(val)
+        except Exception:
+            continue
+    return default_s
 
 # ------------------------ ترتيب القوالب ------------------------
 def _read_templates_order() -> List[str]:
@@ -286,10 +326,10 @@ def _log_attempt_fee(user_id: int, stage_no: int, amount: int):
         sb_upsert("transactions", {
             "user_id": user_id,
             "kind": "attempt_fee",
-            "payload": json.dumps({"stage_no": int(stage_no), "amount": int(amount)}, ensure_ascii=False)
+            "payload": {"stage_no": int(stage_no), "amount": int(amount)}
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("log attempt_fee failed: %s", e)
 
 def deduct_fee_for_stage(user_id: int, stage_no: int) -> Tuple[bool, int, int]:
     price = get_attempt_price(stage_no)
@@ -347,13 +387,6 @@ def reset_progress(user_id: int, template_id: Optional[str] = None) -> Dict[str,
     return state
 
 # ------------------------ أسئلة/مراحل ------------------------
-def _timer_bar(remaining: int, settings: Dict[str, Any]) -> str:
-    full = settings.get("timer_bar_full", "🟩"); empty = settings.get("timer_bar_empty", "⬜")
-    total = 10
-    ratio = remaining / max(1, int(settings.get("seconds_per_question", 60)))
-    filled = max(0, min(total, int(round(ratio * total))))
-    return full * filled + empty * (total - filled)
-
 def _question_id(tpl_id: str, stage_no: int, item: dict, q_idx: int) -> str:
     qid = str(item.get("id", q_idx))
     return f"{tpl_id}:{stage_no}:{qid}"
@@ -434,26 +467,50 @@ def _reset_stage_counters(user_id: int):
     st["stage_done"] = 0
     set_and_persist(user_id, st)
 
+def register_wrong_attempt(user_id: int):
+    """تُسجّل محاولة خاطئة (لا ترفع السؤال الحالي)."""
+    try:
+        st = get_progress(user_id) or reset_progress(user_id)
+        st["stage_wrong_attempts"] = int(st.get("stage_wrong_attempts", 0)) + 1
+        st["no_charge_next"] = 0  # لا إعفاء بعد خطأ
+        set_and_persist(user_id, st)
+    except Exception as e:
+        logger.warning("register_wrong_attempt failed: %s", e)
+
+def register_correct_answer(user_id: int):
+    """تُسجّل إجابة صحيحة وتُفعّل إعفاء الخصم للسؤال التالي."""
+    try:
+        st = get_progress(user_id) or reset_progress(user_id)
+        st["stage_stars"] = int(st.get("stage_stars", 0)) + 1
+        st["stage_done"] = int(st.get("stage_done", 0)) + 1
+        st["no_charge_next"] = 1  # إعفاء للسؤال التالي
+        set_and_persist(user_id, st)
+    except Exception as e:
+        logger.warning("register_correct_answer failed: %s", e)
+
 # ------------------------ إدارة دورة المسابقة (T10) ------------------------
 def _comp_state_get() -> Dict[str, Any]:
     # نحاول من جدول app_state(key,value json) وإلا Fallback بالذاكرة
     try:
         row = sb_select_one("app_state", {"key": "eq.quiz_competition_state"}, select="key,value")
-        if row and row.get("value"):
+        if row and row.get("value") is not None:
             v = row["value"]
             if isinstance(v, str):
                 v = json.loads(v)
+            if not isinstance(v, dict):
+                v = {}
             for k, d in {"cycle": 1, "t10_winners": 0, "locked": False}.items():
                 v.setdefault(k, d)
             return v
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("comp_state_get failed: %s", e)
     return dict(_COMP_STATE_FALLBACK)
 
 def _comp_state_set(state: Dict[str, Any]):
     try:
-        sb_upsert("app_state", {"key": "quiz_competition_state", "value": json.dumps(state, ensure_ascii=False)}, on_conflict="key")
-    except Exception:
+        sb_upsert("app_state", {"key": "quiz_competition_state", "value": state}, on_conflict="key")
+    except Exception as e:
+        logger.warning("comp_state_set failed: %s", e)
         _COMP_STATE_FALLBACK.update(state)
 
 def admin_reset_competition():
@@ -479,10 +536,10 @@ def _notify_admin_restart(payload: Dict[str, Any]):
             sb_upsert("transactions", {
                 "user_id": 0,
                 "kind": "admin_notify",
-                "payload": json.dumps({"action": "competition_restart", **payload}, ensure_ascii=False)
+                "payload": {"action": "competition_restart", **payload}
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("notify_admin failed: %s", e)
 
 # ------------------------ صرف الجوائز الثابتة ------------------------
 def _log_award(kind: str, user_id: int, template_id: str, syp: int, points: int, extra: Dict[str, Any] | None = None):
@@ -493,20 +550,20 @@ def _log_award(kind: str, user_id: int, template_id: str, syp: int, points: int,
         sb_upsert("transactions", {
             "user_id": user_id,
             "kind": kind,
-            "payload": json.dumps(payload, ensure_ascii=False)
+            "payload": payload
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("log award failed: %s", e)
 
 def _record_completion(user_id: int, template_id: str, award_points: int, award_syp: int):
     try:
         sb_upsert("quiz_templates_completed", {
             "user_id": user_id,
             "template_id": template_id,
-            "payload": json.dumps({"award_points": int(award_points), "award_syp": int(award_syp)}, ensure_ascii=False)
+            "payload": {"award_points": int(award_points), "award_syp": int(award_syp)}
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("record completion failed: %s", e)
 
 def _last_stage_of_template(template_id: str) -> int:
     tpl = load_template(template_id)
@@ -643,10 +700,10 @@ def convert_points_to_balance(user_id: int):
         sb_upsert("transactions", {
             "user_id": user_id,
             "kind": "convert_points_to_balance",
-            "payload": json.dumps({"units": units, "points_spent": pts_spent, "syp_added": syp_add}, ensure_ascii=False)
+            "payload": {"units": units, "points_spent": pts_spent, "syp_added": syp_add}
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("log convert_points_to_balance failed: %s", e)
     return pts, syp_add, pts_after
 
 # لوائح وشاشات ترتيب
