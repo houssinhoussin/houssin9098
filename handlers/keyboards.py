@@ -32,7 +32,7 @@ def transfers_menu():
 def game_categories():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row("🎯 شحن شدات ببجي العالمية", "🔥 شحن جواهر فري فاير")
-    markup.row("🏏 تطبيق جواكر")
+    markup.row("🏏 تطبيق جواكر", "🎮 شحن العاب و تطبيقات مختلفة")
     markup.row("⬅️ رجوع")
     return markup
 
