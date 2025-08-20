@@ -124,15 +124,15 @@ SYRIATEL_UNITS = [
 ]
 
 MTN_UNITS = [
-    {"name": "1000 وحدة", "price": 1200},
-    {"name": "5000 وحدة", "price": 6000},
-    {"name": "7000 وحدة", "price": 8400},
-    {"name": "10000 وحدة", "price": 12000},
-    {"name": "15000 وحدة", "price": 18000},
-    {"name": "20000 وحدة", "price": 24000},
-    {"name": "23000 وحدة", "price": 27600},
-    {"name": "30000 وحدة", "price": 36000},
-    {"name": "36000 وحدة", "price": 43200},
+    {"name": "1000 وحدة", "price": 1125},
+    {"name": "5000 وحدة", "price": 5625},
+    {"name": "8500 وحدة", "price": 9557},
+    {"name": "10000 وحدة", "price": 11242},
+    {"name": "15000 وحدة", "price": 16865},
+    {"name": "20000 وحدة", "price": 22485},
+    {"name": "30000 وحدة", "price": 33728},
+    {"name": "50000 وحدة", "price": 56215},
+    {"name": "100000 وحدة", "price": 112425},
 ]
 
 from services.state_adapter import UserStateDictLike
