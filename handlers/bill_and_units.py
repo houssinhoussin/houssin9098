@@ -699,7 +699,7 @@ def register_bill_and_units(bot, history):
         user_id = call.from_user.id
         amount = user_states[user_id]["amount"]
         # ✅ بدون float: 10% = amount * 10 // 100
-        fee = amount * 10 // 100
+        fee = amount * 7 // 100
         amount_with_fee = amount + fee
         user_states[user_id]["amount_with_fee"] = amount_with_fee
         user_states[user_id]["step"] = "syr_bill_final_confirm"
@@ -841,7 +841,7 @@ def register_bill_and_units(bot, history):
     def confirm_mtn_bill_amount(call):
         user_id = call.from_user.id
         amount = user_states[user_id]["amount"]
-        fee = amount * 10 // 100  # ✅ بدون float
+        fee = amount * 7 // 100  # ✅ بدون float
         amount_with_fee = amount + fee
         user_states[user_id]["amount_with_fee"] = amount_with_fee
         user_states[user_id]["step"] = "mtn_bill_final_confirm"
