@@ -594,113 +594,113 @@ def register_bill_and_units(bot, history):
         )
         user_states[user_id]["step"] = "wait_admin_syr_kazia"
     # ===== MTN كازية: كود ثم رقم الكازية ثم تأكيد =====
-@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "mtn_kz_code")
-def mtn_kz_code(msg):
-    user_id = msg.from_user.id
-    code = msg.text.strip()
-    state = user_states[user_id]
-    state["code"] = code
-    state["step"] = "mtn_kz_number"
-    kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
-    bot.send_message(msg.chat.id, with_cancel_hint("📍 أدخل رقم كازية MTN:"), reply_markup=kb)
-
-@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "mtn_kz_number")
-def mtn_kz_number(msg):
-    user_id = msg.from_user.id
-    station = msg.text.strip()
-    state = user_states[user_id]
-    state["station"] = station
-    state["step"] = "mtn_kz_confirm"
-    it = state["kz"]
-    kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✔️ تأكيد الطلب", "mtn_kz_final_confirm"))
-    lines = [
-        f"المبلغ: {_fmt_syp(int(it['amount']))}",
-        f"السعر:  {_fmt_syp(int(it['price']))}",
-        f"الكود:   {state['code']}",
-        f"رقم الكازية: {station}",
-        "نكمّل الطلب؟ 😉"
-    ]
-    bot.send_message(msg.chat.id, with_cancel_hint(banner("🧾 تأكيد عملية (جملة كازية MTN)", lines)), reply_markup=kb)
-
-@bot.callback_query_handler(func=lambda call: call.data == "mtn_kz_final_confirm")
-def mtn_kz_final_confirm(call):
-    user_id = call.from_user.id
-    if confirm_guard(bot, call, "mtn_kz_final_confirm"):
-        return
-    name = _user_name(call)
-
-    if is_maintenance():
-        return bot.send_message(call.message.chat.id, maintenance_message())
-    if block_if_disabled(bot, call.message.chat.id, "mtn_kazia", "جملة (كازية) MTN"):
-        return
-
-    state = user_states.get(user_id, {})
-    it = state.get("kz") or {}
-    code = state.get("code") or ""
-    station = state.get("station") or ""
-    amount = int(it.get("amount") or 0)
-    price  = int(it.get("price")  or 0)
-
-    if require_feature_or_alert(bot, call.message.chat.id, key_kazia("MTN", amount),
-                                f"كازية MTN — {amount:,} ل.س"):
-        return
-
-    available = get_available_balance(user_id)
-    if available < price:
-        missing = price - (available or 0)
+    @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "mtn_kz_code")
+    def mtn_kz_code(msg):
+        user_id = msg.from_user.id
+        code = msg.text.strip()
+        state = user_states[user_id]
+        state["code"] = code
+        state["step"] = "mtn_kz_number"
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
-        return bot.send_message(
-            call.message.chat.id,
-            with_cancel_hint(banner("❌ رصيدك مش مكفّي", [f"متاحك: {_fmt_syp(available)}",
-                                                        f"المطلوب: {_fmt_syp(price)}",
-                                                        f"الناقص: {_fmt_syp(missing)}"])),
-            reply_markup=kb
+        bot.send_message(msg.chat.id, with_cancel_hint("📍 أدخل رقم كازية MTN:"), reply_markup=kb)
+
+    @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "mtn_kz_number")
+    def mtn_kz_number(msg):
+        user_id = msg.from_user.id
+        station = msg.text.strip()
+        state = user_states[user_id]
+        state["station"] = station
+        state["step"] = "mtn_kz_confirm"
+        it = state["kz"]
+        kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✔️ تأكيد الطلب", "mtn_kz_final_confirm"))
+        lines = [
+            f"المبلغ: {_fmt_syp(int(it['amount']))}",
+            f"السعر:  {_fmt_syp(int(it['price']))}",
+            f"الكود:   {state['code']}",
+            f"رقم الكازية: {station}",
+            "نكمّل الطلب؟ 😉"
+        ]
+        bot.send_message(msg.chat.id, with_cancel_hint(banner("🧾 تأكيد عملية (جملة كازية MTN)", lines)), reply_markup=kb)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "mtn_kz_final_confirm")
+    def mtn_kz_final_confirm(call):
+        user_id = call.from_user.id
+        if confirm_guard(bot, call, "mtn_kz_final_confirm"):
+            return
+        name = _user_name(call)
+
+        if is_maintenance():
+            return bot.send_message(call.message.chat.id, maintenance_message())
+        if block_if_disabled(bot, call.message.chat.id, "mtn_kazia", "جملة (كازية) MTN"):
+            return
+
+        state = user_states.get(user_id, {})
+        it = state.get("kz") or {}
+        code = state.get("code") or ""
+        station = state.get("station") or ""
+        amount = int(it.get("amount") or 0)
+        price  = int(it.get("price")  or 0)
+
+        if require_feature_or_alert(bot, call.message.chat.id, key_kazia("MTN", amount),
+                                    f"كازية MTN — {amount:,} ل.س"):
+            return
+
+        available = get_available_balance(user_id)
+        if available < price:
+            missing = price - (available or 0)
+            kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
+            return bot.send_message(
+                call.message.chat.id,
+                with_cancel_hint(banner("❌ رصيدك مش مكفّي", [f"متاحك: {_fmt_syp(available)}",
+                                                            f"المطلوب: {_fmt_syp(price)}",
+                                                            f"الناقص: {_fmt_syp(missing)}"])),
+                reply_markup=kb
+            )
+
+        hold_id = None
+        try:
+            resp = create_hold(user_id, price, f"حجز جملة كازية MTN - {amount:,} ل.س")
+            hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
+        except Exception as e:
+            logging.exception("create_hold failed: %s", e)
+
+        if not hold_id:
+            return bot.send_message(call.message.chat.id, f"⚠️ يا {name}، حصل عطل بسيط في إنشاء الحجز. جرّب تاني بعد دقيقة.\n\n{CANCEL_HINT}")
+
+        bal_now = get_balance(user_id)
+        admin_msg = (
+            f"🧾 طلب جملة (كازية) MTN\n"
+            f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
+            f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
+            f"آيدي: <code>{user_id}</code>\n"
+            f"🔖 المبلغ: {amount:,} ل.س\n"
+            f"💵 السعر: {price:,} ل.س\n"
+            f"🔐 الكود: <code>{code}</code>\n"
+            f"🏷️ رقم الكازية: <code>{station}</code>\n"
+            f"💼 رصيد المستخدم الآن: {bal_now:,} ل.س\n"
+            f"(type=mtn_kazia)"
         )
 
-    hold_id = None
-    try:
-        resp = create_hold(user_id, price, f"حجز جملة كازية MTN - {amount:,} ل.س")
-        hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
-    except Exception as e:
-        logging.exception("create_hold failed: %s", e)
-
-    if not hold_id:
-        return bot.send_message(call.message.chat.id, f"⚠️ يا {name}، حصل عطل بسيط في إنشاء الحجز. جرّب تاني بعد دقيقة.\n\n{CANCEL_HINT}")
-
-    bal_now = get_balance(user_id)
-    admin_msg = (
-        f"🧾 طلب جملة (كازية) MTN\n"
-        f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
-        f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
-        f"آيدي: <code>{user_id}</code>\n"
-        f"🔖 المبلغ: {amount:,} ل.س\n"
-        f"💵 السعر: {price:,} ل.س\n"
-        f"🔐 الكود: <code>{code}</code>\n"
-        f"🏷️ رقم الكازية: <code>{station}</code>\n"
-        f"💼 رصيد المستخدم الآن: {bal_now:,} ل.س\n"
-        f"(type=mtn_kazia)"
-    )
-
-    add_pending_request(
-        user_id=user_id,
-        username=call.from_user.username,
-        request_text=admin_msg,
-        payload={
-            "type": "mtn_kazia",
-            "code": code,
-            "station_number": station,
-            "amount": amount,
-            "price": price,
-            "reserved": price,
-            "hold_id": hold_id,
-        }
-    )
-    process_queue(bot)
-    bot.send_message(
-        call.message.chat.id,
-        banner(f"✅ تمام يا {name}! طلبك في السكة 🚀", ["هننجّزها بسرعة ✌️ وهيوصلك إشعار أول ما نكمّل."])
-    )
-    user_states[user_id]["step"] = "wait_admin_mtn_kazia"
+        add_pending_request(
+            user_id=user_id,
+            username=call.from_user.username,
+            request_text=admin_msg,
+            payload={
+                "type": "mtn_kazia",
+                "code": code,
+                "station_number": station,
+                "amount": amount,
+                "price": price,
+                "reserved": price,
+                "hold_id": hold_id,
+            }
+        )
+        process_queue(bot)
+        bot.send_message(
+            call.message.chat.id,
+            banner(f"✅ تمام يا {name}! طلبك في السكة 🚀", ["هننجّزها بسرعة ✌️ وهيوصلك إشعار أول ما نكمّل."])
+        )
+        user_states[user_id]["step"] = "wait_admin_mtn_kazia"
 
     # ===== إلغاء عام (زر cancel_all) =====
     @bot.callback_query_handler(func=lambda call: call.data == "cancel_all")
