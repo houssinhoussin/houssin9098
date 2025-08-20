@@ -306,7 +306,13 @@ def register_bill_and_units(bot, history):
             return bot.answer_callback_query(call.id)
 
         if action == "back":
-            bot.edit_message_text("⬅️ رجعناك للقائمة.", chat_id, call.message.message_id)
+            # ✅ صفّر الحالة قبل الرجوع حتى لا تبقى الهاندلرات السابقة فعالة
+            _reset_state(user_id)
+            try:
+                bot.edit_message_text("⬅️ رجعناك للقائمة.", chat_id, call.message.message_id)
+            except Exception:
+                # لو الرسالة الأصلية غير قابلة للتعديل أو انحذفت، نكمل برسالة جديدة
+                pass
             bot.send_message(chat_id, "اختار من القائمة:", reply_markup=units_bills_menu_inline())
             return bot.answer_callback_query(call.id)
 
@@ -395,10 +401,6 @@ def register_bill_and_units(bot, history):
             )
             return bot.answer_callback_query(call.id, text=_unit_label(unit))
 
-        if action == "back":
-            bot.edit_message_text("🎛️ اختار الخدمة:", chat_id, call.message.message_id, reply_markup=units_bills_menu_inline())
-            return bot.answer_callback_query(call.id)
-
         bot.answer_callback_query(call.id)
 
     # ===== كولباك وحدات MTN =====
@@ -429,10 +431,6 @@ def register_bill_and_units(bot, history):
                 chat_id, call.message.message_id, reply_markup=kb
             )
             return bot.answer_callback_query(call.id, text=_unit_label(unit))
-
-        if action == "back":
-            bot.edit_message_text("🎛️ اختار الخدمة:", chat_id, call.message.message_id, reply_markup=units_bills_menu_inline())
-            return bot.answer_callback_query(call.id)
 
         bot.answer_callback_query(call.id)
 
@@ -721,6 +719,17 @@ def register_bill_and_units(bot, history):
             bot.answer_callback_query(call.id)
         except Exception:
             pass
+            
+    # ===== رجوع (ReplyKeyboard) — يعمل في جميع مراحل الريلاي كيبورد =====
+    @bot.message_handler(func=lambda msg: msg.text == "⬅️ رجوع")
+    def reply_back_btn(msg):
+        # ✅ تصفير الحالة وإزالة كيبورد الريلاي، ثم الرجوع للقائمة الرئيسية (Inline)
+        _reset_state(msg.from_user.id)
+        try:
+            bot.send_message(msg.chat.id, "⬅️ رجعناك للقائمة.", reply_markup=types.ReplyKeyboardRemove())
+        except Exception:
+            pass
+        bot.send_message(msg.chat.id, "اختار من القائمة:", reply_markup=units_bills_menu_inline())
 
     # ===================================================================
     #   (التوافق) مسارات الـ ReplyKeyboard القديمة — من غير حذف
