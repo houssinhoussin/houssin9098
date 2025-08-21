@@ -655,7 +655,7 @@ def setup_inline_handlers(bot, admin_ids):
                 reply_markup=kb
             )
         bot.answer_callback_query(call.id)
-    bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
+        bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
     
     # ✅ ضغط على منتج موقوف — نعطي تنبيه فقط
     @bot.callback_query_handler(func=lambda c: c.data.startswith("prod_inactive:"))
