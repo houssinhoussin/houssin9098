@@ -149,7 +149,29 @@ PRODUCTS = {
         Product(25, "60000 توكنز", "ألعاب", 8.04, "زر 60000 توكنز"),
         Product(26, "120000 توكنز", "ألعاب", 16.08, "زر 120000 توكنز"),
     ],
+    "MixedApps": [
+        # === Call of Duty ===
+        Product(27, "Call of Duty — 88 نقطة",  "ألعاب/تطبيقات", 1.28,  "COD 88 CP"),
+        Product(28, "Call of Duty — 460 نقطة", "ألعاب/تطبيقات", 5.56,  "COD 460 CP"),
+        Product(29, "Call of Duty — 960 نقطة", "ألعاب/تطبيقات", 9.56,  "COD 960 CP"),
+        Product(30, "Call of Duty — 2600 نقطة","ألعاب/تطبيقات", 24.13, "COD 2600 CP"),
+        Product(31, "Call of Duty — Battle Pass",        "ألعاب/تطبيقات", 3.08, "COD Battle Pass"),
+        Product(32, "Call of Duty — Battle Pass Bundle",  "ألعاب/تطبيقات", 7.08, "COD Battle Pass Bundle"),
+
+        # === Bigo Live ===
+        Product(33, "Bigo Live — 50 ألماس",   "ألعاب/تطبيقات", 0.94,  "Bigo Live 50 Diamonds"),
+        Product(34, "Bigo Live — 100 ألماس",  "ألعاب/تطبيقات", 1.88,  "Bigo Live 100 Diamonds"),
+        Product(35, "Bigo Live — 200 ألماس",  "ألعاب/تطبيقات", 3.64,  "Bigo Live 200 Diamonds"),
+        Product(36, "Bigo Live — 400 ألماس",  "ألعاب/تطبيقات", 7.25,  "Bigo Live 400 Diamonds"),
+        Product(37, "Bigo Live — 600 ألماس",  "ألعاب/تطبيقات", 10.86, "Bigo Live 600 Diamonds"),
+        Product(38, "Bigo Live — 1000 ألماس", "ألعاب/تطبيقات", 18.09, "Bigo Live 1000 Diamonds"),
+        Product(39, "Bigo Live — 1500 ألماس", "ألعاب/تطبيقات", 27.09, "Bigo Live 1500 Diamonds"),
+        Product(40, "Bigo Live — 2000 ألماس", "ألعاب/تطبيقات", 36.12, "Bigo Live 2000 Diamonds"),
+        Product(41, "Bigo Live — 3000 ألماس", "ألعاب/تطبيقات", 54.19, "Bigo Live 3000 Diamonds"),
+        Product(42, "Bigo Live — 4000 ألماس", "ألعاب/تطبيقات", 72.22, "Bigo Live 4000 Diamonds"),
+    ],
 }
+
 
 def convert_price_usd_to_syp(usd):
     # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
@@ -346,6 +368,7 @@ def register_message_handlers(bot, history):
         "🎯 شحن شدات ببجي العالمية",
         "🔥 شحن جواهر فري فاير",
         "🏏 تطبيق جواكر"
+        "🎮 شحن العاب و تطبيقات مختلفة"
     ])
     def game_handler(msg):
         user_id = msg.from_user.id
@@ -361,6 +384,7 @@ def register_message_handlers(bot, history):
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
             "🏏 تطبيق جواكر": "Jawaker"
+            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps"
         }
         category = category_map[msg.text]
         history.setdefault(user_id, []).append("product_options")
