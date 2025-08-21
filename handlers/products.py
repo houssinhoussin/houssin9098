@@ -666,7 +666,7 @@ def setup_inline_handlers(bot, admin_ids):
             for p in items:
                 if p.product_id == pid:
                     name = p.name
-                break
+                    break
             if name:
                 break
         _hide_inline_kb(bot, call)  # ← أولًا
@@ -715,7 +715,7 @@ def setup_inline_handlers(bot, admin_ids):
                     _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
                     reply_markup=kb
                 )
-
+        bot.answer_callback_query(call.id)  # ✅ مهم جدًا لإيقاف الـspinner
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
         _hide_inline_kb(bot, call)
@@ -813,6 +813,8 @@ def setup_inline_handlers(bot, admin_ids):
                     return
                 logging.error("create_hold RPC error: %s", resp.error)
                 bot.send_message(user_id, f"❌ يا {name}، حصل خطأ بسيط أثناء الحجز. جرّب كمان شوية.")
+                return
+
             data = getattr(resp, "data", None)
             if isinstance(data, dict):
                 hold_id = data.get("id") or data.get("hold_id")
