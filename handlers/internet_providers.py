@@ -53,7 +53,7 @@ except Exception:
 #       إعدادات عامة / ثوابت
 # =====================================
 BAND = "━━━━━━━━━━━━━━━━"
-COMMISSION_PER_10000 = 1500
+COMMISSION_PER_10000 = 1400
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 
 INTERNET_PROVIDERS = [
@@ -102,7 +102,7 @@ def _fmt_syp(n) -> str:
 def _commission(amount: int) -> int:
     if amount <= 0:
         return 0
-    # سقف لأعلى (كل 10000 عليها 1500): بدون أعداد عشرية
+    # سقف لأعلى (كل 10000 عليها 1400): بدون أعداد عشرية
     blocks = (amount + 10000 - 1) // 10000
     return blocks * COMMISSION_PER_10000
 def _client_card(title: str, lines: list[str]) -> str:
