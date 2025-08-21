@@ -102,8 +102,8 @@ def _fmt_syp(n) -> str:
 def _commission(amount: int) -> int:
     if amount <= 0:
         return 0
-    # سقف لأعلى (كل 5000 عليها 600): بدون أعداد عشرية
-    blocks = (amount + 5000 - 1) // 5000
+    # سقف لأعلى (كل 10000 عليها 1500): بدون أعداد عشرية
+    blocks = (amount + 10000 - 1) // 10000
     return blocks * COMMISSION_PER_10000
 def _client_card(title: str, lines: list[str]) -> str:
     body = "\n".join(lines)
