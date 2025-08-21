@@ -174,7 +174,7 @@ def _confirm_inline_kb() -> types.InlineKeyboardMarkup:
 def _insufficient_kb() -> types.InlineKeyboardMarkup | None:
     kb = types.InlineKeyboardMarkup()
     if keyboards and hasattr(keyboards, "recharge_menu"):
-        kb.add(types.InlineKeyboardButton("💳 شحن المحفظة", callback_d[ata=CB_RECHARGE))
+        kb.add(types.InlineKeyboardButton("💳 شحن المحفظة", callback_data=CB_RECHARGE))
         kb.add(types.InlineKeyboardButton("⬅️ رجوع للسرعات", callback_data=CB_BACK_SPEED))
         return kb
     # بدون قائمة شحن — نرجع None ونكتفي برسالة
