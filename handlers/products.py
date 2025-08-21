@@ -589,6 +589,7 @@ def setup_inline_handlers(bot, admin_ids):
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
         msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
+        bot.answer_callback_query(call.id)
 
     # ✅ (جديد) فتح تصنيف فرعي داخل MixedApps (Call of Duty / Bigo Live ...)
     @bot.callback_query_handler(func=lambda c: c.data.startswith("open_subcat:"))
@@ -654,22 +655,22 @@ def setup_inline_handlers(bot, admin_ids):
                 reply_markup=kb
             )
         bot.answer_callback_query(call.id)
-
+    bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
+    
     # ✅ ضغط على منتج موقوف — نعطي تنبيه فقط
     @bot.callback_query_handler(func=lambda c: c.data.startswith("prod_inactive:"))
     def _inactive_alert(call):
         pid = int(call.data.split(":", 1)[1])
-        # العثور على الاسم للرسالة
         name = None
         for items in PRODUCTS.values():
             for p in items:
                 if p.product_id == pid:
                     name = p.name
-                    break
+                break
             if name:
                 break
+        _hide_inline_kb(bot, call)  # ← أولًا
         bot.answer_callback_query(call.id, _unavailable_short(name or "المنتج"), show_alert=True)
-        _hide_inline_kb(bot, call)
 
     @bot.callback_query_handler(func=lambda c: c.data == "prodnoop")
     def _noop(call):
@@ -739,7 +740,7 @@ def setup_inline_handlers(bot, admin_ids):
         user_orders.pop(user_id, None)
         bot.send_message(user_id, f"❌ تم إلغاء الطلب يا {name}. بنجهّزلك عروض أحلى المرة الجاية 🤝", reply_markup=keyboards.products_menu())
         _hide_inline_kb(bot, call)
-        
+        bot.answer_callback_query(call.id)  # ✅ مهم لإيقاف الـ spinner
     @bot.callback_query_handler(func=lambda c: c.data == "edit_player_id")
     def edit_player_id(call):
         user_id = call.from_user.id
@@ -749,7 +750,8 @@ def setup_inline_handlers(bot, admin_ids):
         msg = bot.send_message(user_id, _with_cancel(f"📋 يا {name}، ابعت آيدي اللاعب الجديد:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
         _hide_inline_kb(bot, call)
-
+        bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
+        
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
         user_id = call.from_user.id
@@ -810,8 +812,7 @@ def setup_inline_handlers(bot, admin_ids):
                     )
                     return
                 logging.error("create_hold RPC error: %s", resp.error)
-                bot.send_message(user_id, "❌ يا {name}، حصل خطأ بسيط أثناء الحجز. جرّب كمان شوية.")
-                return
+                bot.send_message(user_id, f"❌ يا {name}، حصل خطأ بسيط أثناء الحجز. جرّب كمان شوية.")
             data = getattr(resp, "data", None)
             if isinstance(data, dict):
                 hold_id = data.get("id") or data.get("hold_id")
