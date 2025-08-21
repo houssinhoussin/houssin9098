@@ -188,12 +188,12 @@ def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
 def convert_price_usd_to_syp(usd):
     # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
     if usd <= 5:
-        return int(round(usd * 12000))
-    elif usd <= 10:
         return int(round(usd * 11800))
+    elif usd <= 10:
+        return int(round(usd * 11600))
     elif usd <= 20:
-        return int(round(usd * 11700))
-    return int(round(usd * 11600))
+        return int(round(usd * 11300))
+    return int(round(usd * 11000))
 
 def _button_label(p: Product) -> str:
     # اسم الزر + السعر بالدولار
@@ -509,6 +509,34 @@ def setup_inline_handlers(bot, admin_ids):
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
         msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
+
+    # ✅ (جديد) فتح تصنيف فرعي داخل MixedApps (Call of Duty / Bigo Live ...)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("open_subcat:"))
+    def _open_subcategory(call):
+        user_id = call.from_user.id
+        try:
+            _, category, key_text = call.data.split(":", 2)  # مثال: open_subcat:MixedApps:Call of Duty
+        except Exception:
+            return bot.answer_callback_query(call.id)
+
+        # خزّن التصنيف + المفتاح (subset) للمستخدم عشان التنقل والرجوع
+        user_orders[user_id] = {"category": category, "subset": key_text}
+
+        # فلترة المنتجات داخل التصنيف بحسب المفتاح
+        options = _filter_products_by_key(category, key_text)
+        if not options:
+            bot.answer_callback_query(call.id, "❌ لا توجد خيارات متاحة حاليًا.", show_alert=True)
+            return
+
+        kb, pages = _build_products_keyboard_subset(category, options, page=0)
+        txt = _with_cancel(f"📦 منتجات {key_text}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎")
+
+        try:
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=kb)
+        except Exception:
+            bot.send_message(call.message.chat.id, txt, reply_markup=kb)
+
+        bot.answer_callback_query(call.id)
 
     # ✅ عرض صفحة جديدة من المنتجات
     @bot.callback_query_handler(func=lambda c: c.data.startswith("prodpage:"))
