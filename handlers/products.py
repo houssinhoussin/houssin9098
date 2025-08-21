@@ -180,21 +180,36 @@ MIXEDAPPS_SUBCATS = [
 ]
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
-    """يرجع باقات التصنيف بحسب وسم التطبيق في الوصف (مثلاً app:cod / app:bigo)."""
+    """يرجع باقات التصنيف بحسب وسم التطبيق في أي حقل نصي داخل الكائن (app:cod / app:bigo)."""
     options = PRODUCTS.get(category, [])
     k = (key_text or "").strip().lower()
     tag = f"app:{k}"
+
     result = []
     for p in options:
         desc = ""
-        try:
-            # الخاصية الخامسة من Product هي الوصف (استعملناها كوسم)
-            desc = (getattr(p, "description", "") or "").lower()
-        except Exception:
-            desc = ""
+        # جرّب أسماء حقول شائعة
+        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+            v = getattr(p, attr, None)
+            if isinstance(v, str) and v:
+                desc = v
+                break
+        # لو ما لقينا، دوّر بأي قيمة نصية داخل الكائن
+        if not desc:
+            try:
+                for v in getattr(p, "__dict__", {}).values():
+                    if isinstance(v, str) and "app:" in v:
+                        desc = v
+                        break
+            except Exception:
+                pass
+
+        desc_l = (desc or "").lower()
         name_l = (p.name or "").lower()
-        if tag in desc or k in name_l:  # دعم احتياطي بالاسم إن احتجنا
+
+        if tag in desc_l or tag in name_l:
             result.append(p)
+
     return result
 
 def convert_price_usd_to_syp(usd):
