@@ -62,11 +62,12 @@ INTERNET_PROVIDERS = [
 ]
 
 INTERNET_SPEEDS = [
-    {"label": "1 ميغا",  "price": 19500},
-    {"label": "2 ميغا",  "price": 25000},
-    {"label": "4 ميغا",  "price": 39000},
-    {"label": "8 ميغا",  "price": 65000},
-    {"label": "16 ميغا", "price": 84000},
+    {"label": "512 كيلو",  "price": 14500},
+    {"label": "1 ميغا",  "price": 19000},
+    {"label": "2 ميغا",  "price": 24500},
+    {"label": "4 ميغا",  "price": 38500},
+    {"label": "8 ميغا",  "price": 64500},
+    {"label": "16 ميغا", "price": 83500},
 ]
 
 # حالة المستخدم (نوع الطلب والخطوات)
@@ -103,8 +104,7 @@ def _commission(amount: int) -> int:
         return 0
     # سقف لأعلى (كل 5000 عليها 600): بدون أعداد عشرية
     blocks = (amount + 5000 - 1) // 5000
-    return blocks * COMMISSION_PER_5000
-
+    return blocks * COMMISSION_PER_10000
 def _client_card(title: str, lines: list[str]) -> str:
     body = "\n".join(lines)
     return f"{BAND}\n{title}\n{body}\n{BAND}"
@@ -215,7 +215,7 @@ def register(bot):
         user_net_state[uid] = {"step": "choose_speed", "provider": provider}
         txt_raw = _client_card(
             f"⚡ يا {nm}، اختار السرعة المطلوبة",
-            [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
+            [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_10000)}"]
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
@@ -235,7 +235,7 @@ def register(bot):
         user_net_state[uid] = {"step": "choose_provider"}
         txt_raw = _client_card(
             f"⚠️ يا {nm}، اختار مزوّد الإنترنت",
-            [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
+            [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_1000)}"]
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
@@ -285,7 +285,7 @@ def register(bot):
         st["step"] = "choose_speed"
         txt_raw = _client_card(
             f"⚡ يا {nm}، اختار السرعة المطلوبة",
-            [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
+            [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_10000)}"]
         )
         try:
             bot.edit_message_text(
@@ -462,7 +462,7 @@ def start_internet_provider_menu(bot, message):
     nm = _name(bot, message.from_user.id)
     txt_raw = _client_card(
         f"🌐 يا {nm}، اختار مزوّد الإنترنت",
-        [f"💸 العمولة لكل 5000 ل.س: {_fmt_syp(COMMISSION_PER_5000)}"]
+        [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_10000)}"]
     )
     bot.send_message(message.chat.id, _with_cancel(txt_raw), reply_markup=_provider_inline_kb())
     user_net_state[message.from_user.id] = {"step": "choose_provider"}
