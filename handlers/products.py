@@ -188,12 +188,12 @@ def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
 def convert_price_usd_to_syp(usd):
     # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
     if usd <= 5:
-        return int(round(usd * 11800))
+        return int(round(usd * 12000))
     elif usd <= 10:
-        return int(round(usd * 11600))
+        return int(round(usd * 11800))
     elif usd <= 20:
-        return int(round(usd * 11300))
-    return int(round(usd * 11000))
+        return int(round(usd * 11700))
+    return int(round(usd * 11600))
 
 def _button_label(p: Product) -> str:
     # اسم الزر + السعر بالدولار
