@@ -33,6 +33,13 @@ CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 ETA_TEXT = "من 1 إلى 4 دقائق"
 PAGE_SIZE_PRODUCTS = 7  # ✅ عرض كل المنتجات بالصفحات بدلاً من ظهور 3 فقط
 
+# يحذف كيبورد الرسالة الحالية (inline) بدون حذف النص
+def _hide_inline_kb(bot, call):
+    try:
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except Exception:
+        pass
+
 def _name_from_user(u) -> str:
     n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
     n = (n or "").strip()
@@ -555,6 +562,7 @@ def setup_inline_handlers(bot, admin_ids):
         user_id = call.from_user.id
         name = _name_from_user(call.from_user)
         product_id = int(call.data.split("_", 1)[1])
+        _hide_inline_kb(bot, call)
 
         # ابحث عن المنتج
         selected = None
@@ -590,6 +598,7 @@ def setup_inline_handlers(bot, admin_ids):
             _, category, key_text = call.data.split(":", 2)  # مثال: open_subcat:MixedApps:Call of Duty
         except Exception:
             return bot.answer_callback_query(call.id)
+        _hide_inline_kb(bot, call)
 
         # خزّن التصنيف + المفتاح (subset) للمستخدم عشان التنقل والرجوع
         user_orders[user_id] = {"category": category, "subset": key_text}
@@ -618,6 +627,7 @@ def setup_inline_handlers(bot, admin_ids):
             page = int(page_str)
         except Exception:
             return bot.answer_callback_query(call.id)
+        _hide_inline_kb(bot, call)
 
         user_id = call.from_user.id
         order = user_orders.get(user_id, {})
@@ -659,13 +669,18 @@ def setup_inline_handlers(bot, admin_ids):
             if name:
                 break
         bot.answer_callback_query(call.id, _unavailable_short(name or "المنتج"), show_alert=True)
+        _hide_inline_kb(bot, call)
 
     @bot.callback_query_handler(func=lambda c: c.data == "prodnoop")
     def _noop(call):
+        _hide_inline_kb(bot, call)
         bot.answer_callback_query(call.id)
+
 
     @bot.callback_query_handler(func=lambda c: c.data == "show_recharge_methods")
     def _show_recharge(call):
+        _hide_inline_kb(bot, call)
+        # إن كانت recharge_menu ReplyKeyboardMarkup فهذا الطريق الصحيح:
         try:
             bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
         except Exception:
@@ -674,6 +689,7 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
+        _hide_inline_kb(bot, call)
         user_id = call.from_user.id
         order = user_orders.get(user_id, {}) or {}
         category = order.get("category")
@@ -701,7 +717,20 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
-        show_game_categories(bot, call.message)
+        _hide_inline_kb(bot, call)
+        name = _name_from_user(call.from_user)
+        txt = _with_cancel(f"🎮 يا {name}، اختار اللعبة أو التطبيق اللي محتاجه:")
+        try:
+            bot.edit_message_text(
+                txt,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=keyboards.game_categories()
+            )
+        except Exception:
+            # fallback
+            bot.send_message(call.message.chat.id, txt, reply_markup=keyboards.game_categories())
+        bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data == "cancel_order")
     def cancel_order(call):
@@ -709,7 +738,8 @@ def setup_inline_handlers(bot, admin_ids):
         name = _name_from_user(call.from_user)
         user_orders.pop(user_id, None)
         bot.send_message(user_id, f"❌ تم إلغاء الطلب يا {name}. بنجهّزلك عروض أحلى المرة الجاية 🤝", reply_markup=keyboards.products_menu())
-
+        _hide_inline_kb(bot, call)
+        
     @bot.callback_query_handler(func=lambda c: c.data == "edit_player_id")
     def edit_player_id(call):
         user_id = call.from_user.id
@@ -718,6 +748,7 @@ def setup_inline_handlers(bot, admin_ids):
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
         msg = bot.send_message(user_id, _with_cancel(f"📋 يا {name}، ابعت آيدي اللاعب الجديد:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
+        _hide_inline_kb(bot, call)
 
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
