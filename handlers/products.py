@@ -473,6 +473,13 @@ def register_message_handlers(bot, history):
     @bot.message_handler(commands=['cancel'])
     def cancel_cmd(msg):
         uid = msg.from_user.id
+
+        # 👇 جديد: امسح أي next_step_handler قيد الانتظار
+        try:
+            bot.clear_step_handler_by_chat_id(msg.chat.id)
+        except Exception:
+            pass
+
         user_orders.pop(uid, None)
         name = _name_from_user(msg.from_user)
         bot.send_message(
@@ -673,7 +680,7 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "prodnoop")
     def _noop(call):
-        _hide_inline_kb(bot, call)
+        # لا تفعل شيئًا ولا تُخْفِ الكيبورد
         bot.answer_callback_query(call.id)
 
 
@@ -689,11 +696,26 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
+        # 👇 جديد: أوقف انتظار إدخال الآيدي
+        try:
+            bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        except Exception:
+            pass
+
         _hide_inline_kb(bot, call)
         user_id = call.from_user.id
         order = user_orders.get(user_id, {}) or {}
         category = order.get("category")
         subset = order.get("subset")
+        
+        if not category:
+            name = _name_from_user(call.from_user)
+            bot.send_message(
+                call.message.chat.id,
+                _with_cancel(f"🎮 يا {name}، اختار اللعبة أو التطبيق اللي محتاجه:"),
+                reply_markup=keyboards.game_categories()
+            )
+            return bot.answer_callback_query(call.id)
 
         if category:
             if subset and category == "MixedApps":
@@ -714,9 +736,16 @@ def setup_inline_handlers(bot, admin_ids):
                     _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
                     reply_markup=kb
                 )
-        bot.answer_callback_query(call.id)  # ✅ مهم جدًا لإيقاف الـspinner
+        bot.answer_callback_query(call.id)
+
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
+        # 👇 جديد: أوقف انتظار إدخال الآيدي
+        try:
+            bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        except Exception:
+            pass
+
         _hide_inline_kb(bot, call)
         name = _name_from_user(call.from_user)
         txt = _with_cancel(f"🎮 يا {name}، اختار اللعبة أو التطبيق اللي محتاجه:")
@@ -728,18 +757,29 @@ def setup_inline_handlers(bot, admin_ids):
                 reply_markup=keyboards.game_categories()
             )
         except Exception:
-            # fallback
             bot.send_message(call.message.chat.id, txt, reply_markup=keyboards.game_categories())
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data == "cancel_order")
     def cancel_order(call):
         user_id = call.from_user.id
+
+        # 👇 جديد
+        try:
+            bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        except Exception:
+            pass
+
         name = _name_from_user(call.from_user)
         user_orders.pop(user_id, None)
-        bot.send_message(user_id, f"❌ تم إلغاء الطلب يا {name}. بنجهّزلك عروض أحلى المرة الجاية 🤝", reply_markup=keyboards.products_menu())
+        bot.send_message(
+            user_id,
+            f"❌ تم إلغاء الطلب يا {name}. بنجهّزلك عروض أحلى المرة الجاية 🤝",
+            reply_markup=keyboards.products_menu()
+        )
         _hide_inline_kb(bot, call)
-        bot.answer_callback_query(call.id)  # ✅ مهم لإيقاف الـ spinner
+        bot.answer_callback_query(call.id)
+
     @bot.callback_query_handler(func=lambda c: c.data == "edit_player_id")
     def edit_player_id(call):
         user_id = call.from_user.id
