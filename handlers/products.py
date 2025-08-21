@@ -53,6 +53,52 @@ def _card(title: str, lines: list[str]) -> str:
 
 def _unavailable_short(product_name: str) -> str:
     return UNAVAILABLE_MSG.format(label=product_name)
+    
+# ===== تصنيف مرئي واضح للرسائل (حسب الطلبية) =====
+_CATEGORY_LABELS = {
+    "PUBG": "شحن شدات ببجي",
+    "FreeFire": "شحن جواهر فري فاير",
+    "Jawaker": "تطبيق جواكر",
+}
+_MIXED_SUB_LABELS = {
+    "cod": "كول أوف ديوتي",
+    "bigo": "بيغو لايف",
+}
+
+def _visible_category_label(order: dict, product: Product) -> str:
+    """يرجع اسم الفئة المفهوم للمستخدم/الأدمن بدل 'ألعاب/تطبيقات'."""
+    cat = (order or {}).get("category") or getattr(product, "category", "") or ""
+
+    # MixedApps: نحدده من subset، أو من الوسم داخل الوصف (app:cod/app:bigo)
+    if cat == "MixedApps":
+        key = ((order or {}).get("subset") or "").strip().lower()
+
+        if not key:
+            # fallback: استخرج من الوصف/أي حقل نصي يحمل app:...
+            desc_all = ""
+            for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+                v = getattr(product, attr, None)
+                if isinstance(v, str) and v:
+                    desc_all = v
+                    break
+            if not desc_all:
+                try:
+                    for v in getattr(product, "__dict__", {}).values():
+                        if isinstance(v, str) and "app:" in v:
+                            desc_all = v
+                            break
+                except Exception:
+                    pass
+            d = (desc_all or "").lower()
+            if "app:cod" in d:
+                key = "cod"
+            elif "app:bigo" in d:
+                key = "bigo"
+
+        return _MIXED_SUB_LABELS.get(key, "ألعاب/تطبيقات")
+
+    # غير MixedApps
+    return _CATEGORY_LABELS.get(cat, cat)
 
 # ================= (جديد) تحكّم تفصيلي ON/OFF لكل زر كمية =================
 # نستخدم جدول features نفسه بمفاتيح منسّقة لكل خيار (SKU)
@@ -401,7 +447,7 @@ def handle_player_id(message, bot):
                 "📦 تفاصيل الطلب",
                 [
                     f"• المنتج: {product.name}",
-                    f"• الفئة: {product.category}",
+                    f"• الفئة: {_visible_category_label(order, product)}",
                     f"• السعر: {_fmt_syp(price_syp)}",
                     f"• آيدي اللاعب: {player_id}",
                     "",
@@ -761,7 +807,7 @@ def setup_inline_handlers(bot, admin_ids):
             f"آيدي: <code>{user_id}</code>\n"
             f"آيدي اللاعب: <code>{player_id}</code>\n"
             f"🔖 المنتج: {product.name}\n"
-            f"التصنيف: {product.category}\n"
+            f"التصنيف: {_visible_category_label(order, product)}\n"
             f"💵 السعر: {price_syp:,} ل.س\n"
             f"(select_{product.product_id})"
         )
