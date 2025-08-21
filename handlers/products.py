@@ -654,7 +654,6 @@ def setup_inline_handlers(bot, admin_ids):
                 _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎"),
                 reply_markup=kb
             )
-        bot.answer_callback_query(call.id)
         bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
     
     # ✅ ضغط على منتج موقوف — نعطي تنبيه فقط
