@@ -172,6 +172,18 @@ PRODUCTS = {
     ],
 }
 
+# ================= (جديد) أقسام فرعية قابلة للتوسّع لقسم MixedApps =================
+# لإضافة زر جديد لاحقًا يكفي إضافة dict جديد هنا بنفس البنية (label/key)
+MIXEDAPPS_SUBCATS = [
+    {"label": "Call of Duty", "key": "Call of Duty"},
+    {"label": "Bigo Live",    "key": "Bigo Live"},
+]
+
+def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
+    """يرجع باقات التصنيف التي تحتوي اسم المفتاح (للفلترة داخل MixedApps)."""
+    options = PRODUCTS.get(category, [])
+    k = (key_text or "").lower()
+    return [p for p in options if k in (p.name or "").lower()]
 
 def convert_price_usd_to_syp(usd):
     # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
@@ -246,6 +258,63 @@ def _build_products_keyboard(category: str, page: int = 0):
         kb.row(*nav)
 
     # أزرار مساعدة مختصرة
+    kb.add(types.InlineKeyboardButton("💳 طرق الدفع/الشحن", callback_data="show_recharge_methods"))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
+    return kb, pages
+
+# ======== (جديد) باني لوحة لجزء فرعي (subset) داخل نفس التصنيف ========
+def _build_products_keyboard_subset(category: str, options: list[Product], page: int = 0):
+    """نسخة من الباني الرئيسي لكن تعمل على قائمة options المفلترة (مثل Call of Duty فقط داخل MixedApps)."""
+    total = len(options)
+
+    # 🌱 زرع مفاتيح features لكل زر كمية
+    for p in options:
+        try:
+            ensure_feature(
+                key_product_option(category, p.name),
+                f"{category} — {p.name}",
+                default_active=True
+            )
+        except Exception:
+            pass
+
+    pages = max(1, math.ceil(total / PAGE_SIZE_PRODUCTS))
+    page = max(0, min(page, pages - 1))
+    start = page * PAGE_SIZE_PRODUCTS
+    end = start + PAGE_SIZE_PRODUCTS
+    slice_items = options[start:end]
+
+    kb = types.InlineKeyboardMarkup(row_width=2)
+
+    for p in slice_items:
+        try:
+            active_global = bool(get_product_active(p.product_id))
+        except Exception:
+            active_global = True
+
+        active_option = is_option_enabled(category, p.name, True)
+        active = active_global and active_option
+
+        if active:
+            kb.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
+        else:
+            try:
+                label = f"🔴 {p.name} — ${float(p.price):.2f} (موقوف)"
+            except Exception:
+                label = f"🔴 {p.name} (موقوف)"
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"prod_inactive:{p.product_id}"))
+
+    # شريط تنقّل
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton("◀️", callback_data=f"prodpage:{category}:{page-1}"))
+    nav.append(types.InlineKeyboardButton(f"{page+1}/{pages}", callback_data="prodnoop"))
+    if page < pages - 1:
+        nav.append(types.InlineKeyboardButton("▶️", callback_data=f"prodpage:{category}:{page+1}"))
+    if nav:
+        kb.row(*nav)
+
+    # أزرار مساعدة + رجوع
     kb.add(types.InlineKeyboardButton("💳 طرق الدفع/الشحن", callback_data="show_recharge_methods"))
     kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
     return kb, pages
@@ -367,7 +436,7 @@ def register_message_handlers(bot, history):
     @bot.message_handler(func=lambda msg: msg.text in [
         "🎯 شحن شدات ببجي العالمية",
         "🔥 شحن جواهر فري فاير",
-        "🏏 تطبيق جواكر"
+        "🏏 تطبيق جواكر",
         "🎮 شحن العاب و تطبيقات مختلفة"
     ])
     def game_handler(msg):
@@ -380,11 +449,25 @@ def register_message_handlers(bot, history):
             finally:
                 return
 
+        # ===== (جديد) لو كان الزر هو "🎮 شحن العاب و تطبيقات مختلفة" اعرض قائمة فرعية ديناميكية =====
+        if msg.text in ("🎮 شحن العاب و تطبيقات مختلفة", "🎮 شحن ألعاب و تطبيقات مختلفة"):
+            kb = types.InlineKeyboardMarkup(row_width=2)
+            for sc in MIXEDAPPS_SUBCATS:
+                kb.add(types.InlineKeyboardButton(sc["label"], callback_data=f"open_subcat:MixedApps:{sc['key']}"))
+            kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
+            name = _name_from_user(msg.from_user)
+            bot.send_message(
+                msg.chat.id,
+                _with_cancel(f"🎮 يا {name}، اختر اللعبة/التطبيق:"),
+                reply_markup=kb
+            )
+            return  # لا نكمل للخريطة العامة
+
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
             "🏏 تطبيق جواكر": "Jawaker",
-            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps",  # ✅ فاصلة هنا (مستحسن تبقيها حتى لو آخر عنصر)
+            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps",  # ✅ يبقى موجود لو احتجناه لاحقًا
         }
 
         category = category_map[msg.text]
@@ -435,7 +518,18 @@ def setup_inline_handlers(bot, admin_ids):
             page = int(page_str)
         except Exception:
             return bot.answer_callback_query(call.id)
-        kb, pages = _build_products_keyboard(category, page=page)
+
+        user_id = call.from_user.id
+        order = user_orders.get(user_id, {})
+        subset = order.get("subset")
+
+        # إن كان المستخدم في subset داخل MixedApps، نحافظ على نفس الفلترة أثناء التنقل
+        if subset and category == "MixedApps":
+            options = _filter_products_by_key(category, subset)
+            kb, pages = _build_products_keyboard_subset(category, options, page=page)
+        else:
+            kb, pages = _build_products_keyboard(category, page=page)
+
         try:
             bot.edit_message_text(
                 _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎"),
@@ -481,9 +575,16 @@ def setup_inline_handlers(bot, admin_ids):
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
         user_id = call.from_user.id
-        category = user_orders.get(user_id, {}).get("category")
+        order = user_orders.get(user_id, {}) or {}
+        category = order.get("category")
+        subset = order.get("subset")
+
         if category:
-            kb, pages = _build_products_keyboard(category, page=0)
+            if subset and category == "MixedApps":
+                options = _filter_products_by_key(category, subset)
+                kb, pages = _build_products_keyboard_subset(category, options, page=0)
+            else:
+                kb, pages = _build_products_keyboard(category, page=0)
             try:
                 bot.edit_message_text(
                     _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
