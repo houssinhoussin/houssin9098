@@ -159,14 +159,14 @@ def _speeds_inline_kb() -> types.InlineKeyboardMarkup:
         for idx, speed in enumerate(INTERNET_SPEEDS)
     ]
     kb.add(*btns)
-    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=CB_BACK_PROV))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع للمزوّدين", callback_data=CB_BACK_PROV))
     return kb
 
 def _confirm_inline_kb() -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
         types.InlineKeyboardButton("✅ تأكيد", callback_data=CB_CONFIRM),
-        types.InlineKeyboardButton("⬅️ تعديل", callback_data=CB_BACK_SPEED),
+        types.InlineKeyboardButton("⬅️ رجوع للسرعات", callback_data=CB_BACK_SPEED),
         types.InlineKeyboardButton("❌ إلغاء", callback_data=CB_CANCEL),
     )
     return kb
@@ -174,8 +174,8 @@ def _confirm_inline_kb() -> types.InlineKeyboardMarkup:
 def _insufficient_kb() -> types.InlineKeyboardMarkup | None:
     kb = types.InlineKeyboardMarkup()
     if keyboards and hasattr(keyboards, "recharge_menu"):
-        kb.add(types.InlineKeyboardButton("💳 شحن المحفظة", callback_data=CB_RECHARGE))
-        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=CB_BACK_SPEED))
+        kb.add(types.InlineKeyboardButton("💳 شحن المحفظة", callback_d[ata=CB_RECHARGE))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع للسرعات", callback_data=CB_BACK_SPEED))
         return kb
     # بدون قائمة شحن — نرجع None ونكتفي برسالة
     return None
@@ -195,6 +195,15 @@ def register(bot):
     # فتح القائمة الرئيسية
     @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
     def open_net_menu(msg):
+        if too_soon(msg.from_user.id, "internet_open", 1.2):
+            return
+        if _service_unavailable_guard(bot, msg.chat.id):
+            return
+        register_user_if_not_exist(msg.from_user.id, msg.from_user.full_name)
+        start_internet_provider_menu(bot, msg)
+        
+    @bot.message_handler(commands=['internet', 'adsl'])
+    def cmd_internet(msg):
         if too_soon(msg.from_user.id, "internet_open", 1.2):
             return
         if _service_unavailable_guard(bot, msg.chat.id):
@@ -236,7 +245,7 @@ def register(bot):
         user_net_state[uid] = {"step": "choose_provider"}
         txt_raw = _client_card(
             f"⚠️ يا {nm}، اختار مزوّد الإنترنت",
-            [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_1000)}"]
+            [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_10000)}"]
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
@@ -309,8 +318,8 @@ def register(bot):
             remove_inline_keyboard(bot, call.message)
         except Exception:
             pass
-        txt = _client_card("✅ اتلغت العملية", [f"يا {nm}، اكتب /start للرجوع للقائمة الرئيسية."])
-        bot.send_message(call.message.chat.id, _with_cancel(txt))
+        txt = _client_card("✅ تم الإلغاء", [f"يا {nm}، اكتب /start للرجوع للقائمة الرئيسية."])
+        bot.send_message(call.message.chat.id, txt)
         try:
             bot.answer_callback_query(call.id)
         except Exception:
