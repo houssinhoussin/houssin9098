@@ -383,9 +383,10 @@ def register_message_handlers(bot, history):
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
-            "🏏 تطبيق جواكر": "Jawaker"
-            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps"
+            "🏏 تطبيق جواكر": "Jawaker",
+            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps",  # ✅ فاصلة هنا (مستحسن تبقيها حتى لو آخر عنصر)
         }
+
         category = category_map[msg.text]
         history.setdefault(user_id, []).append("product_options")
         user_orders[user_id] = {"category": category}
