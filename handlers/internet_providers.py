@@ -143,7 +143,7 @@ CB_RECHARGE      = "irecharge"     # شحن المحفظة (اختياري)
 #   لوحات أزرار Inline
 # =====================================
 def _provider_inline_kb() -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb = types.InlineKeyboardMarkup(row_width=3)
     btns = [types.InlineKeyboardButton(f"🌐 {name}", callback_data=f"{CB_PROV_PREFIX}:{name}") for name in INTERNET_PROVIDERS]
     kb.add(*btns)
     kb.add(types.InlineKeyboardButton("❌ إلغاء", callback_data=CB_CANCEL))
