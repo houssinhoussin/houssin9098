@@ -151,39 +151,51 @@ PRODUCTS = {
     ],
     "MixedApps": [
         # === Call of Duty ===
-        Product(27, "Call of Duty — 88 نقطة",  "ألعاب/تطبيقات", 1.28,  "COD 88 CP"),
-        Product(28, "Call of Duty — 460 نقطة", "ألعاب/تطبيقات", 5.56,  "COD 460 CP"),
-        Product(29, "Call of Duty — 960 نقطة", "ألعاب/تطبيقات", 9.56,  "COD 960 CP"),
-        Product(30, "Call of Duty — 2600 نقطة","ألعاب/تطبيقات", 24.13, "COD 2600 CP"),
-        Product(31, "Call of Duty — Battle Pass",        "ألعاب/تطبيقات", 3.08, "COD Battle Pass"),
-        Product(32, "Call of Duty — Battle Pass Bundle",  "ألعاب/تطبيقات", 7.08, "COD Battle Pass Bundle"),
+        Product(27, "88 نقطة",   "ألعاب/تطبيقات", 1.28,  "app:cod|COD 88 CP"),
+        Product(28, "460 نقطة",  "ألعاب/تطبيقات", 5.56,  "app:cod|COD 460 CP"),
+        Product(29, "960 نقطة",  "ألعاب/تطبيقات", 9.56,  "app:cod|COD 960 CP"),
+        Product(30, "2600 نقطة", "ألعاب/تطبيقات", 24.13, "app:cod|COD 2600 CP"),
+        Product(31, "Battle Pass",         "ألعاب/تطبيقات", 3.08, "app:cod|COD Battle Pass"),
+        Product(32, "Battle Pass Bundle",  "ألعاب/تطبيقات", 7.08, "app:cod|COD Battle Pass Bundle"),
 
         # === Bigo Live ===
-        Product(33, "Bigo Live — 50 ألماس",   "ألعاب/تطبيقات", 0.94,  "Bigo Live 50 Diamonds"),
-        Product(34, "Bigo Live — 100 ألماس",  "ألعاب/تطبيقات", 1.88,  "Bigo Live 100 Diamonds"),
-        Product(35, "Bigo Live — 200 ألماس",  "ألعاب/تطبيقات", 3.64,  "Bigo Live 200 Diamonds"),
-        Product(36, "Bigo Live — 400 ألماس",  "ألعاب/تطبيقات", 7.25,  "Bigo Live 400 Diamonds"),
-        Product(37, "Bigo Live — 600 ألماس",  "ألعاب/تطبيقات", 10.86, "Bigo Live 600 Diamonds"),
-        Product(38, "Bigo Live — 1000 ألماس", "ألعاب/تطبيقات", 18.09, "Bigo Live 1000 Diamonds"),
-        Product(39, "Bigo Live — 1500 ألماس", "ألعاب/تطبيقات", 27.09, "Bigo Live 1500 Diamonds"),
-        Product(40, "Bigo Live — 2000 ألماس", "ألعاب/تطبيقات", 36.12, "Bigo Live 2000 Diamonds"),
-        Product(41, "Bigo Live — 3000 ألماس", "ألعاب/تطبيقات", 54.19, "Bigo Live 3000 Diamonds"),
-        Product(42, "Bigo Live — 4000 ألماس", "ألعاب/تطبيقات", 72.22, "Bigo Live 4000 Diamonds"),
+        Product(33, "50 ألماس",    "ألعاب/تطبيقات", 0.94,  "app:bigo|Bigo Live 50 Diamonds"),
+        Product(34, "100 ألماس",   "ألعاب/تطبيقات", 1.88,  "app:bigo|Bigo Live 100 Diamonds"),
+        Product(35, "200 ألماس",   "ألعاب/تطبيقات", 3.64,  "app:bigo|Bigo Live 200 Diamonds"),
+        Product(36, "400 ألماس",   "ألعاب/تطبيقات", 7.25,  "app:bigo|Bigo Live 400 Diamonds"),
+        Product(37, "600 ألماس",   "ألعاب/تطبيقات", 10.86, "app:bigo|Bigo Live 600 Diamonds"),
+        Product(38, "1000 ألماس",  "ألعاب/تطبيقات", 18.09, "app:bigo|Bigo Live 1000 Diamonds"),
+        Product(39, "1500 ألماس",  "ألعاب/تطبيقات", 27.09, "app:bigo|Bigo Live 1500 Diamonds"),
+        Product(40, "2000 ألماس",  "ألعاب/تطبيقات", 36.12, "app:bigo|Bigo Live 2000 Diamonds"),
+        Product(41, "3000 ألماس",  "ألعاب/تطبيقات", 54.19, "app:bigo|Bigo Live 3000 Diamonds"),
+        Product(42, "4000 ألماس",  "ألعاب/تطبيقات", 72.22, "app:bigo|Bigo Live 4000 Diamonds"),
     ],
 }
 
 # ================= (جديد) أقسام فرعية قابلة للتوسّع لقسم MixedApps =================
 # لإضافة زر جديد لاحقًا يكفي إضافة dict جديد هنا بنفس البنية (label/key)
 MIXEDAPPS_SUBCATS = [
-    {"label": "Call of Duty", "key": "Call of Duty"},
-    {"label": "Bigo Live",    "key": "Bigo Live"},
+    {"label": "Call of Duty", "key": "cod"},
+    {"label": "Bigo Live",    "key": "bigo"},
 ]
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
-    """يرجع باقات التصنيف التي تحتوي اسم المفتاح (للفلترة داخل MixedApps)."""
+    """يرجع باقات التصنيف بحسب وسم التطبيق في الوصف (مثلاً app:cod / app:bigo)."""
     options = PRODUCTS.get(category, [])
-    k = (key_text or "").lower()
-    return [p for p in options if k in (p.name or "").lower()]
+    k = (key_text or "").strip().lower()
+    tag = f"app:{k}"
+    result = []
+    for p in options:
+        desc = ""
+        try:
+            # الخاصية الخامسة من Product هي الوصف (استعملناها كوسم)
+            desc = (getattr(p, "description", "") or "").lower()
+        except Exception:
+            desc = ""
+        name_l = (p.name or "").lower()
+        if tag in desc or k in name_l:  # دعم احتياطي بالاسم إن احتجنا
+            result.append(p)
+    return result
 
 def convert_price_usd_to_syp(usd):
     # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
@@ -196,9 +208,8 @@ def convert_price_usd_to_syp(usd):
     return int(round(usd * 11000))
 
 def _button_label(p: Product) -> str:
-    # اسم الزر + السعر بالدولار
     try:
-        return f"{p.name} — ${float(p.price):.2f}"
+        return f"{(p.name or '').strip()} بسعر ${float(p.price):.2f}"
     except Exception:
         return f"{p.name}"
 
