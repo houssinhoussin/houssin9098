@@ -40,6 +40,29 @@ def _hide_inline_kb(bot, call):
     except Exception:
         pass
 
+# --- helper: امسح أي next_step_handler بأمان (لكل الإصدارات) ---
+def _clear_next_step(bot, chat_id: int) -> bool:
+    """يحاول مسح next_step_handler بالاعتماد على الدوال المتاحة في نسخة المكتبة."""
+    # المسار الحديث: clear_step_handler_by_chat_id(chat_id)
+    try:
+        fn = getattr(bot, "clear_step_handler_by_chat_id", None)
+        if callable(fn):
+            fn(chat_id)
+            return True
+    except Exception:
+        pass
+    # المسار الأقدم: clear_step_handler(message)
+    try:
+        fn2 = getattr(bot, "clear_step_handler", None)
+        if callable(fn2):
+            class _Msg: ...
+            m = _Msg(); m.chat = _Msg(); m.chat.id = chat_id
+            fn2(m)
+            return True
+    except Exception:
+        pass
+    return False
+
 def _name_from_user(u) -> str:
     n = getattr(u, "first_name", None) or getattr(u, "full_name", None) or ""
     n = (n or "").strip()
@@ -474,11 +497,8 @@ def register_message_handlers(bot, history):
     def cancel_cmd(msg):
         uid = msg.from_user.id
 
-        # 👇 جديد: امسح أي next_step_handler قيد الانتظار
-        try:
-            bot.clear_step_handler_by_chat_id(msg.chat.id)
-        except Exception:
-            pass
+        # 👇 جديد: امسح أي next_step_handler قيد الانتظار (آمن لكل النسخ)
+        _clear_next_step(bot, msg.chat.id)
 
         user_orders.pop(uid, None)
         name = _name_from_user(msg.from_user)
@@ -591,7 +611,10 @@ def setup_inline_handlers(bot, admin_ids):
         if require_option_or_alert(bot, call.message.chat.id, selected_category or "", selected.name):
             return bot.answer_callback_query(call.id)
 
-        user_orders[user_id] = {"category": selected_category or selected.category, "product": selected}
+        # ⚠️ احفظ subset السابق (لو كان المستخدم داخل تصنيف فرعي من MixedApps)
+        prev = user_orders.get(user_id, {})
+        user_orders[user_id] = {"category": selected_category or selected.category, "product": selected, "subset": prev.get("subset")}
+
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
         msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
@@ -696,11 +719,8 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
-        # 👇 جديد: أوقف انتظار إدخال الآيدي
-        try:
-            bot.clear_step_handler_by_chat_id(call.message.chat.id)
-        except Exception:
-            pass
+        # 👇 جديد: أوقف انتظار إدخال الآيدي (آمن لكل النسخ)
+        _clear_next_step(bot, call.message.chat.id)
 
         _hide_inline_kb(bot, call)
         user_id = call.from_user.id
@@ -740,11 +760,8 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
-        # 👇 جديد: أوقف انتظار إدخال الآيدي
-        try:
-            bot.clear_step_handler_by_chat_id(call.message.chat.id)
-        except Exception:
-            pass
+        # 👇 جديد: أوقف انتظار إدخال الآيدي (آمن لكل النسخ)
+        _clear_next_step(bot, call.message.chat.id)
 
         _hide_inline_kb(bot, call)
         name = _name_from_user(call.from_user)
@@ -764,11 +781,8 @@ def setup_inline_handlers(bot, admin_ids):
     def cancel_order(call):
         user_id = call.from_user.id
 
-        # 👇 جديد
-        try:
-            bot.clear_step_handler_by_chat_id(call.message.chat.id)
-        except Exception:
-            pass
+        # 👇 جديد: أوقف أي انتظار لإدخال آيدي (آمن لكل النسخ)
+        _clear_next_step(bot, call.message.chat.id)
 
         name = _name_from_user(call.from_user)
         user_orders.pop(user_id, None)
