@@ -287,17 +287,6 @@ def register(bot, history):
         )
         _screen_from_call(bot, call, text, reply_markup=kb)
 
-        try:
-            bot.edit_message_text(
-                text,
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=kb
-            )
-        except Exception:
-            bot.send_message(call.message.chat.id, text, reply_markup=kb)
-        bot.answer_callback_query(call.id)
-
     # الدخول من زر بالقائمة الرئيسية (لو عندك زر)
     @bot.message_handler(func=lambda msg: msg.text == "💵 تحويل الى رصيد كاش")
     def open_cash_menu(msg):
@@ -330,9 +319,6 @@ def register(bot, history):
             ("❌ إلغاء", "commission_cancel"),
         )
         _screen(bot, user_id, msg.chat.id, text, reply_markup=kb, delete_user_msg_id=msg.message_id)
-
-
-        bot.send_message(msg.chat.id, text, reply_markup=kb)
 
     # إلغاء
     @bot.callback_query_handler(func=lambda call: call.data == "commission_cancel")
