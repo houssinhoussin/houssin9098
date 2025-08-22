@@ -372,7 +372,6 @@ def register(bot, history):
         user_states[user_id]["step"] = "awaiting_number"
         _screen_from_call(bot, call, with_cancel_hint("📲 اكتب الرقم من جديد:"),
                   reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_menu"), ("❌ إلغاء","commission_cancel")))
-        bot.answer_callback_query(call.id)
 
     # بعد تأكيد الرقم → اطلب المبلغ
     @bot.callback_query_handler(func=lambda call: call.data == "number_confirm")
