@@ -526,6 +526,22 @@ def register(bot, history):
         )
 
         process_queue(bot)
+        # 🧾 أرسل إيصال ثابت للعميل (لن يتم تحريره لاحقًا — يبقى كمرجع)
+        receipt_text = banner(
+            "🧾 إيصال طلب تحويلك",
+            [
+                f"• النوع: {cash_type}",
+                f"• رقم المستفيد: {number}",
+                f"• المبلغ: {_fmt(amount)}",
+                f"• العمولة: {_fmt(commission)}",
+                f"• الإجمالي: {_fmt(total)}",
+                f"• معرف الحجز (HOLD): {hold_id}",
+            ]
+        ) + "\n\nاحتفظ بهذه الرسالة كمرجع. في حال حدوث أي مشكلة: «انظر، أنت أرسلت نفس هذه التفاصيل»."
+        try:
+            bot.send_message(call.message.chat.id, receipt_text)
+        except Exception:
+            logging.exception(f"[CASH][{user_id}] failed to send receipt")
 
         _screen_from_call(
             bot, call,
