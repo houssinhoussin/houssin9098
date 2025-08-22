@@ -381,17 +381,8 @@ def register(bot, history):
             return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
-        kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
-        try:
-            bot.edit_message_text(
-                with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"),
-                call.message.chat.id, call.message.message_id, reply_markup=kb
-            )
-        except Exception:
-            kb = make_inline_buttons(("⬅️ رجوع", "back_to_number"), ("❌ إلغاء", "commission_cancel"))
-            _screen_from_call(bot, call, with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"), reply_markup=kb)
-
-        bot.answer_callback_query(call.id)
+        kb = make_inline_buttons(("⬅️ رجوع", "back_to_number"), ("❌ إلغاء", "commission_cancel"))
+        _screen_from_call(bot, call, with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"), reply_markup=kb)
 
     # استلام المبلغ وحساب العمولة
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_amount")
