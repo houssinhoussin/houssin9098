@@ -433,10 +433,7 @@ def register(bot, history):
                           reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_number"), ("❌ إلغاء","commission_cancel")))
 
     # تأكيد نهائي → إنشاء هولد + إرسال للطابور
-    @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
-    def confirm_transfer(call):
-        user_id = call.from_user.id
-        name = _name_of(call.from_user)
+    
     @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
     def confirm_transfer(call):
         try:
@@ -447,11 +444,10 @@ def register(bot, history):
         user_id = call.from_user.id
         name = _name_of(call.from_user)
 
-        # ✅ قاعدة عامة: عند التأكيد — احذف الكيبورد فقط + Debounce
+        # Debounce
         if confirm_guard(bot, call, "cash_confirm"):
             return
 
-        # حارس توفر الخدمة
         if _service_unavailable_guard(bot, call.message.chat.id):
             return
 
@@ -462,16 +458,15 @@ def register(bot, history):
         commission = int(data.get('commission') or 0)
         total = int(data.get('total') or 0)
 
-        # فحص الرصيد المتاح (balance - held)
         available = get_available_balance(user_id)
         if available is None:
-            return bot.send_message(call.message.chat.id, "❌ حصل خطأ في جلب الرصيد. جرّب تاني.\n\n" + CANCEL_HINT)
+            return _screen_from_call(bot, call, "❌ حصل خطأ في جلب الرصيد. جرّب تاني.\n\n" + CANCEL_HINT)
 
         if available < total:
             shortage = total - available
             kb = make_inline_buttons(("💳 شحن المحفظة", "recharge_wallet"), ("⬅️ رجوع", "back_to_amount"))
-            return bot.send_message(
-                call.message.chat.id,
+            return _screen_from_call(
+                bot, call,
                 with_cancel_hint(
                     f"❌ يا {name}، متاحك الحالي {_fmt(available)} والمطلوب {_fmt(total)}.\n"
                     f"نقصك {_fmt(shortage)} — كمّل شحن ونمشي الطلب سِكة سريعة 😉"
@@ -479,19 +474,17 @@ def register(bot, history):
                 reply_markup=kb
             )
 
-        # إنشاء هولد بدل الخصم الفوري (ذرّي من خلال الـ RPC)
         hold_desc = f"حجز تحويل كاش — {cash_type} — رقم {number}"
         try:
             r = create_hold(user_id, total, hold_desc)
         except Exception as e:
             logging.exception(f"[CASH][{user_id}] create_hold exception: {e}")
-            return bot.send_message(call.message.chat.id, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
+            return _screen_from_call(bot, call, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
 
         if getattr(r, "error", None) or not getattr(r, "data", None):
             logging.error(f"[CASH][{user_id}] create_hold failed: {getattr(r, 'error', r)}")
-            return bot.send_message(call.message.chat.id, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
+            return _screen_from_call(bot, call, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
 
-        # استخراج hold_id بمرونة (dict/list/primitive)
         data_resp = getattr(r, "data", None)
         if isinstance(data_resp, dict):
             hold_id = data_resp.get("id") or data_resp.get("hold_id") or data_resp
@@ -501,13 +494,11 @@ def register(bot, history):
         else:
             hold_id = data_resp
 
-        # رصيد بعد الحجز (اختياري للعرض)
         try:
             balance_after = get_balance(user_id)
         except Exception:
             balance_after = None
 
-        # رسالة الإدمن الموحّدة
         admin_msg = (
             f"💰 رصيد المستخدم الآن: {_fmt(balance_after) if balance_after is not None else '—'}\n"
             f"🆕 طلب جديد — تحويل كاش\n"
@@ -533,28 +524,25 @@ def register(bot, history):
                 "amount": amount,
                 "commission": commission,
                 "total": total,
-                "reserved": total,     # للتوافق مع مسارات قديمة
-                "hold_id": hold_id,    # المسار الحديث الآمن
+                "reserved": total,
+                "hold_id": hold_id,
                 "hold_desc": hold_desc
             }
         )
 
-        # شغّل الطابور
         process_queue(bot)
 
-        # رسالة للعميل (من غير تعديل/حذف للرسالة السابقة — إحنا شيلنا الكيبورد خلاص)
-        bot.send_message(
-            _screen_from_call(bot, call,
-                banner(
-                    f"✅ تمام يا {name}! بعتنا طلب تحويلك 🚀",
-                    [
-                        "⏱️ التنفيذ عادةً خلال 1–4 دقايق.",
-                        "ℹ️ تقدر تبعت طلب جديد لو حابب — كل الطلبات بتحترم الرصيد المتاح 😉",
-                    ]
-                ),
-                reply_markup=None
-            )
-
+        _screen_from_call(
+            bot, call,
+            banner(
+                f"✅ تمام يا {name}! بعتنا طلب تحويلك 🚀",
+                [
+                    "⏱️ التنفيذ عادةً خلال 1–4 دقايق.",
+                    "ℹ️ تقدر تبعت طلب جديد لو حابب — كل الطلبات بتحترم الرصيد المتاح 😉",
+                ]
+            ),
+            reply_markup=None
+        )
         user_states[user_id]["step"] = "waiting_admin"
 
     # زر شحن المحفظة
