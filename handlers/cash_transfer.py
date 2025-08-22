@@ -67,6 +67,37 @@ except Exception:
 
 from services.state_adapter import UserStateDictLike
 user_states = UserStateDictLike()
+# شاشة واحدة: حرر رسالة البوت بدل الإرسال، واحذف رسالة المستخدم لو موجودة
+def _screen(bot, user_id, chat_id, text, reply_markup=None, delete_user_msg_id=None):
+    # احذف رسالة المستخدم (لإبقاء شاشة واحدة)
+    try:
+        if delete_user_msg_id:
+            bot.delete_message(chat_id, delete_user_msg_id)
+    except Exception:
+        pass
+
+    st = user_states.get(user_id, {}) or {}
+    last_id = st.get("last_bot_msg_id")
+
+    # جرّب التحرير أولًا
+    if last_id:
+        try:
+            bot.edit_message_text(text, chat_id, last_id, reply_markup=reply_markup)
+            return
+        except Exception:
+            # ممكن الرسالة لا تقبل التحرير أو اختفت — نرسل جديدة
+            pass
+
+    m = bot.send_message(chat_id, text, reply_markup=reply_markup)
+    st["last_bot_msg_id"] = m.message_id
+    user_states[user_id] = st
+
+def _screen_from_call(bot, call, text, reply_markup=None):
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    _screen(bot, call.from_user.id, call.message.chat.id, text, reply_markup)
 
 CASH_TYPES = [
     "تحويل إلى سيرياتيل كاش",
@@ -158,11 +189,9 @@ def start_cash_transfer(bot, message, history=None):
             history[user_id] = []
         history[user_id].append("cash_menu")
     logging.info(f"[CASH][{user_id}] فتح قائمة تحويل كاش")
-    bot.send_message(
-        message.chat.id,
+    _screen(bot, user_id, message.chat.id,
         with_cancel_hint("💸 جاهز نحرك الفلوس؟ اختار نوع التحويل من محفظتك:"),
-        reply_markup=build_cash_menu(0)
-    )
+        reply_markup=build_cash_menu(0))
 
 def register(bot, history):
 
@@ -171,11 +200,10 @@ def register(bot, history):
     def cancel_cmd(msg):
         uid = msg.from_user.id
         user_states.pop(uid, None)
-        bot.send_message(
-            msg.chat.id,
-            banner("❌ تم الإلغاء", [f"يا {_name_of(msg.from_user)}، رجعناك للقائمة. اختار اللي يناسبك 👇"]),
-            reply_markup=build_cash_menu(0)
-        )
+        _screen(bot, uid, msg.chat.id,
+                banner("❌ تم الإلغاء", [f"يا {_name_of(msg.from_user)}، رجعناك للقائمة. اختار اللي يناسبك 👇"]),
+                reply_markup=build_cash_menu(0))
+
 
     # تنقّل صفحات أنواع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_page_"))
@@ -198,6 +226,34 @@ def register(bot, history):
     def _noop(call):
         bot.answer_callback_query(call.id)
 
+    @bot.callback_query_handler(func=lambda c: c.data == "back_to_menu")
+    def back_to_menu(call):
+        uid = call.from_user.id
+        user_states[uid] = {"step": "show_commission"}  # نرجّعه لمرحلة ما قبل إدخال الرقم
+        _screen_from_call(bot, call,
+            with_cancel_hint("💸 اختار نوع التحويل من محفظتك:"),
+            reply_markup=build_cash_menu(0))
+
+    @bot.callback_query_handler(func=lambda c: c.data == "back_to_number")
+    def back_to_number(call):
+        uid = call.from_user.id
+        st = user_states.get(uid, {}) or {}
+        st["step"] = "awaiting_number"
+        user_states[uid] = st
+        _screen_from_call(bot, call,
+            with_cancel_hint("📲 اكتب الرقم من جديد:"),
+            reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_menu"), ("❌ إلغاء","commission_cancel")))
+
+    @bot.callback_query_handler(func=lambda c: c.data == "back_to_amount")
+    def back_to_amount(call):
+        uid = call.from_user.id
+        st = user_states.get(uid, {}) or {}
+        st["step"] = "awaiting_amount"
+        user_states[uid] = st
+        _screen_from_call(bot, call,
+            with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"),
+            reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_number"), ("❌ إلغاء","commission_cancel")))
+
     # اختيار نوع التحويل
     @bot.callback_query_handler(func=lambda c: c.data.startswith("cash_sel_"))
     def _cash_type_selected(call):
@@ -212,9 +268,11 @@ def register(bot, history):
         user_id = call.from_user.id
 
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
-        if not isinstance(history.get(user_id), list):
-            history[user_id] = []
-        history[user_id].append("cash_menu")
+        if history is not None:
+            if not isinstance(history.get(user_id), list):
+                history[user_id] = []
+            history[user_id].append("cash_menu")
+
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type}")
         name = _name_of(call.from_user)
         text = with_cancel_hint(
@@ -223,9 +281,12 @@ def register(bot, history):
             "لو تمام، دوس موافق وكمل اكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
+            ("⬅️ رجوع", "back_to_menu"),
             ("✅ موافق", "commission_confirm"),
-            ("❌ إلغاء", "commission_cancel")
+            ("❌ إلغاء", "commission_cancel"),
         )
+        _screen_from_call(bot, call, text, reply_markup=kb)
+
         try:
             bot.edit_message_text(
                 text,
@@ -251,20 +312,26 @@ def register(bot, history):
             return
         cash_type = msg.text
         user_states[user_id] = {"step": "show_commission", "cash_type": cash_type}
-        if not isinstance(history.get(user_id), list):
-            history[user_id] = []
-        history[user_id].append("cash_menu")
+        if history is not None:
+            if not isinstance(history.get(user_id), list):
+                history[user_id] = []
+            history[user_id].append("cash_menu")
+
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type} (من رسالة)")
         name = _name_of(msg.from_user)
         text = with_cancel_hint(
             f"⚠️ يا {name}، تنويه مهم:\n"
             f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_50000:,} ل.س.\n\n"
-            "لو تمام، اكتب الرقم اللي هتحوّل له."
+            "لو تمام، دوس موافق وكمل اكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
+            ("⬅️ رجوع", "back_to_menu"),
             ("✅ موافق", "commission_confirm"),
-            ("❌ إلغاء", "commission_cancel")
+            ("❌ إلغاء", "commission_cancel"),
         )
+        _screen(bot, user_id, msg.chat.id, text, reply_markup=kb, delete_user_msg_id=msg.message_id)
+
+
         bot.send_message(msg.chat.id, text, reply_markup=kb)
 
     # إلغاء
@@ -289,12 +356,16 @@ def register(bot, history):
         if _service_unavailable_guard(bot, call.message.chat.id):
             return bot.answer_callback_query(call.id)
         user_id = call.from_user.id
-        user_states[user_id] = {**user_states.get(user_id, {}), "step": "awaiting_number"}
-        kb = make_inline_buttons(("❌ إلغاء", "commission_cancel"))
+        user_states.pop(user_id, None)
+        _screen_from_call(bot, call,
+            banner("❌ تم الإلغاء", ["رجعناك للقائمة الرئيسية 👇"]),
+            reply_markup=build_cash_menu(0))
+
         try:
             bot.edit_message_text(
-                with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"),
-                call.message.chat.id, call.message.message_id, reply_markup=kb
+                kb = make_inline_buttons(("⬅️ رجوع", "back_to_menu"), ("❌ إلغاء", "commission_cancel"))
+                _screen_from_call(bot, call, with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"), reply_markup=kb)
+
             )
         except Exception:
             bot.send_message(call.message.chat.id, with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"), reply_markup=kb)
@@ -308,21 +379,21 @@ def register(bot, history):
         user_states[user_id] = {**user_states.get(user_id, {}), "number": number, "step": "confirm_number"}
         logging.info(f"[CASH][{user_id}] رقم التحويل: {number}")
         kb = make_inline_buttons(
-            ("❌ إلغاء", "commission_cancel"),
+            ("⬅️ رجوع", "back_to_menu"),
             ("✏️ تعديل", "edit_number"),
-            ("✔️ تأكيد", "number_confirm")
+            ("✔️ تأكيد", "number_confirm"),
+            ("❌ إلغاء", "commission_cancel")
         )
-        bot.send_message(
-            msg.chat.id,
-            with_cancel_hint(f"🔢 الرقم المدخل: {number}\n\nتمام كده؟"),
-            reply_markup=kb
-        )
+        _screen(bot, user_id, msg.chat.id,
+                with_cancel_hint(f"🔢 الرقم المدخل: {number}\n\nتمام كده؟"),
+                reply_markup=kb, delete_user_msg_id=msg.message_id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_number")
     def edit_number(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_number"
-        bot.send_message(call.message.chat.id, with_cancel_hint("📲 اكتب الرقم من جديد:"))
+        _screen_from_call(bot, call, with_cancel_hint("📲 اكتب الرقم من جديد:"),
+                  reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_menu"), ("❌ إلغاء","commission_cancel")))
         bot.answer_callback_query(call.id)
 
     # بعد تأكيد الرقم → اطلب المبلغ
@@ -339,7 +410,9 @@ def register(bot, history):
                 call.message.chat.id, call.message.message_id, reply_markup=kb
             )
         except Exception:
-            bot.send_message(call.message.chat.id, with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"), reply_markup=kb)
+            kb = make_inline_buttons(("⬅️ رجوع", "back_to_number"), ("❌ إلغاء", "commission_cancel"))
+            _screen_from_call(bot, call, with_cancel_hint("💰 اكتب قيمة التحويل المطلوب (بالأرقام):"), reply_markup=kb)
+
         bot.answer_callback_query(call.id)
 
     # استلام المبلغ وحساب العمولة
@@ -362,10 +435,14 @@ def register(bot, history):
         user_states[user_id] = state
 
         kb = make_inline_buttons(
-            ("❌ إلغاء", "commission_cancel"),
+            ("⬅️ رجوع", "back_to_amount"),
             ("✏️ تعديل", "edit_amount"),
-            ("✔️ تأكيد", "cash_confirm")
+            ("✔️ تأكيد", "cash_confirm"),
+            ("❌ إلغاء", "commission_cancel")
         )
+        _screen(bot, user_id, msg.chat.id, with_cancel_hint(summary),
+                reply_markup=kb, delete_user_msg_id=msg.message_id)
+
         summary = banner(
             "📤 تأكيد العملية",
             [
@@ -382,7 +459,9 @@ def register(bot, history):
     def edit_amount(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
-        bot.send_message(call.message.chat.id, with_cancel_hint("💰 اكتب المبلغ من جديد:"))
+       _screen_from_call(bot, call, with_cancel_hint("💰 اكتب المبلغ من جديد:"),
+                  reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_number"), ("❌ إلغاء","commission_cancel")))
+
         bot.answer_callback_query(call.id)
 
     # تأكيد نهائي → إنشاء هولد + إرسال للطابور
@@ -488,15 +567,17 @@ def register(bot, history):
 
         # رسالة للعميل (من غير تعديل/حذف للرسالة السابقة — إحنا شيلنا الكيبورد خلاص)
         bot.send_message(
-            call.message.chat.id,
-            banner(
-                f"✅ تمام يا {name}! بعتنا طلب تحويلك 🚀",
-                [
-                    "⏱️ التنفيذ عادةً خلال 1–4 دقايق.",
-                    "ℹ️ تقدر تبعت طلب جديد لو حابب — كل الطلبات بتحترم الرصيد المتاح 😉",
-                ]
+            _screen_from_call(bot, call,
+                banner(
+                    f"✅ تمام يا {name}! بعتنا طلب تحويلك 🚀",
+                    [
+                        "⏱️ التنفيذ عادةً خلال 1–4 دقايق.",
+                        "ℹ️ تقدر تبعت طلب جديد لو حابب — كل الطلبات بتحترم الرصيد المتاح 😉",
+                    ]
+                ),
+                reply_markup=None
             )
-        )
+
         user_states[user_id]["step"] = "waiting_admin"
 
     # زر شحن المحفظة
