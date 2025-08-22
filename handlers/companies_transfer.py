@@ -509,12 +509,12 @@ def register_companies_transfer(bot, history):
     def show_recharge_methods(call):
         user_id = call.from_user.id
         name = _user_name(bot, user_id)
-        bot.send_message(call.message.chat.id, f"💳 يا {name}، اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-
+        _replace_screen(
+            bot, call,
+            f"💳 يا {name}، اختار طريقة شحن محفظتك:",
+            reply_markup=keyboards.recharge_menu()
+        )
+        
     # ===== أدمن (مسارات بديلة قديمة) — مفضّلين الهولد لو موجود =====
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_company_accept_"))
