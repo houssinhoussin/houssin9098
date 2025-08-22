@@ -337,8 +337,14 @@ def register(bot, history):
     # إلغاء
     @bot.callback_query_handler(func=lambda call: call.data == "commission_cancel")
     def commission_cancel(call):
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+
         user_id = call.from_user.id
         logging.info(f"[CASH][{user_id}] ألغى عملية التحويل")
+
         user_states.pop(user_id, None)
         try:
             remove_inline_keyboard(bot, call.message)
@@ -467,6 +473,15 @@ def register(bot, history):
     # تأكيد نهائي → إنشاء هولد + إرسال للطابور
     @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
     def confirm_transfer(call):
+        user_id = call.from_user.id
+        name = _name_of(call.from_user)
+    @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
+    def confirm_transfer(call):
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+
         user_id = call.from_user.id
         name = _name_of(call.from_user)
 
