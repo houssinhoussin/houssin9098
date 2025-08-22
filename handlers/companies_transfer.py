@@ -567,8 +567,9 @@ def register_companies_transfer(bot, history):
             name = _user_name(bot, user_id)
             bot.send_message(
                 user_id,
-                f"✅ تمام يا {name}! تم تنفيذ الحوالة عبر {company} للمستفيد {beneficiary_name} بمبلغ {amount:,} ل.س."
+                f"✅ تمام يا {name}! تم تنفيذ حوالة مالية عبر {company} للمستفيد «{beneficiary_number}» وتم خصم {reserved:,} ل.س من محفظتك."
             )
+
             bot.answer_callback_query(call.id, "✅ تم القبول")
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
 
