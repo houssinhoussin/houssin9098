@@ -339,21 +339,15 @@ def register(bot, history):
     def commission_confirmed(call):
         if _service_unavailable_guard(bot, call.message.chat.id):
             return bot.answer_callback_query(call.id)
+
         user_id = call.from_user.id
-        user_states.pop(user_id, None)
-        _screen_from_call(bot, call,
-            banner("❌ تم الإلغاء", ["رجعناك للقائمة الرئيسية 👇"]),
-            reply_markup=build_cash_menu(0))
+        # ننتقل لمرحلة إدخال الرقم
+        st = user_states.get(user_id, {}) or {}
+        st["step"] = "awaiting_number"
+        user_states[user_id] = st
 
-        try:
-            bot.edit_message_text(
-                kb = make_inline_buttons(("⬅️ رجوع", "back_to_menu"), ("❌ إلغاء", "commission_cancel"))
-                _screen_from_call(bot, call, with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"), reply_markup=kb)
-
-            )
-        except Exception:
-            bot.send_message(call.message.chat.id, with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"), reply_markup=kb)
-        bot.answer_callback_query(call.id)
+        kb = make_inline_buttons(("⬅️ رجوع", "back_to_menu"), ("❌ إلغاء", "commission_cancel"))
+        _screen_from_call(bot, call, with_cancel_hint("📲 ابعتلنا الرقم اللي هتحوّل له:"), reply_markup=kb)
 
     # استلام الرقم
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_number")
