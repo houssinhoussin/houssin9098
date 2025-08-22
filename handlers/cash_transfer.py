@@ -323,10 +323,6 @@ def register(bot, history):
     # إلغاء
     @bot.callback_query_handler(func=lambda call: call.data == "commission_cancel")
     def commission_cancel(call):
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
         user_id = call.from_user.id
         logging.info(f"[CASH][{user_id}] ألغى عملية التحويل")
         user_states.pop(user_id, None)
@@ -542,13 +538,13 @@ def register(bot, history):
             ),
             reply_markup=None
         )
-        user_states[user_id]["step"] = "waiting_admin"
+        user_states[user_id] = {**user_states.get(user_id, {}) , "step": "waiting_admin"}
 
     # زر شحن المحفظة
     @bot.callback_query_handler(func=lambda call: call.data == "recharge_wallet")
     def show_recharge_methods(call):
-        bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن المحفظة:", reply_markup=keyboards.recharge_menu())
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
+        _screen_from_call(
+            bot, call,
+            "💳 اختار طريقة شحن المحفظة:",
+            reply_markup=keyboards.recharge_menu()
+        )
