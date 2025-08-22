@@ -394,7 +394,9 @@ def register(bot, history):
             amount = parse_amount(amount_text, min_value=1)
         except Exception:
             logging.warning(f"[CASH][{user_id}] مبلغ غير صالح: {msg.text}")
-            bot.send_message(msg.chat.id, with_cancel_hint(f"⚠️ يا {name}، دخّل مبلغ صحيح بالأرقام من غير فواصل/رموز."))
+            _screen(bot, user_id, msg.chat.id,
+                    with_cancel_hint(f"⚠️ يا {name}، دخّل مبلغ صحيح بالأرقام من غير فواصل/رموز."),
+                    delete_user_msg_id=msg.message_id)
             return
 
         state = user_states.get(user_id, {}) or {}
@@ -402,15 +404,6 @@ def register(bot, history):
         total = amount + commission
         state.update({"amount": amount, "commission": commission, "total": total, "step": "confirming"})
         user_states[user_id] = state
-
-        kb = make_inline_buttons(
-            ("⬅️ رجوع", "back_to_amount"),
-            ("✏️ تعديل", "edit_amount"),
-            ("✔️ تأكيد", "cash_confirm"),
-            ("❌ إلغاء", "commission_cancel")
-        )
-        _screen(bot, user_id, msg.chat.id, with_cancel_hint(summary),
-                reply_markup=kb, delete_user_msg_id=msg.message_id)
 
         summary = banner(
             "📤 تأكيد العملية",
@@ -422,7 +415,15 @@ def register(bot, history):
                 f"• الطريقة: {state['cash_type']}"
             ]
         )
-        bot.send_message(msg.chat.id, with_cancel_hint(summary), reply_markup=kb)
+        kb = make_inline_buttons(
+            ("⬅️ رجوع", "back_to_amount"),
+            ("✏️ تعديل", "edit_amount"),
+            ("✔️ تأكيد", "cash_confirm"),
+            ("❌ إلغاء", "commission_cancel")
+        )
+        _screen(bot, user_id, msg.chat.id, with_cancel_hint(summary),
+                reply_markup=kb, delete_user_msg_id=msg.message_id)
+
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_amount")
     def edit_amount(call):
