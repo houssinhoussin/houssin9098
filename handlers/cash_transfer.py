@@ -429,10 +429,8 @@ def register(bot, history):
     def edit_amount(call):
         user_id = call.from_user.id
         user_states[user_id]["step"] = "awaiting_amount"
-       _screen_from_call(bot, call, with_cancel_hint("💰 اكتب المبلغ من جديد:"),
-                  reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_number"), ("❌ إلغاء","commission_cancel")))
-
-        bot.answer_callback_query(call.id)
+        _screen_from_call(bot, call, with_cancel_hint("💰 اكتب المبلغ من جديد:"),
+                          reply_markup=make_inline_buttons(("⬅️ رجوع","back_to_number"), ("❌ إلغاء","commission_cancel")))
 
     # تأكيد نهائي → إنشاء هولد + إرسال للطابور
     @bot.callback_query_handler(func=lambda call: call.data == "cash_confirm")
@@ -471,7 +469,7 @@ def register(bot, history):
 
         if available < total:
             shortage = total - available
-            kb = make_inline_buttons(("💳 شحن المحفظة", "recharge_wallet"), ("⬅️ رجوع", "commission_cancel"))
+            kb = make_inline_buttons(("💳 شحن المحفظة", "recharge_wallet"), ("⬅️ رجوع", "back_to_amount"))
             return bot.send_message(
                 call.message.chat.id,
                 with_cancel_hint(
