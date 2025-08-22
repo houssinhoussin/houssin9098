@@ -327,20 +327,12 @@ def register(bot, history):
             bot.answer_callback_query(call.id)
         except Exception:
             pass
-
         user_id = call.from_user.id
         logging.info(f"[CASH][{user_id}] ألغى عملية التحويل")
-
         user_states.pop(user_id, None)
-        try:
-            remove_inline_keyboard(bot, call.message)
-        except Exception:
-            pass
-        bot.send_message(
-            call.message.chat.id,
+        _screen_from_call(bot, call,
             banner("❌ تم الإلغاء", ["رجعناك للقائمة الرئيسية 👇"]),
-            reply_markup=build_cash_menu(0)
-        )
+            reply_markup=build_cash_menu(0))
 
     # موافقة على الشروط → اطلب الرقم
     @bot.callback_query_handler(func=lambda call: call.data == "commission_confirm")
