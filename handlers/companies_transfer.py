@@ -228,8 +228,6 @@ def register_companies_transfer(bot, history):
             ("❌ إلغاء", "company_commission_cancel")
         )
         _replace_screen(bot, call, text, reply_markup=kb)
-        try: bot.answer_callback_query(call.id)
-        except Exception: pass
         return
 
     @bot.callback_query_handler(func=lambda call: call.data == "company_commission_cancel")
@@ -294,18 +292,21 @@ def register_companies_transfer(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "beneficiary_name_confirm")
     def beneficiary_name_confirm(call):
         if _service_unavailable_guard(bot, call.message.chat.id):
-        try: bot.answer_callback_query(call.id)
-        except Exception: pass
-        return
-    user_id = call.from_user.id
-    name = _user_name(bot, user_id)
-    user_states[user_id]["step"] = "awaiting_beneficiary_number"
-    _replace_screen(
-        bot, call,
-        with_cancel_hint(f"📱 يا {name}، ابعت رقم المستفيد (لازم يبدأ بـ 09) — 10 أرقام:"),
-        reply_markup=make_inline_buttons(("❌ إلغاء", "company_commission_cancel"))
-    )
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass
+            return
 
+        user_id = call.from_user.id
+        name = _user_name(bot, user_id)
+        user_states[user_id]["step"] = "awaiting_beneficiary_number"
+        _replace_screen(
+            bot, call,
+            with_cancel_hint(f"📱 يا {name}، ابعت رقم المستفيد (لازم يبدأ بـ 09) — 10 أرقام:"),
+            reply_markup=make_inline_buttons(("❌ إلغاء", "company_commission_cancel"))
+        )
+        
     @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "awaiting_beneficiary_number")
     def get_beneficiary_number(msg):
         user_id = msg.from_user.id
