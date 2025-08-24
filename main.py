@@ -17,6 +17,9 @@ from services.commands_setup import setup_bot_commands
 from services.outbox_worker import start_outbox_worker
 from services.maintenance_worker import start_housekeeping
 
+# ✅ تعديل بسيط ليتوافق مع ويندوز: تشغيل الخادم الوهمي يصبح اختياريًا
+ENABLE_DUMMY_SERVER = os.environ.get("ENABLE_DUMMY_SERVER", "0") == "1"
+
 PORT = 8081
 
 def run_dummy_server():
@@ -28,7 +31,11 @@ def run_dummy_server():
         httpd.serve_forever()
 
 # تشغيل الخادم في ثريد منفصل حتى لا يوقف البوت الأساسي
-threading.Thread(target=run_dummy_server, daemon=True).start()
+# (لن يعمل على ويندوز إلا إذا ENABLE_DUMMY_SERVER=1)
+if ENABLE_DUMMY_SERVER:
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+else:
+    print("🖥️ Local run: dummy server is disabled (ENABLE_DUMMY_SERVER=0).")
 
 # ---------------------------------------------------------
 # تسجيل الأخطاء لظهورها في سجلّ Render
@@ -255,7 +262,8 @@ def handle_shakhashir(msg):
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة شخاشير**.\n"
-        "يتم إضافة مبلغ 1500 ل.س على كل 50000 ل.س.\n\n"
+        "يتم إضافة مبلغ 1500 ل.س على كل 50000 ل.س.\n"
+        "\n"
         "تابع العملية أو ألغِ الطلب.",
         reply_markup=telebot.types.ReplyKeyboardMarkup(resize_keyboard=True).add(
             "✔️ تأكيد حوالة شخاشير", "❌ إلغاء"
