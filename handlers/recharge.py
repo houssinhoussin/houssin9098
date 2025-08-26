@@ -27,11 +27,11 @@ recharge_pending = set()
 # ✅ الحد الأدنى للشحن
 MIN_RECHARGE = 15000
 
-SYRIATEL_NUMBERS = ["0011111", "0022222", "0033333", "0044444"]
+SYRIATEL_NUMBERS = ["58591772"]
 # 🔧 إصلاح تكرار في القائمة
-MTN_NUMBERS = ["0005555", "0006666", "0007777"]
-SHAMCASH_CODES = ["000xz55XH55", "00YI06MB666"]
-PAYEER_CODES = ["0PPWY0777JG7"]
+MTN_NUMBERS = ["0946728015"]
+SHAMCASH_CODES = ["578344c08da57a5b0ce8c2b915614d2b"]
+PAYEER_CODES = ["0"]
 
 # ==== Helpers ====
 BAND = "━━━━━━━━━━━━━━━━"
