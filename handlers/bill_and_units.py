@@ -723,13 +723,16 @@ def register_bill_and_units(bot, history):
     # ===== رجوع (ReplyKeyboard) — يعمل في جميع مراحل الريلاي كيبورد =====
     @bot.message_handler(func=lambda msg: msg.text == "⬅️ رجوع")
     def reply_back_btn(msg):
-        # ✅ تصفير الحالة وإزالة كيبورد الريلاي، ثم الرجوع للقائمة الرئيسية (Inline)
-        _reset_state(msg.from_user.id)
+        user_id = msg.from_user.id
+        # ✅ تصفير الحالة وإزالة أي كيبورد قديم
+        _reset_state(user_id)
         try:
             bot.send_message(msg.chat.id, "⬅️ رجعناك للقائمة.", reply_markup=types.ReplyKeyboardRemove())
         except Exception:
             pass
+        # ✅ إظهار القائمة الرئيسية (Inline)
         bot.send_message(msg.chat.id, "اختار من القائمة:", reply_markup=units_bills_menu_inline())
+
 
     # ===================================================================
     #   (التوافق) مسارات الـ ReplyKeyboard القديمة — من غير حذف
