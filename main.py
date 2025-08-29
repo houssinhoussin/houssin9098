@@ -165,17 +165,17 @@ def handle_back(msg):
 
     if state == "products_menu":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى المنتجات.", reply_markup=products_menu())
-        user_state[user_id]['step'] = "main_menu"
+        user_state[user_id]['step'] = "products_menu"
     elif state == "main_menu":
         bot.send_message(msg.chat.id, "⬅️ عدت إلى القائمة الرئيسية.", reply_markup=main_menu())
     elif state == "game_menu":
-        bot.send_message(msg.chat.id, "⬅️ عدت إلى الألعاب.", reply_markup=game_categories())
+        bot.send_message(msg.chat.id, "⬅️ عدت إلى قائمة المنتجات.", reply_markup=products_menu())
         user_state[user_id]['step'] = "products_menu"
     elif state == "cash_menu":
-        bot.send_message(msg.chat.id, "⬅️ عدت إلى قائمة الكاش.", reply_markup=cash_transfer_menu())
-        user_state[user_id]['step'] = "main_menu"
+        bot.send_message(msg.chat.id, "⬅️ عدت إلى قائمة التحويلات.", reply_markup=transfers_menu())
+        user_state[user_id]['step'] = "transfers_menu"
     elif state == "syrian_transfer":
-        bot.send_message(msg.chat.id, "⬅️ عدت إلى تحويل الرصيد السوري.", reply_markup=syrian_balance_menu())
+        bot.send_message(msg.chat.id, "⬅️ عدت إلى قائمة المنتجات.", reply_markup=products_menu())
         user_state[user_id]['step'] = "products_menu"
     else:
         bot.send_message(msg.chat.id, "⬅️ عدت إلى البداية.", reply_markup=main_menu())
