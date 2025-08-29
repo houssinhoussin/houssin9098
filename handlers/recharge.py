@@ -25,7 +25,7 @@ recharge_requests = {}
 recharge_pending = set()
 
 # ✅ الحد الأدنى للشحن
-MIN_RECHARGE = 15000
+MIN_RECHARGE = 5000
 
 SYRIATEL_NUMBERS = ["58591772"]
 # 🔧 إصلاح تكرار في القائمة
