@@ -480,6 +480,21 @@ def handle_player_id(message, bot):
         types.InlineKeyboardButton("❌ إلغاء", callback_data="cancel_order")
     )
 
+        # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill
+    id_label = "آيدي اللاعب"
+    try:
+        subset = order.get("subset")
+        prod_text = ""
+        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+            v = getattr(product, attr, None)
+            if isinstance(v, str) and v:
+                prod_text = v.lower()
+                break
+        if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
+            id_label = "آيدي سول شيل"
+    except Exception:
+        pass
+
     bot.send_message(
         user_id,
         _with_cancel(
@@ -489,7 +504,7 @@ def handle_player_id(message, bot):
                     f"• المنتج: {product.name}",
                     f"• الفئة: {_visible_category_label(order, product)}",
                     f"• السعر: {_fmt_syp(price_syp)}",
-                    f"• آيدي اللاعب: {player_id}",
+                    f"• {id_label}: {player_id}",
                     "",
                     f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
                     "تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
@@ -498,6 +513,7 @@ def handle_player_id(message, bot):
         ),
         reply_markup=keyboard
     )
+
 
 # ================= تسجيل هاندلرات الرسائل =================
 
@@ -627,7 +643,23 @@ def setup_inline_handlers(bot, admin_ids):
 
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
-        msg = bot.send_message(user_id, _with_cancel(f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"), reply_markup=kb)
+
+        # حدد نص الطلب للآيدي: لو المستخدم جاي من subset 'soulchill'
+        prompt = f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"
+        try:
+            subset = prev.get("subset")
+            prod_text = ""
+            for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+                v = getattr(selected, attr, None)
+                if isinstance(v, str) and v:
+                    prod_text = v.lower()
+                    break
+            if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (selected.name or "").lower():
+                prompt = f"💡 يا {name}، ابعت آيدي سول شيل لو سمحت:"
+        except Exception:
+            pass
+
+        msg = bot.send_message(user_id, _with_cancel(prompt), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
         bot.answer_callback_query(call.id)
 
