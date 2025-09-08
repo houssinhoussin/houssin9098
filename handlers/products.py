@@ -125,6 +125,8 @@ def _visible_category_label(order: dict, product: Product) -> str:
                 key = "cod"
             elif "app:bigo" in d:
                 key = "bigo"
+            elif "app:soulchill" in d:
+                key = "soulchill"
 
         return _MIXED_SUB_LABELS.get(key, "ألعاب/تطبيقات")
 
@@ -246,7 +248,7 @@ PRODUCTS = {
         Product(40, "2000 ألماس",  "ألعاب/تطبيقات", 36.12, "app:bigo|Bigo Live 2000 Diamonds"),
         Product(41, "3000 ألماس",  "ألعاب/تطبيقات", 54.19, "app:bigo|Bigo Live 3000 Diamonds"),
         Product(42, "4000 ألماس",  "ألعاب/تطبيقات", 72.22, "app:bigo|Bigo Live 4000 Diamonds"),
-    ],
+
         # === SoulChill ===
         Product(43, "1000 كريستال",  "ألعاب/تطبيقات", 1.79,  "app:soulchill|SoulChill 1000 Crystals"),
         Product(44, "1500 كريستال",  "ألعاب/تطبيقات", 2.67,  "app:soulchill|SoulChill 1500 Crystals"),
@@ -254,7 +256,7 @@ PRODUCTS = {
         Product(46, "4000 كريستال",  "ألعاب/تطبيقات", 7.80,  "app:soulchill|SoulChill 4000 Crystals"),
         Product(47, "5000 كريستال",  "ألعاب/تطبيقات", 8.83,  "app:soulchill|SoulChill 5000 Crystals"),
         Product(48, "10000 كريستال", "ألعاب/تطبيقات", 17.64, "app:soulchill|SoulChill 10000 Crystals"),
-
+    ],
 }
 
 # ================= (جديد) أقسام فرعية قابلة للتوسّع لقسم MixedApps =================
@@ -481,38 +483,38 @@ def handle_player_id(message, bot):
     )
 
         # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill
-    id_label = "آيدي اللاعب"
-    try:
-        subset = order.get("subset")
-        prod_text = ""
-        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
-            v = getattr(product, attr, None)
-            if isinstance(v, str) and v:
-                prod_text = v.lower()
-                break
-        if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
-            id_label = "آيدي سول شيل"
-    except Exception:
-        pass
+        id_label = "آيدي اللاعب"
+        try:
+            subset = order.get("subset")
+            prod_text = ""
+            for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+                v = getattr(product, attr, None)
+                if isinstance(v, str) and v:
+                    prod_text = v.lower()
+                    break
+            if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
+                id_label = "آيدي سول شيل"
+        except Exception:
+            pass
 
-    bot.send_message(
-        user_id,
-        _with_cancel(
-            _card(
-                "📦 تفاصيل الطلب",
-                [
-                    f"• المنتج: {product.name}",
-                    f"• الفئة: {_visible_category_label(order, product)}",
-                    f"• السعر: {_fmt_syp(price_syp)}",
-                    f"• {id_label}: {player_id}",
-                    "",
-                    f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
-                    "تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
-                ]
-            )
-        ),
-        reply_markup=keyboard
-    )
+        bot.send_message(
+            user_id,
+            _with_cancel(
+                _card(
+                    "📦 تفاصيل الطلب",
+                    [
+                        f"• المنتج: {product.name}",
+                        f"• الفئة: {_visible_category_label(order, product)}",
+                        f"• السعر: {_fmt_syp(price_syp)}",
+                        f"• {id_label}: {player_id}",
+                        "",
+                        f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
+                        "تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
+                    ]
+                )
+            ),
+            reply_markup=keyboard
+        )
 
 
 # ================= تسجيل هاندلرات الرسائل =================
