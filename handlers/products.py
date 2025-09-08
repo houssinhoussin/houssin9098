@@ -93,6 +93,7 @@ _CATEGORY_LABELS = {
 _MIXED_SUB_LABELS = {
     "cod": "كول أوف ديوتي",
     "bigo": "بيغو لايف",
+    "soulchill": "سول شيل",
 }
 
 def _visible_category_label(order: dict, product: Product) -> str:
@@ -246,6 +247,14 @@ PRODUCTS = {
         Product(41, "3000 ألماس",  "ألعاب/تطبيقات", 54.19, "app:bigo|Bigo Live 3000 Diamonds"),
         Product(42, "4000 ألماس",  "ألعاب/تطبيقات", 72.22, "app:bigo|Bigo Live 4000 Diamonds"),
     ],
+        # === SoulChill ===
+        Product(43, "1000 كريستال",  "ألعاب/تطبيقات", 1.79,  "app:soulchill|SoulChill 1000 Crystals"),
+        Product(44, "1500 كريستال",  "ألعاب/تطبيقات", 2.67,  "app:soulchill|SoulChill 1500 Crystals"),
+        Product(45, "2000 كريستال",  "ألعاب/تطبيقات", 3.56,  "app:soulchill|SoulChill 2000 Crystals"),
+        Product(46, "4000 كريستال",  "ألعاب/تطبيقات", 7.80,  "app:soulchill|SoulChill 4000 Crystals"),
+        Product(47, "5000 كريستال",  "ألعاب/تطبيقات", 8.83,  "app:soulchill|SoulChill 5000 Crystals"),
+        Product(48, "10000 كريستال", "ألعاب/تطبيقات", 17.64, "app:soulchill|SoulChill 10000 Crystals"),
+
 }
 
 # ================= (جديد) أقسام فرعية قابلة للتوسّع لقسم MixedApps =================
@@ -253,6 +262,7 @@ PRODUCTS = {
 MIXEDAPPS_SUBCATS = [
     {"label": "Call of Duty", "key": "cod"},
     {"label": "Bigo Live",    "key": "bigo"},
+    {"label": "SoulChill",    "key": "soulchill"},
 ]
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
