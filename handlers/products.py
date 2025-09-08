@@ -482,39 +482,39 @@ def handle_player_id(message, bot):
         types.InlineKeyboardButton("❌ إلغاء", callback_data="cancel_order")
     )
 
-        # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill
-        id_label = "آيدي اللاعب"
-        try:
-            subset = order.get("subset")
-            prod_text = ""
-            for attr in ("description", "desc", "label", "button", "button_label", "extra"):
-                v = getattr(product, attr, None)
-                if isinstance(v, str) and v:
-                    prod_text = v.lower()
-                    break
-            if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
-                id_label = "آيدي سول شيل"
-        except Exception:
-            pass
+    # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill
+    id_label = "آيدي اللاعب"
+    try:
+        subset = order.get("subset")
+        prod_text = ""
+        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+            v = getattr(product, attr, None)
+            if isinstance(v, str) and v:
+                prod_text = v.lower()
+                break
+        if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
+            id_label = "آيدي سول شيل"
+    except Exception:
+        pass
 
-        bot.send_message(
-            user_id,
-            _with_cancel(
-                _card(
-                    "📦 تفاصيل الطلب",
-                    [
-                        f"• المنتج: {product.name}",
-                        f"• الفئة: {_visible_category_label(order, product)}",
-                        f"• السعر: {_fmt_syp(price_syp)}",
-                        f"• {id_label}: {player_id}",
-                        "",
-                        f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
-                        "تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
-                    ]
-                )
-            ),
-            reply_markup=keyboard
-        )
+    bot.send_message(
+        user_id,
+        _with_cancel(
+            _card(
+                "📦 تفاصيل الطلب",
+                [
+                    f"• المنتج: {product.name}",
+                    f"• الفئة: {_visible_category_label(order, product)}",
+                    f"• السعر: {_fmt_syp(price_syp)}",
+                    f"• {id_label}: {player_id}",
+                    "",
+                    f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
+                    "تقدر تعمل طلبات تانية برضه — بنحسب من المتاح بس."
+                ]
+            )
+        ),
+        reply_markup=keyboard
+    )
 
 
 # ================= تسجيل هاندلرات الرسائل =================
