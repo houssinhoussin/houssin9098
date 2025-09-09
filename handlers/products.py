@@ -94,6 +94,9 @@ _MIXED_SUB_LABELS = {
     "cod": "كول أوف ديوتي",
     "bigo": "بيغو لايف",
     "soulchill": "سول شيل",
+    "clashofclans": "كلاش أوف كلانس",
+    "clashroyale": "كلاش رويال",
+    "siba": "صبا شات",
 }
 
 def _visible_category_label(order: dict, product: Product) -> str:
@@ -256,6 +259,30 @@ PRODUCTS = {
         Product(46, "4000 كريستال",  "ألعاب/تطبيقات", 7.80,  "app:soulchill|SoulChill 4000 Crystals"),
         Product(47, "5000 كريستال",  "ألعاب/تطبيقات", 8.83,  "app:soulchill|SoulChill 5000 Crystals"),
         Product(48, "10000 كريستال", "ألعاب/تطبيقات", 17.64, "app:soulchill|SoulChill 10000 Crystals"),
+        
+        # === Clash of Clans ===
+        Product(49, "88 جوهرة",        "ألعاب/تطبيقات", 1.26,  "app:clashofclans|Clash of Clans 88 Gems"),
+        Product(50, "500 جوهرة",       "ألعاب/تطبيقات", 5.69,  "app:clashofclans|Clash of Clans 500 Gems"),
+        Product(51, "1200 جوهرة",      "ألعاب/تطبيقات", 11.89, "app:clashofclans|Clash of Clans 1200 Gems"),
+        Product(52, "2500 جوهرة",      "ألعاب/تطبيقات", 22.71, "app:clashofclans|Clash of Clans 2500 Gems"),
+        Product(53, "التذكرة الذهبية",  "ألعاب/تطبيقات", 8.21,  "app:clashofclans|Clash of Clans Golden Ticket"),
+        Product(54, "سكنات الملوك",    "ألعاب/تطبيقات", 10.77, "app:clashofclans|Clash of Clans King Skins"),
+        Product(55, "تذكرة الحدث",     "ألعاب/تطبيقات", 6.19,  "app:clashofclans|Clash of Clans Event Ticket"),
+        Product(56, "سكنات القرية",    "ألعاب/تطبيقات", 7.70,  "app:clashofclans|Clash of Clans Village Skins"),
+
+        # === Clash Royale ===
+        Product(57, "80 جوهرة",        "ألعاب/تطبيقات", 1.50,  "app:clashroyale|Clash Royale 80 Gems"),
+        Product(58, "500 جوهرة",       "ألعاب/تطبيقات", 5.70,  "app:clashroyale|Clash Royale 500 Gems"),
+        Product(59, "1200 جوهرة",      "ألعاب/تطبيقات", 10.70, "app:clashroyale|Clash Royale 1200 Gems"),
+        Product(60, "2500 جوهرة",      "ألعاب/تطبيقات", 22.00, "app:clashroyale|Clash Royale 2500 Gems"),
+        Product(61, "التذكرة الماسية", "ألعاب/تطبيقات", 12.70, "app:clashroyale|Clash Royale Diamond Ticket"),
+
+        # === Siba Chat ===
+        Product(62, "10000 شحن", "ألعاب/تطبيقات", 1.20, "app:siba|Siba 10000"),
+        Product(63, "15000 شحن", "ألعاب/تطبيقات", 1.80, "app:siba|Siba 15000"),
+        Product(64, "20000 شحن", "ألعاب/تطبيقات", 2.39, "app:siba|Siba 20000"),
+        Product(65, "50000 شحن", "ألعاب/تطبيقات", 5.98, "app:siba|Siba 50000"),
+
     ],
 }
 
