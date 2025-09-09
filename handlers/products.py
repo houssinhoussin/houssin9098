@@ -700,30 +700,19 @@ def setup_inline_handlers(bot, admin_ids):
                 if isinstance(v, str) and v:
                     prod_text = v.lower()
                     break
+    
+            # SoulChill
             if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (selected.name or "").lower():
-                 # حدد نص الطلب للآيدي (حسب السابسِت أو وسم المنتج)
-                 prompt = f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"
-                 try:
-                     subset = prev.get("subset")
-                     prod_text = ""
-                     for attr in ("description", "desc", "label", "button", "button_label", "extra"):
-                         v = getattr(selected, attr, None)
-                         if isinstance(v, str) and v:
-                             prod_text = v.lower()
-                             break
-
-                     # SoulChill
-                     if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (selected.name or "").lower():
-                         prompt = f"💡 يا {name}، ابعت آيدي سول شيل لو سمحت:"
-                     # Clash of Clans
-                     elif subset == "clashofclans" or "app:clashofclans" in prod_text or "clashofclans" in (selected.name or "").lower():
-                         prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash of Clans لو سمحت:"
-                     # Clash Royale
-                     elif subset == "clashroyale" or "app:clashroyale" in prod_text or "clashroyale" in (selected.name or "").lower():
-                         prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash Royale لو سمحت:"
-                     # Siba يبقى الافتراضي
-                 except Exception:
-                     pass
+                prompt = f"💡 يا {name}، ابعت آيدي سول شيل لو سمحت:"
+            # Clash of Clans
+            elif subset == "clashofclans" or "app:clashofclans" in prod_text or "clashofclans" in (selected.name or "").lower():
+                prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash of Clans لو سمحت:"
+            # Clash Royale
+            elif subset == "clashroyale" or "app:clashroyale" in prod_text or "clashroyale" in (selected.name or "").lower():
+                prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash Royale لو سمحت:"
+            # Siba يبقى الافتراضي
+        except Exception:
+            pass
         msg = bot.send_message(user_id, _with_cancel(prompt), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
         bot.answer_callback_query(call.id)
