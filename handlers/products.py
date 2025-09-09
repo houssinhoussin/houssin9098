@@ -715,13 +715,13 @@ def setup_inline_handlers(bot, admin_ids):
                      # SoulChill
                      if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (selected.name or "").lower():
                          prompt = f"💡 يا {name}، ابعت آيدي سول شيل لو سمحت:"
-                     # Clash of Clans -> نطلب إيميل Supercell ID
+                     # Clash of Clans
                      elif subset == "clashofclans" or "app:clashofclans" in prod_text or "clashofclans" in (selected.name or "").lower():
                          prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash of Clans لو سمحت:"
-                     # Clash Royale -> نطلب إيميل Supercell ID
+                     # Clash Royale
                      elif subset == "clashroyale" or "app:clashroyale" in prod_text or "clashroyale" in (selected.name or "").lower():
                          prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash Royale لو سمحت:"
-                     # Siba: يبقى الافتراضي (آيدي اللاعب)
+                     # Siba يبقى الافتراضي
                  except Exception:
                      pass
         msg = bot.send_message(user_id, _with_cancel(prompt), reply_markup=kb)
