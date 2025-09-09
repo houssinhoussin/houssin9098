@@ -130,6 +130,13 @@ def _visible_category_label(order: dict, product: Product) -> str:
                 key = "bigo"
             elif "app:soulchill" in d:
                 key = "soulchill"
+            elif "app:clashofclans" in d:
+                key = "clashofclans"
+            elif "app:clashroyale" in d:
+                key = "clashroyale"
+            elif "app:siba" in d:
+                key = "siba"
+
 
         return _MIXED_SUB_LABELS.get(key, "ألعاب/تطبيقات")
 
@@ -289,9 +296,12 @@ PRODUCTS = {
 # ================= (جديد) أقسام فرعية قابلة للتوسّع لقسم MixedApps =================
 # لإضافة زر جديد لاحقًا يكفي إضافة dict جديد هنا بنفس البنية (label/key)
 MIXEDAPPS_SUBCATS = [
-    {"label": "Call of Duty", "key": "cod"},
-    {"label": "Bigo Live",    "key": "bigo"},
-    {"label": "SoulChill",    "key": "soulchill"},
+    {"label": "Call of Duty",     "key": "cod"},
+    {"label": "Bigo Live",        "key": "bigo"},
+    {"label": "SoulChill",        "key": "soulchill"},
+    {"label": "Clash of Clans",   "key": "clashofclans"},
+    {"label": "Clash Royale",     "key": "clashroyale"},
+    {"label": "Siba Chat",        "key": "siba"},
 ]
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
