@@ -91,12 +91,12 @@ _CATEGORY_LABELS = {
     "Jawaker": "تطبيق جواكر",
 }
 _MIXED_SUB_LABELS = {
-    "cod": "كول أوف ديوتي",
-    "bigo": "بيغو لايف",
-    "soulchill": "سول شيل",
-    "clashofclans": "كلاش أوف كلانس",
-    "clashroyale": "كلاش رويال",
-    "siba": "صبا شات",
+    "cod": "لعبة كول أوف ديوتي",
+    "clashofclans": "لعبة كلاش أوف كلانس",
+    "clashroyale": "لعبة كلاش رويال",
+    "bigo": "تطبيق بيغو لايف",
+    "siba": "تطبيق صبا شات",
+    "soulchill": "تطبيق سول شيل",
 }
 
 def _visible_category_label(order: dict, product: Product) -> str:
@@ -296,13 +296,14 @@ PRODUCTS = {
 # ================= (جديد) أقسام فرعية قابلة للتوسّع لقسم MixedApps =================
 # لإضافة زر جديد لاحقًا يكفي إضافة dict جديد هنا بنفس البنية (label/key)
 MIXEDAPPS_SUBCATS = [
-    {"label": "Call of Duty",     "key": "cod"},
-    {"label": "Bigo Live",        "key": "bigo"},
-    {"label": "SoulChill",        "key": "soulchill"},
-    {"label": "Clash of Clans",   "key": "clashofclans"},
-    {"label": "Clash Royale",     "key": "clashroyale"},
-    {"label": "Siba Chat",        "key": "siba"},
+    {"label": "لعبة Call of Duty",   "key": "cod"},
+    {"label": "لعبة Clash of Clans", "key": "clashofclans"},
+    {"label": "لعبة Clash Royale",   "key": "clashroyale"},
+    {"label": "تطبيق Bigo Live",     "key": "bigo"},
+    {"label": "تطبيق Siba Chat",     "key": "siba"},
+    {"label": "تطبيق SoulChill",     "key": "soulchill"},
 ]
+
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
     """يرجع باقات التصنيف بحسب وسم التطبيق في أي حقل نصي داخل الكائن (app:cod / app:bigo)."""
