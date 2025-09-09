@@ -518,8 +518,8 @@ def handle_player_id(message, bot):
         types.InlineKeyboardButton("✏️ أعدّل الآيدي", callback_data="edit_player_id"),
         types.InlineKeyboardButton("❌ إلغاء", callback_data="cancel_order")
     )
-
-    # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill
+    
+    # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill أو الكلاش
     id_label = "آيدي اللاعب"
     try:
         subset = order.get("subset")
@@ -529,8 +529,15 @@ def handle_player_id(message, bot):
             if isinstance(v, str) and v:
                 prod_text = v.lower()
                 break
+
         if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
             id_label = "آيدي سول شيل"
+        elif subset == "clashofclans" or "app:clashofclans" in prod_text or "clashofclans" in (product.name or "").lower():
+            id_label = "إيميل Supercell ID"
+        elif subset == "clashroyale" or "app:clashroyale" in prod_text or "clashroyale" in (product.name or "").lower():
+            id_label = "إيميل Supercell ID"
+        elif subset == "siba" or "app:siba" in prod_text or "siba" in (product.name or "").lower():
+            id_label = "آيدي اللاعب"
     except Exception:
         pass
 
