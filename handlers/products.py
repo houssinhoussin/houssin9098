@@ -97,6 +97,9 @@ _MIXED_SUB_LABELS = {
     "bigo": "تطبيق بيغو لايف",
     "siba": "تطبيق صبا شات",
     "soulchill": "تطبيق سول شيل",
+    "pota": "تطبيق Pota Live",
+    "waaw": "تطبيق Waaw Chat",
+    "kiyo": "تطبيق Kiyo Live",
 }
 
 def _visible_category_label(order: dict, product: Product) -> str:
@@ -289,7 +292,24 @@ PRODUCTS = {
         Product(63, "15000 شحن", "ألعاب/تطبيقات", 1.80, "app:siba|Siba 15000"),
         Product(64, "20000 شحن", "ألعاب/تطبيقات", 2.39, "app:siba|Siba 20000"),
         Product(65, "50000 شحن", "ألعاب/تطبيقات", 5.98, "app:siba|Siba 50000"),
+        
+        # === POTA LIVE ===
+        Product(66, "50000 شحن",    "ألعاب/تطبيقات", 1.39,  "app:pota|Pota Live 50000"),
+        Product(67, "100000 شحن",   "ألعاب/تطبيقات", 2.78,  "app:pota|Pota Live 100000"),
+        Product(68, "500000 شحن",   "ألعاب/تطبيقات", 13.69, "app:pota|Pota Live 500000"),
+        Product(69, "1000000 شحن",  "ألعاب/تطبيقات", 27.40, "app:pota|Pota Live 1000000"),
 
+        # === WAAW CHAT ===
+        Product(70, "50000 شحن",    "ألعاب/تطبيقات", 1.80,  "app:waaw|Waaw Chat 50000"),
+        Product(71, "100000 شحن",   "ألعاب/تطبيقات", 3.50,  "app:waaw|Waaw Chat 100000"),
+        Product(72, "500000 شحن",   "ألعاب/تطبيقات", 17.10, "app:waaw|Waaw Chat 500000"),
+        Product(73, "1000000 شحن",  "ألعاب/تطبيقات", 34.06, "app:waaw|Waaw Chat 1000000"),
+
+        # === Kiyo LIVE ===
+        Product(74, "3000 شحن",     "ألعاب/تطبيقات", 1.11,  "app:kiyo|Kiyo Live 3000"),
+        Product(75, "6000 شحن",     "ألعاب/تطبيقات", 2.20,  "app:kiyo|Kiyo Live 6000"),
+        Product(76, "12000 شحن",    "ألعاب/تطبيقات", 4.38,  "app:kiyo|Kiyo Live 12000"),
+        Product(77, "24000 شحن",    "ألعاب/تطبيقات", 8.71,  "app:kiyo|Kiyo Live 24000"),
     ],
 }
 
@@ -302,6 +322,9 @@ MIXEDAPPS_SUBCATS = [
     {"label": "تطبيق Bigo Live",     "key": "bigo"},
     {"label": "تطبيق Siba Chat",     "key": "siba"},
     {"label": "تطبيق SoulChill",     "key": "soulchill"},
+    {"label": "تطبيق Pota Live",     "key": "pota"},
+    {"label": "تطبيق Waaw Chat",     "key": "waaw"},
+    {"label": "تطبيق Kiyo Live",     "key": "kiyo"},
 ]
 
 
