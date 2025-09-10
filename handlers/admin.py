@@ -1502,6 +1502,17 @@ def register(bot, history):
         txt = summarize_all_admins(days=7)
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
+
+    @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
+    def assistants_daily_report(m):
+        txt = summarize_assistants(days=7)
+        bot.send_message(m.chat.id, txt, parse_mode="HTML")
+
+    @bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
+    def all_admins_report(m):
+        txt = summarize_all_admins(days=7)
+        bot.send_message(m.chat.id, txt, parse_mode="HTML")
+
     # ==== بث للجميع ====
     @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     def broadcast_menu(m):
@@ -1510,6 +1521,7 @@ def register(bot, history):
         kb.row("📊 استفتاء سريع", "📝 رسالة من عندي")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
+
 
 # === نقلناها إلى مستوى الموديول لتتفادا NameError ===
 def _collect_all_user_ids() -> set[int]:
@@ -1549,6 +1561,13 @@ def _collect_all_user_ids() -> set[int]:
         pass
 
     return ids
+    
+def _register_admin_roles(bot):
+    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id == ADMIN_MAIN_ID)
+    def admins_roles(m):
+        ids_str = ", ".join(str(x) for x in ADMINS)
+        bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
+
 
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
