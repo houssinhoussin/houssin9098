@@ -195,7 +195,7 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int):
 def wire_handlers(bot: TeleBot):
 
     # بدء
-    @bot.message_handler(func=lambda m: True, content_types=['text'])
+    @bot.message_handler(func=lambda m: isinstance(m.text, str) and ((m.text or "").strip() in {"/quiz", "🎯 الحزازير (ربحي)", "🎯 الحزازير", "الحزازير (ربحي)", "الحزازير", "quiz"}), content_types=['text'])
     def _catch_all(m):
         txt = (m.text or "").strip()
         QUIZ_TRIGGERS = {"/quiz", "🎯 الحزازير (ربحي)", "🎯 الحزازير", "الحزازير (ربحي)", "الحزازير", "quiz"}
