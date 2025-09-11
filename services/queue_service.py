@@ -11,11 +11,11 @@ import logging
 
 import httpx
 
-from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLE_NAME
-# اسم جدول المستخدمين كما في .env
-USERS_TABLE = SUPABASE_TABLE_NAME or "houssin363"
-if USERS_TABLE == USERS_TABLE:
-    USERS_TABLE = "houssin363"
+from config import SUPABASE_URL, SUPABASE_KEY
+from config import SUPABASE_TABLE_NAME
+USERS_TABLE = (SUPABASE_TABLE_NAME or 'houssin363')
+if USERS_TABLE == 'USERS_TABLE':
+    USERS_TABLE = 'houssin363'
 from services.state_adapter import UserStateDictLike  # كاش بالذاكرة فقط
 
 # محاولة ربط اختيارية لإبلاغ الإدمن عند قفل المسابقة
@@ -314,13 +314,13 @@ def pick_template_for_user(user_id: int) -> str:
 
 # ------------------------ محفظة/نقاط (USERS_TABLE) ------------------------
 def ensure_user_wallet(user_id: int, name: str | None = None) -> Dict[str, Any]:
-    row = sb_select_one(USERS_TABLE, {"user_id": f"eq.{user_id}"})
+    row = sb_sb_select_one(USERS_TABLE, {"user_id": f"eq.{user_id}"})
     if row:
         return row
-    return sb_upsert(USERS_TABLE, {"user_id": user_id, "name": name or "", "balance": 0, "points": 0}, on_conflict="user_id")
+    return sb_sb_upsert(USERS_TABLE, {"user_id": user_id, "name": name or "", "balance": 0, "points": 0}, on_conflict="user_id")
 
 def get_wallet(user_id: int) -> Tuple[int, int]:
-    row = sb_select_one(USERS_TABLE, {"user_id": f"eq.{user_id}"}, select="balance,points")
+    row = sb_sb_select_one(USERS_TABLE, {"user_id": f"eq.{user_id}"}, select="balance,points")
     if not row:
         return (0, 0)
     return int(row.get("balance") or 0), int(row.get("points") or 0)
@@ -802,7 +802,7 @@ def get_leaderboard_top(n: int = 10) -> list[dict]:
     n = int(max(1, min(100, n)))
     try:
         with _http_client() as client:
-            url = _table_url(USERS_TABLE)
+            url = _table_url("USERS_TABLE")
             headers = _rest_headers()
             params = {"select": "user_id,name,points,balance", "order": "points.desc", "limit": str(n)}
             r = client.get(url, headers=headers, params=params); r.raise_for_status()
@@ -826,7 +826,7 @@ def get_leaderboard_by_progress(n: int = 10) -> list[dict]:
     for r in rows:
         uid = int(r.get("user_id"))
         try:
-            wallet = sb_select_one(USERS_TABLE, {"user_id": f"eq.{uid}"}, select="name,points,balance")
+            wallet = sb_sb_select_one(USERS_TABLE, {"user_id": f"eq.{uid}"}, select="name,points,balance")
         except Exception:
             wallet = None
         out.append({
