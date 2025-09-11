@@ -153,6 +153,13 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.message_handler(func=lambda msg: msg.text == "📢 إعلاناتك")
     def ads_entry(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
+
         # صيانة/إيقاف خدمة؟
         if is_maintenance():
             return bot.send_message(msg.chat.id, maintenance_message())
