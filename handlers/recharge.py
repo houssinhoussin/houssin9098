@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from handlers.start import _reset_user_flows
+_reset_user_flows(m.from_user.id)
 from telebot import types
 from config import ADMIN_MAIN_ID
 from services.recharge_service import apply_recharge
