@@ -2,7 +2,7 @@
 # handlers/wallet.py
 
 from telebot import types
-from config import BOT_NAME
+from config import BOT_NAME, SUPABASE_TABLE_NAME
 from handlers import keyboards
 from services.wallet_service import (
     get_all_purchases_structured,
@@ -55,6 +55,11 @@ def _card_footer() -> str:
 
 import logging
 
+
+# اسم جدول العملاء
+USERS_TABLE = SUPABASE_TABLE_NAME or "houssin363"
+if USERS_TABLE == "USERS_TABLE":
+    USERS_TABLE = "houssin363"
 transfer_steps = {}
 
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
@@ -373,7 +378,7 @@ def register(bot, history=None):
             return
 
         # تحقق من أنّه عميل مسجّل
-        is_client = _select_single("USERS_TABLE", "user_id", target_id)
+        is_client = _select_single(USERS_TABLE, "user_id", target_id)
         if not is_client:
             bot.send_message(
                 msg.chat.id,
