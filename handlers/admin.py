@@ -1,6 +1,24 @@
 # -*- coding: utf-8 -*-
 # handlers/admin.py
 
+# --- Helper: normalize and match admin button aliases ---
+import re as _re_mod
+
+def _norm_btn_text(s: str) -> str:
+    if not isinstance(s, str):
+        return ""
+    s = s.strip()
+    # remove emojis and spaces
+    s = _re_mod.sub(r"[\u2600-\u27BF\U0001F300-\U0001FAD6\U0001FA70-\U0001FAFF\U0001F900-\U0001F9FF]", "", s)
+    s = _re_mod.sub(r"\s+", "", s)
+    # Arabic normalization (basic)
+    s = s.replace("أ","ا").replace("إ","ا").replace("آ","ا").replace("ة","ه").replace("ى","ي")
+    return s
+
+def _match_admin_alias(txt: str, aliases: list[str]) -> bool:
+    t = _norm_btn_text(txt)
+    return any(_norm_btn_text(a) == t for a in aliases)
+
 import re
 import logging
 import os
@@ -314,43 +332,34 @@ def _features_home_markup():
     )
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
     return kb
-
 def _features_markup(page: int = 0, page_size: int = 10):
-    """يبني لوحة عرض جميع المزايا مع زر تشغيل/إيقاف لكل عنصر + صفحات."""
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    try:
-        items = list_features() or []
-    except Exception as e:
-        logging.exception("[ADMIN] list_features failed: %s", e)
-        items = []
-
-    # إزالة الازدواجية حسب التسمية بشكل متساهل
+# ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
     import re as _re
     def _norm_label(s: str) -> str:
         s = (s or "").strip()
         s = s.replace("—", "-")
-        s = _re.sub(r"[\u200f\u200e]+", "", s)          # إزالة علامات الاتجاه
-        s = _re.sub(r"\s+", " ", s)                      # مسافات موحّدة
+        s = _re.sub(r"[\u200f\u200e]+", "", s)         # إزالة علامات الاتجاه
+        s = _re.sub(r"\s+", " ", s)                     # مسافات موحّدة
+        # نُبقي الحروف العربية/اللاتينية والأرقام والشرطة
         s = _re.sub(r"[^0-9A-Za-z\u0600-\u06FF\- ]+", "", s)
         return s.lower()
 
+    seen_labels = set()
     unique = []
-    seen = set()
     for it in items:
-        label = it.get("label") or it.get("key") or ""
-        if not label:
+        label = (it.get("label") or it.get("key") or "")
+        nl = _norm_label(label)
+        if nl in seen_labels:
             continue
-        k = _norm_label(label)
-        if k in seen:
-            continue
-        seen.add(k)
+        seen_labels.add(nl)
         unique.append(it)
-
     items = unique
+    # ===== انتهى منع التكرار =====
+
     total = len(items)
+    kb = types.InlineKeyboardMarkup(row_width=1)
     if total == 0:
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
-        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
         return kb
 
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -359,8 +368,8 @@ def _features_markup(page: int = 0, page_size: int = 10):
     subset = items[start_i : start_i + page_size]
 
     for it in subset:
-        k = it.get("key") or ""
-        label = it.get("label") or k
+        k = it.get("key")
+        label = (it.get("label") or k) or ""
         active = bool(it.get("active", True))
         lamp = "🟢" if active else "🔴"
         to = 0 if active else 1
@@ -369,7 +378,6 @@ def _features_markup(page: int = 0, page_size: int = 10):
             callback_data=f"adm_feat_t:{k}:{to}:{page}"
         ))
 
-    # شريط الصفحات
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
@@ -378,14 +386,8 @@ def _features_markup(page: int = 0, page_size: int = 10):
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
             types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
         )
-
-    # أزرار التبديل الكلي
-    kb.row(
-        types.InlineKeyboardButton("✅ تشغيل الكل", callback_data=f"adm_feat_toggle:1:{page}"),
-        types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_toggle:0:{page}")
-    )
-    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
     return kb
+
 
 def _features_groups_markup():
     """يعرض قائمة المجموعات وعدد العناصر النشطة/الإجمالي داخل كل مجموعة."""
@@ -2010,7 +2012,7 @@ def _register_admin_roles(bot):
 
 
     @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
-    def system_menu(m):
+    \n\n@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام", "إعدادات النظام", "اعدادات النظام", "الاعدادات"]))\ndef system_menu_alias(m):\n    return system_menu(m)\ndef system_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.add(
             types.InlineKeyboardButton("🧱 وضع الصيانة: تشغيل", callback_data="sys:maint_on"),
@@ -2067,7 +2069,7 @@ def _register_admin_roles(bot):
         return (uid in ADMINS) or (uid == ADMIN_MAIN_ID)
 
     @bot.message_handler(func=lambda m: m.text == "🎟️ أكواد خصم" and _is_admin(m.from_user.id))
-    def discount_menu(m):
+    \n\n@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["أكواد خصم", "كود خصم", "اكواد خصم", "خصومات"]))\ndef discount_menu_alias(m):\n    return discount_menu(m)\ndef discount_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("➕ خصم عام 1٪", callback_data="disc:new:global:1"),
@@ -2201,7 +2203,7 @@ def _register_admin_roles(bot):
     # =========================
     _manage_user_state = {}
     @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    def manage_user_menu(m):
+    \n\n@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["إدارة عميل", "ادارة عميل", "إدارة العملاء", "ادارة العملاء", "العميل"]))\ndef manage_user_menu_alias(m):\n    return manage_user_menu(m)\ndef manage_user_menu(m):
         _manage_user_state[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل:", )
 
