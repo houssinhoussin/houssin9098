@@ -1,4 +1,6 @@
 # handlers/products.py                                                                                      # handlers/products.py
+from handlers.start import _reset_user_flows
+_reset_user_flows(m.from_user.id)
 
 from services.products_admin import get_product_active
 import logging
