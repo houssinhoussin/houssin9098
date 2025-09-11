@@ -3,8 +3,6 @@
 # • /cancel للإلغاء في أي وقت
 # • confirm_guard عند التأكيد (يحذف الكيبورد فقط + Debounce)
 # • رسائل محسّنة وإيموجي وبانر
-from handlers.start import _reset_user_flows
-_reset_user_flows(m.from_user.id)
 
 # استيرادات مرِنة موجودة
 try:
@@ -167,6 +165,12 @@ def register_companies_transfer(bot, history):
     @bot.message_handler(func=lambda msg: msg.text == "حوالة مالية عبر شركات")
     def open_companies_menu(msg):
         user_id = msg.from_user.id
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         if _service_unavailable_guard(bot, msg.chat.id):
             return
         name = _user_name(bot, user_id)
