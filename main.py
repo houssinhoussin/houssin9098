@@ -86,8 +86,7 @@ history: dict[int, list] = {}
 # ---------------------------------------------------------
 # استيراد جميع الهاندلرز بعد تهيئة البوت
 # ---------------------------------------------------------
-from handlers import (
-    start,
+from handlers import (start,
     wallet,
     support,
     admin,
@@ -101,6 +100,8 @@ from handlers import (
     university_fees,
     internet_providers,
     bill_and_units,
+
+    quiz,
 )
 from handlers.keyboards import (
     main_menu,
@@ -139,6 +140,9 @@ media_services.register(bot, history)
 wholesale.register(bot, history)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
+# ✅ ربط هاندلر الحزازير
+quiz.wire_handlers(bot)
+
 
 # ✅ تسجيل هاندلر /cancel بعد تعريف bot و history
 cancel_handler.register(bot, history)
@@ -290,9 +294,6 @@ threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
 # ---------------------------------------------------------
 # ✅ ربط معالجات لعبة الجوائز بعد إنشاء البوت وتسجيل الهاندلرز
 # ---------------------------------------------------------
-from handlers.quiz import attach_handlers as attach_quiz_handlers
-attach_quiz_handlers(bot)
-
 # ---------------------------------------------------------
 # معالج إلغاء عام للنص "❌ إلغاء" (أمر /cancel مسجل في handlers/cancel)
 # ---------------------------------------------------------
