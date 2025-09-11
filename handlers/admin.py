@@ -481,7 +481,7 @@ def register(bot, history):
         if "__admin_pending_handlers__" in globals():
             globals()["__admin_pending_handlers__"].clear()
     except Exception as _e:
-        import logging
+
         logging.exception("Admin: failed to replay pending handlers: %s", _e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
