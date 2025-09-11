@@ -94,6 +94,12 @@ def register(bot, user_state):
 
     @bot.message_handler(func=lambda msg: msg.text == "📦 طلب احتياجات منزلية او تجارية")
     def start_wholesale(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         uid = msg.from_user.id
         register_user_if_not_exist(uid, msg.from_user.full_name)
         user_wholesale_state[uid] = {"step": "products"}
