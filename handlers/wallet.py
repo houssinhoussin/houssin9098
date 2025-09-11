@@ -25,8 +25,9 @@ from services.wallet_service import (
 try:
     from services.queue_service import add_pending_request
 except Exception:
-    def add_pending_request(*a, **k):
+    def add_pending_request(*args, **kwargs):
         return None
+
 
 # محاولة استخدام Validator متاح، بدون كسر التوافق
 try:
