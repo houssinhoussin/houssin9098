@@ -7,8 +7,7 @@ from telebot import types
 import threading
 import http.server
 import socketserver
-from handlers import cancel as cancel_handler
-cancel_handler.register(bot, history)
+
 from services.scheduled_tasks import post_ads_task
 from services.error_log_setup import install_global_error_logging
 from services.state_adapter import UserStateDictLike
@@ -79,6 +78,12 @@ except Exception as e:
     logging.warning(f"⚠️ لم يتم حذف Webhook بنجاح: {e}")
 
 # ---------------------------------------------------------
+# تسجيل حالة المستخدم (تخزين في Supabase عبر الـ adapter)
+# ---------------------------------------------------------
+user_state = UserStateDictLike()
+history: dict[int, list] = {}
+
+# ---------------------------------------------------------
 # استيراد جميع الهاندلرز بعد تهيئة البوت
 # ---------------------------------------------------------
 from handlers import (
@@ -111,12 +116,8 @@ from handlers.keyboards import (
     media_services_menu,
     transfers_menu,
 )
-
-# ---------------------------------------------------------
-# تسجيل حالة المستخدم (تخزين في Supabase عبر الـ adapter)
-# ---------------------------------------------------------
-user_state = UserStateDictLike()
-history: dict[int, list] = {}
+# هاندلر الإلغاء المركزي
+from handlers import cancel as cancel_handler
 
 # ---------------------------------------------------------
 # تسجيل جميع الهاندلرز (تمرير user_state أو history حسب الحاجة)
@@ -138,6 +139,9 @@ media_services.register(bot, history)
 wholesale.register(bot, history)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
+
+# ✅ تسجيل هاندلر /cancel بعد تعريف bot و history
+cancel_handler.register(bot, history)
 
 CHANNEL_USERNAME = "@shop100sho"
 def notify_channel_on_start(bot):
@@ -285,10 +289,10 @@ from handlers.quiz import attach_handlers as attach_quiz_handlers
 attach_quiz_handlers(bot)
 
 # ---------------------------------------------------------
-# معالج إلغاء عام (يجب تسجيله قبل start_polling)
+# معالج إلغاء عام للنص "❌ إلغاء" (أمر /cancel مسجل في handlers/cancel)
 # ---------------------------------------------------------
-@bot.message_handler(func=lambda msg: msg.text in ["❌ إلغاء", "/cancel"])
-def global_cancel(msg):
+@bot.message_handler(func=lambda msg: msg.text in ["❌ إلغاء"])
+def global_cancel_text(msg):
     try:
         from services.state_service import clear_state
         clear_state(msg.from_user.id)
@@ -332,5 +336,3 @@ def start_polling():
             continue
 
 start_polling()
-
-     
