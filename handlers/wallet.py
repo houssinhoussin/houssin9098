@@ -241,18 +241,42 @@ def register(bot, history=None):
 
     @bot.message_handler(func=lambda msg: msg.text == "💰 محفظتي")
     def handle_wallet(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         show_wallet(bot, msg, history)
 
     @bot.message_handler(func=lambda msg: msg.text == "🛍️ مشترياتي")
     def handle_purchases(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         show_purchases(bot, msg, history)
 
     @bot.message_handler(func=lambda msg: msg.text == "📑 سجل التحويلات")
     def handle_transfers(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         show_transfers(bot, msg, history)
 
     @bot.message_handler(func=lambda msg: msg.text == "🔁 تحويل من محفظتك إلى محفظة عميل آخر")
     def handle_transfer_notice(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         user_id = msg.from_user.id
         name = _name_from_msg(msg)
         register_user_if_not_exist(user_id, name)
