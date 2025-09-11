@@ -330,8 +330,6 @@ def start_polling():
             time.sleep(10)
             continue
 
-
-
 start_polling()
 
-        bot.send_message(m.chat.id, "✅ تم الإلغاء.")
+     
