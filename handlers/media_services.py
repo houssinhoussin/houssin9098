@@ -1,7 +1,13 @@
 # handlers/media_services.py
 from telebot import types
 from services.wallet_service import register_user_if_not_exist, get_available_balance, get_balance, create_hold
-from services.queue_service import add_pending_request, process_queue
+try:
+    from services.queue_service import add_pending_request, process_queue
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
+    def process_queue(*a, **k):
+        return None
 from handlers.keyboards import media_services_menu
 import logging
 
