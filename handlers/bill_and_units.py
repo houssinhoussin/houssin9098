@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 # handlers/bill_and_units.py — وحدات/فواتير (سيرياتيل/MTN) مع HOLD ذري + رسائل موحّدة + /cancel
-from handlers.start import _reset_user_flows
-_reset_user_flows(m.from_user.id)
+
 from telebot import types
 import math
 import logging
@@ -230,6 +229,15 @@ def register_bill_and_units(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "💳 تحويل وحدات فاتورة سوري")
     def open_main_menu(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
+
+    # صيانة؟
+
         # صيانة؟
         if is_maintenance():
             return bot.send_message(msg.chat.id, maintenance_message())
