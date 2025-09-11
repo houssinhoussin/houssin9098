@@ -6,9 +6,14 @@ import time
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
-from database.db import get_table
+import os
+from database.db import get_table, DEFAULT_TABLE
 
 # الجداول التي تُحذف تلقائيًا بعد 14 ساعة (مع استثناء USERS_TABLE كليًا)
+USERS_TABLE = (os.getenv('SUPABASE_TABLE_NAME') or DEFAULT_TABLE or 'houssin363')
+if USERS_TABLE == 'USERS_TABLE':
+    USERS_TABLE = 'houssin363'
+
 EPHEMERAL_TABLES: List[str] = [
     # كل أنواع المشتريات
     "purchases",
