@@ -14,7 +14,15 @@ from services.wallet_service import (
 from config import ADMIN_MAIN_ID
 from services.wallet_service import register_user_if_not_exist
 from handlers import keyboards
-from services.queue_service import add_pending_request, process_queue, delete_pending_request
+try:
+    from services.queue_service import add_pending_request, process_queue, delete_pending_request
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
+    def process_queue(*a, **k):
+        return None
+    def delete_pending_request(*a, **k):
+        return None
 from database.db import get_table
 import logging
 
