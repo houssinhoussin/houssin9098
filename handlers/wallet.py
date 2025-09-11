@@ -2,7 +2,7 @@
 # handlers/wallet.py
 
 from telebot import types
-from config import BOT_NAME, SUPABASE_TABLE_NAME
+from config import BOT_NAME
 from handlers import keyboards
 from services.wallet_service import (
     get_all_purchases_structured,
@@ -22,7 +22,11 @@ from services.wallet_service import (
     user_has_admin_approval,
     get_available_balance,       # ✅ المتاح = balance - held
 )
-from services.queue_service import add_pending_request
+try:
+    from services.queue_service import add_pending_request
+except Exception:
+    def add_pending_request(*args, **kwargs):
+        return None  # fallback: لا توقف البوت إذا لم تتوفر خدمة الدور
 
 # محاولة استخدام Validator متاح، بدون كسر التوافق
 try:
@@ -55,11 +59,6 @@ def _card_footer() -> str:
 
 import logging
 
-
-# اسم جدول العملاء
-USERS_TABLE = SUPABASE_TABLE_NAME or "houssin363"
-if USERS_TABLE == "USERS_TABLE":
-    USERS_TABLE = "houssin363"
 transfer_steps = {}
 
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
@@ -378,7 +377,7 @@ def register(bot, history=None):
             return
 
         # تحقق من أنّه عميل مسجّل
-        is_client = _select_single(USERS_TABLE, "user_id", target_id)
+        is_client = _select_single("USERS_TABLE", "user_id", target_id)
         if not is_client:
             bot.send_message(
                 msg.chat.id,
