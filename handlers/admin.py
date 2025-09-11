@@ -310,29 +310,7 @@ def _features_home_markup():
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
     return kb
 def _features_markup(page: int = 0, page_size: int = 10):
-    try:
-        items = list_features() or []
-    except Exception as e:
-        logging.exception("[ADMIN] list_features failed: %s", e)
-        items = []
-
-    # طبّع العناصر: نقبل dict أو str ونحوّل الكل إلى dict موحّد
-    normalized = []
-    for it in items:
-        if isinstance(it, dict):
-            normalized.append({
-                "key":   (it.get("key") or it.get("id") or it.get("label") or "").strip(),
-                "label": (it.get("label") or it.get("key") or "").strip(),
-                "active": bool(it.get("active", True)),
-            })
-        else:
-            s = (str(it) or "").strip()
-            if not s:
-                continue
-            normalized.append({"key": s, "label": s, "active": True})
-    items = normalized
-
-    # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
+# ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
     import re as _re
     def _norm_label(s: str) -> str:
         s = (s or "").strip()
@@ -356,10 +334,36 @@ def _features_markup(page: int = 0, page_size: int = 10):
     # ===== انتهى منع التكرار =====
 
     total = len(items)
+    kb = types.InlineKeyboardMarkup(row_width=1)
     if total == 0:
-        kb = types.InlineKeyboardMarkup(row_width=1)
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
         return kb
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start_i = page * page_size
+    subset = items[start_i : start_i + page_size]
+
+    for it in subset:
+        k = it.get("key")
+        label = (it.get("label") or k) or ""
+        active = bool(it.get("active", True))
+        lamp = "🟢" if active else "🔴"
+        to = 0 if active else 1
+        kb.add(types.InlineKeyboardButton(
+            text=f"{lamp} {label}",
+            callback_data=f"adm_feat_t:{k}:{to}:{page}"
+        ))
+
+    if total_pages > 1:
+        prev_page = (page - 1) % total_pages
+        next_page = (page + 1) % total_pages
+        kb.row(
+            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
+            types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
+            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
+        )
+    return kb
 
 
 def _features_groups_markup():
