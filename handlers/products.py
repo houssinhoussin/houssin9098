@@ -5,6 +5,7 @@ import math
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
+from services.discount_service import apply_discount
 from services.wallet_service import (
     register_user_if_not_exist,
     get_balance,
@@ -535,6 +536,11 @@ def handle_player_id(message, bot):
     order["player_id"] = player_id
     price_syp = convert_price_usd_to_syp(product.price)
 
+        # خصم تلقائي (إن وجد)
+        price_before = int(price_syp)
+        price_syp, applied_disc = apply_discount(user_id, price_syp)
+        if applied_disc:
+            order["discount"] = {"id": applied_disc.get("id"), "percent": applied_disc.get("percent"), "before": price_before, "after": price_syp}
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton("✅ تمام.. أكّد الطلب", callback_data="final_confirm_order"),
@@ -1030,7 +1036,7 @@ def setup_inline_handlers(bot, admin_ids):
             f"آيدي اللاعب: <code>{player_id}</code>\n"
             f"🔖 المنتج: {product.name}\n"
             f"التصنيف: {_visible_category_label(order, product)}\n"
-            f"💵 السعر: {price_syp:,} ل.س\n"
+            f"💵 السعر: {price_syp:,} ل.س" + (f" (بعد خصم {order.get('discount',{}).get('percent')}%)" if order.get("discount") else "") + "\n"
             f"(select_{product.product_id})"
         )
 
@@ -1044,7 +1050,9 @@ def setup_inline_handlers(bot, admin_ids):
                 "product_id": product.product_id,
                 "product_name": product.name,   # مهم لرسالة التنفيذ باسم المنتج
                 "player_id": player_id,
+                "price_before": price_before,
                 "price": price_syp,
+
                 "reserved": price_syp,
                 "hold_id": hold_id
             }
