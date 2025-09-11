@@ -3,6 +3,8 @@
 # • /cancel للإلغاء في أي وقت
 # • confirm_guard عند التأكيد (يحذف الكيبورد فقط + Debounce)
 # • رسائل محسّنة وإيموجي وبانر
+from handlers.start import _reset_user_flows
+_reset_user_flows(m.from_user.id)
 
 # استيرادات مرِنة موجودة
 try:
