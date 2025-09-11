@@ -11,6 +11,9 @@ except Exception:
 
 import logging
 import re
+from handlers.start import _reset_user_flows
+_reset_user_flows(m.from_user.id)
+
 from telebot import types
 
 from services.wallet_service import (
