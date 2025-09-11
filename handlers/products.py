@@ -608,6 +608,13 @@ def register_message_handlers(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text in ["🛒 المنتجات", "💼 المنتجات"])
     def handle_main_product_menu(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
+
         user_id = msg.from_user.id
         register_user_if_not_exist(user_id, msg.from_user.full_name)
         val = history.get(user_id)
