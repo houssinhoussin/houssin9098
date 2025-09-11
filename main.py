@@ -282,8 +282,9 @@ def handle_shakhashir(msg):
 try:
     from services.queue_service import process_queue
 except Exception:
-    def process_queue(*a, **k):
+    def process_queue(*args, **kwargs):
         return None
+
 threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
 
 # ---------------------------------------------------------
