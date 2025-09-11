@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
 # handlers/cash_transfer.py — تحويل كاش داخل التطبيق مع /cancel + confirm_guard + رسائل تسويقية
-from handlers.start import _reset_user_flows
-_reset_user_flows(m.from_user.id)
-
 # استيرادات مرنة موجودة عندك
 try:
     from anti_spam import too_soon
@@ -292,8 +289,14 @@ def register(bot, history):
     # الدخول من زر بالقائمة الرئيسية (لو عندك زر)
     @bot.message_handler(func=lambda msg: msg.text == "💵 تحويل الى رصيد كاش")
     def open_cash_menu(msg):
-        start_cash_transfer(bot, msg, history)
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
 
+        start_cash_transfer(bot, msg, history)
     # نفس الفكرة لكن لو المستخدم كتب نوع التحويل كنص
     @bot.message_handler(func=lambda msg: msg.text in CASH_TYPES)
     def handle_cash_type(msg):
