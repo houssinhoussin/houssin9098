@@ -9,6 +9,7 @@ import threading
 
 from database.db import get_table
 from config import ADMIN_MAIN_ID, ADMINS
+from services.ban_service import is_banned
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 QUEUE_TABLE = "pending_requests"
@@ -39,6 +40,9 @@ def _admin_targets():
 _MAX_CAPTION = 900
 
 def add_pending_request(user_id: int, username: str, request_text: str, payload=None):
+    banned, until, reason = is_banned(user_id)
+    if banned:
+        raise RuntimeError(f"user {user_id} is banned until {until or 'forever'}: {reason or ''}")
     for attempt in range(1, 4):
         try:
             data = {
