@@ -17,10 +17,11 @@ from services.wallet_service import (
 try:
     from services.queue_service import add_pending_request, process_queue
 except Exception:
-    def add_pending_request(*a, **k):
+    def add_pending_request(*args, **kwargs):
         return None
-    def process_queue(*a, **k):
+    def process_queue(*args, **kwargs):
         return None
+
 from handlers.keyboards import main_menu
 
 # === Publisher used by services/scheduled_tasks.post_ads_task ===
