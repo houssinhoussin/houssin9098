@@ -14,7 +14,13 @@ from services.wallet_service import (
     create_hold,
     register_user_if_not_exist,
 )
-from services.queue_service import add_pending_request, process_queue
+try:
+    from services.queue_service import add_pending_request, process_queue
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
+    def process_queue(*a, **k):
+        return None
 from handlers.keyboards import main_menu
 
 # === Publisher used by services/scheduled_tasks.post_ads_task ===
