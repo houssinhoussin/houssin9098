@@ -76,18 +76,19 @@ from services.system_service import set_maintenance, is_maintenance, maintenance
 from services.activity_logger import log_action
 from services.authz import allowed as _allowed
 try:
-    from services.queue_service import add_pending_request, process_queue, delete_pending_request, postpone_request, queue_cooldown_start
+    from services.queue_service import (
+        add_pending_request,
+        process_queue,
+        delete_pending_request,
+        postpone_request,
+        queue_cooldown_start,
+    )
 except Exception:
-    def add_pending_request(*args, **kwargs):
-        return None
-    def process_queue(*args, **kwargs):
-        return None
-    def delete_pending_request(*args, **kwargs):
-        return None
-    def postpone_request(*args, **kwargs):
-        return None
-    def queue_cooldown_start(*args, **kwargs):
-        return None
+    def add_pending_request(*args, **kwargs): return None
+    def process_queue(*args, **kwargs): return None
+    def delete_pending_request(*args, **kwargs): return None
+    def postpone_request(*args, **kwargs): return None
+    def queue_cooldown_start(*args, **kwargs): return None
 
 from services.wallet_service import (
     register_user_if_not_exist,
