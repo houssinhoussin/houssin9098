@@ -19,6 +19,20 @@ def _match_admin_alias(txt: str, aliases: list[str]) -> bool:
     t = _norm_btn_text(txt)
     return any(_norm_btn_text(a) == t for a in aliases)
 
+# --- Helper: parse telegram user id from text (digits only) ---
+def parse_user_id(text: str) -> int | None:
+    try:
+        if not isinstance(text, str):
+            return None
+        s = text.strip()
+        m = _re_mod.search(r"(\d{5,})", s)
+        if m:
+            return int(m.group(1))
+        return int(s)
+    except Exception:
+        return None
+
+
 import re
 import logging
 import os
@@ -1350,7 +1364,30 @@ def register(bot, history):
 
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
-    def admin_menu(msg):
+    
+
+    @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and (m.from_user.id in ADMINS))
+    def _admin_back_text(m):
+        try:
+            return admin_menu(m)
+        except Exception:
+            bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
+
+    @bot.callback_query_handler(func=lambda c: c.data == "admin:home")
+    def _admin_home_cb(c):
+        try:
+            bot.answer_callback_query(c.id)
+        except Exception:
+            pass
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        try:
+            return admin_menu(c.message)
+        except Exception:
+            bot.send_message(c.message.chat.id, "قائمة الأدمن.")
+def admin_menu(msg):
         if msg.from_user.id not in ADMINS:
             return bot.reply_to(msg, "صلاحية الأدمن فقط.")
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -2025,7 +2062,9 @@ def _register_admin_roles(bot):
         )
         bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
 
-    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
+    
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
     def system_actions(c):
         try:
             act = c.data.split(":",1)[1]
@@ -2099,6 +2138,7 @@ def _register_admin_roles(bot):
                     types.InlineKeyboardButton(title, callback_data=f"disc:toggle:{did}:{to}")
                 )
         kb.add(types.InlineKeyboardButton("📊 إحصاءات الاستخدام", callback_data="disc:stats"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.send_message(m.chat.id, "لوحة الخصومات:", reply_markup=kb)
 
 
@@ -2244,7 +2284,8 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("💸 تعويض/استرجاع", callback_data=f"mu:refund:{uid}"),
             types.InlineKeyboardButton("🧾 آخر 5 طلبات", callback_data=f"mu:last5:{uid}"),
         )
-        bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
+                kb.row(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
+bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
     def manage_user_actions(c):
@@ -2252,6 +2293,12 @@ def _register_admin_roles(bot):
             _, act, uid = c.data.split(":")
             uid = int(uid)
         except Exception:
+
+        if act == "back":
+            _manage_user_state.pop(c.from_user.id, None)
+            try: bot.answer_callback_query(c.id)
+            except Exception: pass
+            return admin_menu(c.message)
             return bot.answer_callback_query(c.id, "❌ غير مفهوم")
         if act == "profile":
             try:
@@ -2264,7 +2311,16 @@ def _register_admin_roles(bot):
             except Exception:
                 text = "لا يمكن جلب البيانات."
             bot.send_message(c.message.chat.id, text, parse_mode="HTML")
-            return bot.answer_callback_query(c.id)
+            
+            # اطلب الآيدي من جديد
+            _manage_user_state[c.from_user.id] = {"step": "ask_id"}
+            try:
+                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                rk.row("⬅️ رجوع")
+                bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
+            except Exception:
+                pass
+return bot.answer_callback_query(c.id)
         if act == "message":
             _msg_by_id_pending[c.from_user.id] = {"step": "ask_text", "user_id": uid}
             bot.send_message(c.message.chat.id, f"اكتب الرسالة للعميل <code>{uid}</code>:", parse_mode="HTML")
@@ -2278,7 +2334,16 @@ def _register_admin_roles(bot):
                 bot.send_message(c.message.chat.id, "\n".join(lines))
             except Exception:
                 bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
-            return bot.answer_callback_query(c.id)
+            
+            # اطلب الآيدي من جديد
+            _manage_user_state[c.from_user.id] = {"step": "ask_id"}
+            try:
+                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                rk.row("⬅️ رجوع")
+                bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
+            except Exception:
+                pass
+return bot.answer_callback_query(c.id)
         if act == "refund":
             bot.send_message(c.message.chat.id, "اكتب قيمة التعويض (ل.س).")
             _refund_state[c.from_user.id] = {"user_id": uid}
@@ -2300,6 +2365,15 @@ def _register_admin_roles(bot):
             bot.reply_to(m, f"❌ فشل التعويض: {e}")
         finally:
             _refund_state.pop(m.from_user.id, None)
+
+            # اطلب الآيدي من جديد
+            _manage_user_state[m.from_user.id] = {"step": "ask_id"}
+            try:
+                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                rk.row("⬅️ رجوع")
+                bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
+            except Exception:
+                pass
     
 
 
