@@ -14,7 +14,13 @@ from services.wallet_service import (
 )
 from config import BOT_NAME
 from handlers import keyboards
-from services.queue_service import process_queue, add_pending_request
+try:
+    from services.queue_service import process_queue, add_pending_request
+except Exception:
+    def process_queue(*args, **kwargs):
+        return None
+    def add_pending_request(*args, **kwargs):
+        return None
 from database.models.product import Product
 
 # (جديد) فلاغات المزايا للمنتجات الفردية
