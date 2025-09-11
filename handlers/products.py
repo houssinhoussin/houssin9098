@@ -17,9 +17,9 @@ from handlers import keyboards
 try:
     from services.queue_service import process_queue, add_pending_request
 except Exception:
-    def process_queue(*args, **kwargs):
+    def process_queue(*a, **k):
         return None
-    def add_pending_request(*args, **kwargs):
+    def add_pending_request(*a, **k):
         return None
 from database.models.product import Product
 
