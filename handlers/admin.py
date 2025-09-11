@@ -1066,10 +1066,28 @@ def register(bot, history):
                     pass
 
                 delete_pending_request(request_id)
+                # ✅ أرسل للعميل تفاصيل السعر قبل/بعد الخصم (إن وُجد خصم)
+                try:
+                    before = int(payload.get("price_before") or amt)
+                    after  = int(payload.get("price") or amt)
+                except Exception:
+                    before, after = amt, amt
+                msg_lines = [
+                    f"{BAND}",
+                    f"🎉 تمام يا {name}! تم تحويل «{product_name}» لآيدي «{_safe(player_id)}».",
+                ]
+                if before != after:
+                    try:
+                        percent = max(0, int(round((before - after) * 100.0 / max(1, before))))
+                    except Exception:
+                        percent = None
+                    msg_lines.append(f"💸 السعر قبل الخصم: {_fmt_syp(before)}")
+                    msg_lines.append(f"✅ بعد الخصم: {_fmt_syp(after)}" + (f" (خصم {percent}%)" if percent is not None else ""))
+                msg_lines.append(f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮")
+                msg_lines.append(f"{BAND}")
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🎉 تمام يا {name}! تم تحويل «{product_name}» لآيدي «{_safe(player_id)}» "
-                    f"وتم خصم {_fmt_syp(amt)} من محفظتك. استمتع باللعب! 🎮\n{BAND}",
+                    "\n".join(msg_lines),
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
