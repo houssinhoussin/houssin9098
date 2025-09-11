@@ -292,7 +292,6 @@ def _slug(s: str) -> str:
     return re.sub(r'[^A-Za-z0-9]+', '-', s).strip('-')[:30]
 
 def _admin_products_groups_markup():
-    kb = types.InlineKeyboardMarkup()
     for group in PRODUCTS.keys():
         kb.add(types.InlineKeyboardButton(text=f"📁 {group}", callback_data=f"adm_prod_g:{_slug(group)}"))
     return kb
@@ -311,7 +310,6 @@ def _admin_products_list_markup(group_name: str):
 
 def _admin_product_actions_markup(pid: int):
     active = get_product_active(pid)
-    kb = types.InlineKeyboardMarkup()
     if active:
         kb.add(types.InlineKeyboardButton("🚫 إيقاف المنتج", callback_data=f"adm_prod_t:{pid}:0"))
     else:
@@ -506,7 +504,6 @@ def register(bot, history):
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
         st = {"step": "ask_duration", "user_id": uid}
         _ban_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
             types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
@@ -541,7 +538,6 @@ def register(bot, history):
         st["step"] = "confirm"
         _ban_pending[m.from_user.id] = st
         uid = st.get("user_id")
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("✔️ تأكيد الحظر", callback_data="adm_ban:confirm"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_ban:cancel"),
@@ -593,7 +589,6 @@ def register(bot, history):
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
         _unban_pending[m.from_user.id] = {"step": "confirm", "user_id": uid}
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("✔️ تأكيد", callback_data="adm_unban:confirm"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_unban:cancel"),
@@ -659,7 +654,6 @@ def register(bot, history):
             return bot.reply_to(m, "❌ الحالة غير صالحة. أعد البدء.")
         st["text"] = m.text
         _msg_by_id_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("✔️ إرسال", callback_data=f"adm_msgid:send:{uid}"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_msgid:cancel"),
@@ -1378,7 +1372,6 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     def bc_welcome(m):
         _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
@@ -1454,7 +1447,6 @@ def register(bot, history):
         if not body:
             return bot.reply_to(m, "❌ النص فارغ.")
         _broadcast_pending[m.from_user.id] = {"mode": "deal_confirm", "body": body, "dest": "clients"}
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bd_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bd_dest_channel"),
@@ -1555,7 +1547,6 @@ def register(bot, history):
 
         _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
 
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
@@ -1569,7 +1560,6 @@ def register(bot, history):
         bot.reply_to(m, preview, parse_mode="Markdown", reply_markup=kb)
 
         _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
@@ -1642,7 +1632,6 @@ def register(bot, history):
         if not text:
             return bot.reply_to(m, "❌ النص فارغ.")
         _broadcast_pending[m.from_user.id] = {"mode": "free_confirm", "text": text, "dest": "clients"}
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bf_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bf_dest_channel"),
@@ -2012,7 +2001,10 @@ def _register_admin_roles(bot):
 
 
     @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
-    \n\n@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام", "إعدادات النظام", "اعدادات النظام", "الاعدادات"]))\ndef system_menu_alias(m):\n    return system_menu(m)\ndef system_menu(m):
+    @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام","إعدادات النظام","اعدادات النظام","الاعدادات"]))
+    def system_menu_alias(m):
+        return system_menu(m)
+    def system_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.add(
             types.InlineKeyboardButton("🧱 وضع الصيانة: تشغيل", callback_data="sys:maint_on"),
@@ -2069,7 +2061,11 @@ def _register_admin_roles(bot):
         return (uid in ADMINS) or (uid == ADMIN_MAIN_ID)
 
     @bot.message_handler(func=lambda m: m.text == "🎟️ أكواد خصم" and _is_admin(m.from_user.id))
-    \n\n@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["أكواد خصم", "كود خصم", "اكواد خصم", "خصومات"]))\ndef discount_menu_alias(m):\n    return discount_menu(m)\ndef discount_menu(m):
+    @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and _is_admin(m.from_user.id)) and _match_admin_alias(m.text, ["خصم","كود خصم","أكواد خصم","أكواد الخصم","نسب خصم"]))
+    def discount_menu_alias(m):
+        return discount_menu(m)
+
+    def discount_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("➕ خصم عام 1٪", callback_data="disc:new:global:1"),
@@ -2086,16 +2082,20 @@ def _register_admin_roles(bot):
             rows = []
         if rows:
             for r in rows:
-                did    = str(r.get("id"))
-                pct    = int(r.get("percent", 0))
-                scope  = (r.get("scope") or "global")
-                active = "🟢" if r.get("active") else "🔴"
-                title  = f"{active} {('عام' if scope=='global' else 'عميل')} — {pct}٪"
-                # زر تبديل التفعيل/الإيقاف
+                did = str(r.get("id"))
+                pct = int(r.get("percent", 0))
+                scope = (r.get("scope") or "global")
+                title = f"٪{pct} — {'عام' if scope=='global' else 'عميل'}"
+                if scope != "global":
+                    uid = r.get('user_id') or r.get('user')
+                    title += f" (ID:{uid})"
                 to = '0' if r.get('active') else '1'
-                kb.add(types.InlineKeyboardButton(title, callback_data=f"disc:toggle:{did}:{to}"))
+                kb.add(
+                    types.InlineKeyboardButton(title, callback_data=f"disc:toggle:{did}:{to}")
+                )
         kb.add(types.InlineKeyboardButton("📊 إحصاءات الاستخدام", callback_data="disc:stats"))
         bot.send_message(m.chat.id, "لوحة الخصومات:", reply_markup=kb)
+
 
     # حالة داخليّة للمشرف أثناء إنشاء خصم لمستخدم
     _disc_new_user_state: dict[int, dict] = {}
@@ -2198,15 +2198,19 @@ def _register_admin_roles(bot):
             pass
         return discount_menu(c.message)
 
-    # =========================
+        # =========================
     # 👤 إدارة عميل — مبسّطة
     # =========================
     _manage_user_state = {}
-    @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    \n\n@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["إدارة عميل", "ادارة عميل", "إدارة العملاء", "ادارة العملاء", "العميل"]))\ndef manage_user_menu_alias(m):\n    return manage_user_menu(m)\ndef manage_user_menu(m):
-        _manage_user_state[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل:", )
 
+    @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
+    @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
+    def manage_user_menu_alias(m):
+        return manage_user_menu(m)
+
+    def manage_user_menu(m):
+        _manage_user_state[m.from_user.id] = {"step": "ask_id"}
+        bot.send_message(m.chat.id, "أرسل آيدي العميل:")
     @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
     def manage_user_get_id(m):
         try:
