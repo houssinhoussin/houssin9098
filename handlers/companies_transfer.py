@@ -50,7 +50,13 @@ from services.wallet_service import (
 from database.db import get_table
 from config import ADMIN_MAIN_ID
 from handlers import keyboards
-from services.queue_service import add_pending_request, process_queue
+try:
+    from services.queue_service import add_pending_request, process_queue
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
+    def process_queue(*a, **k):
+        return None
 import logging
 
 # صيانة + أعلام المزايا (Feature Flags اختيارية)
