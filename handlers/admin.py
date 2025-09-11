@@ -2021,14 +2021,21 @@ def _register_admin_roles(bot):
         kb.add(types.InlineKeyboardButton("📊 إحصاءات الاستخدام", callback_data="disc:stats"))
         bot.send_message(m.chat.id, "لوحة الخصومات:", reply_markup=kb)
 
+    # حالة داخليّة للمشرف أثناء إنشاء خصم لمستخدم
+    _disc_new_user_state: dict[int, dict] = {}
+
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
     def discounts_actions(c):
-        parts = c.data.split(":")
-        if len(parts) < 2:
-            return
-        act = parts[1]
+        parts = (c.data or "").split(":")
+        act = parts[1] if len(parts) > 1 else None
+        if not act:
+            return bot.answer_callback_query(c.id)
+
+        # إنشاء خصم عام: disc:new:<scope>:<percent>  (scope = global)
         if act == "new":
-            _, _, scope, pct = parts
+            if len(parts) < 4:
+                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
+            _, _, scope, pct = parts[:4]
             try:
                 create_discount(scope=scope, percent=int(pct))
                 bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم.")
@@ -2039,21 +2046,31 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
             return discount_menu(c.message)
-        if act == "new_user":
-            # اطلب آيدي العميل ثم اعرض نسب 1/2/3
+
+        # بدء إنشاء خصم لمستخدم محدد
+        elif act == "new_user":
             _disc_new_user_state[c.from_user.id] = {"step": "ask_user"}
             bot.answer_callback_query(c.id)
-            return bot.send_message(c.message.chat.id, "أرسل آيدي العميل للخصم.
-/ cancel للإلغاء")
-        if act == "toggle":
-            _, _, did, to = parts
+            return bot.send_message(
+                c.message.chat.id,
+                "أرسل آيدي العميل للخصم:\n\nاكتب /cancel للإلغاء",
+                reply_markup=types.ForceReply(selective=True)
+            )
+
+        # تفعيل/إيقاف خصم موجود: disc:toggle:<discount_id>:<0|1>
+        elif act == "toggle":
+           if len(parts) < 4:
+                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
+            _, _, did, to = parts[:4]
             try:
                 set_discount_active(did, bool(int(to)))
                 bot.answer_callback_query(c.id, "تم التبديل.")
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر التبديل.")
             return discount_menu(c.message)
-        if act == "stats":
+
+        # إحصاءات الخصومات
+        elif act == "stats":
             try:
                 stats = discount_stats()
                 text = "📊 إحصاءات الخصومات (آخر 30 يوم):\n" + "\n".join(stats or ["لا يوجد"])
@@ -2062,7 +2079,39 @@ def _register_admin_roles(bot):
             bot.answer_callback_query(c.id)
             return bot.send_message(c.message.chat.id, text)
 
-    _disc_new_user_state = {}
+    # استلام آيدي المستخدم لخصم فردي
+    @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
+    def disc_new_user_get_id(m):
+        try:
+            uid = parse_user_id(m.text)
+        except Exception:
+            return bot.reply_to(m, "❌ آيدي غير صالح. حاول مرة أخرى أو اكتب /cancel.")
+
+        # تحقق أنه موجود في جدول العملاء
+        try:
+            ex = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
+            if not (getattr(ex, "data", None) or []):
+            return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في العملاء.")
+        except Exception:
+            return bot.reply_to(m, "❌ تعذّر التحقق من قاعدة البيانات الآن.")
+
+        _disc_new_user_state[m.from_user.id] = {"step": "ask_pct", "user_id": uid}
+        kb = types.InlineKeyboardMarkup(row_width=3)
+        for p in (1, 2, 3):
+            kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
+        return bot.send_message(m.chat.id, "اختر نسبة الخصم:", reply_markup=kb)
+
+    # اختيار النسبة وإنشاء خصم للمستخدم
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
+    def disc_new_user_choose_pct(c):
+        try:
+            _, _, uid, pct = c.data.split(":", 3)
+            create_discount(scope="user", user_id=int(uid), percent=int(pct))
+            bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+        except Exception as e:
+            bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
+        return discount_menu(c.message)
+
     @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
     def _disc_new_user_get_id(m):
         try:
