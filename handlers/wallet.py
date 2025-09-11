@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
 # handlers/wallet.py
-try:
-    from handlers.start import _reset_user_flows
-    _reset_user_flows(m.from_user.id)
-except Exception:
-    pass
-
 
 from telebot import types
 from config import BOT_NAME
