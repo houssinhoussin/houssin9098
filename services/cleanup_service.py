@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from database.db import get_table
 
-# الجداول التي تُحذف تلقائيًا بعد 14 ساعة (مع استثناء houssin363 كليًا)
+# الجداول التي تُحذف تلقائيًا بعد 14 ساعة (مع استثناء USERS_TABLE كليًا)
 EPHEMERAL_TABLES: List[str] = [
     # كل أنواع المشتريات
     "purchases",
@@ -163,17 +163,17 @@ def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[st
     rows: List[Dict[str, Any]] = []
     try:
         resp = _with_retry(
-            get_table("houssin363").select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute
+            get_table("USERS_TABLE").select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute
         )
         rows = getattr(resp, "data", None) or []
     except Exception:
         try:
             resp = _with_retry(
-                get_table("houssin363").select("user_id, created_at").lte("created_at", cutoff_iso).limit(limit).execute
+                get_table("USERS_TABLE").select("user_id, created_at").lte("created_at", cutoff_iso).limit(limit).execute
             )
             rows = getattr(resp, "data", None) or []
         except Exception as e:
-            print(f"[cleanup] select houssin363 failed: {e}")
+            print(f"[cleanup] select USERS_TABLE failed: {e}")
             return []
     out: List[Dict[str, Any]] = []
     for r in rows:
@@ -185,7 +185,7 @@ def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[st
     return out
 
 def delete_inactive_users(days: int = 33, batch_size: int = 500) -> List[int]:
-    """حذف فعلي لمحافظ houssin363 الخاملة 33 يومًا بعد التحذيرات."""
+    """حذف فعلي لمحافظ USERS_TABLE الخاملة 33 يومًا بعد التحذيرات."""
     candidates = preview_inactive_users(days=days)
     ids = [int(r["user_id"]) for r in candidates if r.get("user_id") is not None]
     if not ids:
@@ -194,10 +194,10 @@ def delete_inactive_users(days: int = 33, batch_size: int = 500) -> List[int]:
     for i in range(0, len(ids), batch_size):
         chunk = ids[i:i+batch_size]
         try:
-            _with_retry(get_table("houssin363").delete().in_("user_id", chunk).execute)
+            _with_retry(get_table("USERS_TABLE").delete().in_("user_id", chunk).execute)
             deleted.extend(chunk)
         except Exception as e:
-            print(f"[cleanup] delete houssin363 chunk failed: {e}")
+            print(f"[cleanup] delete USERS_TABLE chunk failed: {e}")
             continue
     return deleted
 
@@ -211,7 +211,7 @@ def _housekeeping_tick(bot=None):
     try:
         deleted = delete_inactive_users(days=33)
         if deleted:
-            print(f"[cleanup] deleted houssin363 users: {len(deleted)}")
+            print(f"[cleanup] deleted USERS_TABLE users: {len(deleted)}")
     except Exception as e:
         print(f"[cleanup] delete_inactive_users error: {e}")
 
@@ -221,3 +221,23 @@ def schedule_housekeeping(bot=None, every_seconds: int = 3600):
         _housekeeping_tick(bot)
         threading.Timer(every_seconds, _loop).start()
     threading.Timer(60, _loop).start()
+
+
+@bot.message_handler(commands=['cancel'])
+def cancel_cmd(m):
+    try:
+        for dct in (globals().get('_msg_by_id_pending', {}),
+                    globals().get('_disc_new_user_state', {}),
+                    globals().get('_admin_manage_user_state', {}),
+                    globals().get('_address_state', {}),
+                    globals().get('_phone_state', {})):
+            try:
+                dct.pop(m.from_user.id, None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        bot.reply_to(m, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
+    except Exception:
+        bot.send_message(m.chat.id, "✅ تم الإلغاء.")
