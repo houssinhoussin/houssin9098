@@ -373,7 +373,7 @@ def register(bot, history=None):
             return
 
         # تحقق من أنّه عميل مسجّل
-        is_client = _select_single("houssin363", "user_id", target_id)
+        is_client = _select_single("USERS_TABLE", "user_id", target_id)
         if not is_client:
             bot.send_message(
                 msg.chat.id,
