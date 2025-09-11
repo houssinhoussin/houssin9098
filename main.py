@@ -279,7 +279,11 @@ def handle_shakhashir(msg):
 # ---------------------------------------------------------
 # تشغيل نظام الطابور (QUEUE)
 # ---------------------------------------------------------
-from services.queue_service import process_queue
+try:
+    from services.queue_service import process_queue
+except Exception:
+    def process_queue(*a, **k):
+        return None
 threading.Thread(target=process_queue, args=(bot,), daemon=True).start()
 
 # ---------------------------------------------------------
