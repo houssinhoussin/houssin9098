@@ -323,6 +323,12 @@ def _features_home_markup():
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
     return kb
 def _features_markup(page: int = 0, page_size: int = 10):
+    # جلب القائمة من قاعدة البيانات
+    try:
+        items = list_features() or []
+    except Exception as e:
+        logging.exception("[ADMIN] list_features failed: %s", e)
+        items = []
 # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
     import re as _re
     def _norm_label(s: str) -> str:
