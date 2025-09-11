@@ -491,6 +491,11 @@ def register(bot, history):
     except Exception as _e:
         import logging
         logging.exception("Admin: failed to replay pending handlers: %s", _e)
+    # سجل أزرار الأدمن وقوائمها
+    try:
+        _register_admin_roles(bot)
+    except Exception as __e:
+        import logging; logging.exception("Admin roles setup failed: %s", __e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
