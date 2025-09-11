@@ -3,6 +3,7 @@
 
 import re
 import logging
+import os
 from datetime import datetime, timedelta
 from telebot import types
 import threading
@@ -43,7 +44,11 @@ except NameError:
             return noop
     bot = _BotRecorder()
 # ===== End proxy =====
-USERS_TABLE = DEFAULT_TABLE  # ← إن كان اسمك مختلف، عدّله هنا فقط
+USERS_TABLE = (os.getenv("SUPABASE_TABLE_NAME") or DEFAULT_TABLE or "houssin363")  # ← يُحدَّد من .env أولاً
+# توحيد الأسماء: لو ما زالت القيمة USERS_TABLE (الافتراضية القديمة) استبدلها بـ houssin363 لتفادي 404
+if USERS_TABLE == "USERS_TABLE":
+    USERS_TABLE = "houssin363"
+logging.info(f"[admin] USERS_TABLE set to: {USERS_TABLE}")
 def _collect_clients_with_names():
     """
     يرجع قائمة (user_id, name) من جدول العملاء المحدد.
@@ -468,7 +473,8 @@ def register(bot, history):
         if "__admin_pending_handlers__" in globals():
             globals()["__admin_pending_handlers__"].clear()
     except Exception as _e:
-        import logging as _logging
+        import logging
+import os as _logging
         _logging.exception("Admin: failed to replay pending handlers: %s", _e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
