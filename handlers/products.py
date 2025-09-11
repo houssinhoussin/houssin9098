@@ -17,10 +17,11 @@ from handlers import keyboards
 try:
     from services.queue_service import process_queue, add_pending_request
 except Exception:
-    def process_queue(*a, **k):
+    def process_queue(*args, **kwargs):
         return None
-    def add_pending_request(*a, **k):
+    def add_pending_request(*args, **kwargs):
         return None
+
 from database.models.product import Product
 
 # (جديد) فلاغات المزايا للمنتجات الفردية
