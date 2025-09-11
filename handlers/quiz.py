@@ -200,6 +200,12 @@ def wire_handlers(bot: TeleBot):
         txt = (m.text or "").strip()
         QUIZ_TRIGGERS = {"/quiz", "🎯 الحزازير (ربحي)", "🎯 الحزازير", "الحزازير (ربحي)", "الحزازير", "quiz"}
         if txt in QUIZ_TRIGGERS:
+            # ✅ إنهاء أي رحلة/مسار سابق عالق
+            try:
+                from handlers.start import _reset_user_flows
+                _reset_user_flows(m.from_user.id)
+            except Exception:
+                pass
             chat_id = m.chat.id
             user_id = m.from_user.id
             ensure_user_wallet(user_id, name=(m.from_user.first_name or "").strip())
