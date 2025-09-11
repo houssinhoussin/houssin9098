@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
 # handlers/university_fees.py — دفع رسوم جامعية مع HOLD ذري + رسائل موحّدة + /cancel
-from handlers.start import _reset_user_flows
-_reset_user_flows(m.from_user.id)
-
 from telebot import types
 from services.wallet_service import (
     add_purchase,
@@ -97,6 +94,12 @@ def register_university_fees(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "🎓 دفع رسوم جامعية")
     def open_uni_menu(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         user_id = msg.from_user.id
         name = _name(bot, user_id)
         register_user_if_not_exist(user_id)
