@@ -163,13 +163,13 @@ def preview_inactive_users(days: int = 33, limit: int = 100_000) -> List[Dict[st
     rows: List[Dict[str, Any]] = []
     try:
         resp = _with_retry(
-            get_table("USERS_TABLE").select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute
+            get_table(USERS_TABLE).select("user_id, updated_at, created_at").lte("updated_at", cutoff_iso).limit(limit).execute
         )
         rows = getattr(resp, "data", None) or []
     except Exception:
         try:
             resp = _with_retry(
-                get_table("USERS_TABLE").select("user_id, created_at").lte("created_at", cutoff_iso).limit(limit).execute
+                get_table(USERS_TABLE).select("user_id, created_at").lte("created_at", cutoff_iso).limit(limit).execute
             )
             rows = getattr(resp, "data", None) or []
         except Exception as e:
@@ -194,7 +194,7 @@ def delete_inactive_users(days: int = 33, batch_size: int = 500) -> List[int]:
     for i in range(0, len(ids), batch_size):
         chunk = ids[i:i+batch_size]
         try:
-            _with_retry(get_table("USERS_TABLE").delete().in_("user_id", chunk).execute)
+            _with_retry(get_table(USERS_TABLE).delete().in_("user_id", chunk).execute)
             deleted.extend(chunk)
         except Exception as e:
             print(f"[cleanup] delete USERS_TABLE chunk failed: {e}")
