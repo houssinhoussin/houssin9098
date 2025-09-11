@@ -75,21 +75,13 @@ from services.discount_service import list_discounts, create_discount, set_disco
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
 from services.activity_logger import log_action
 from services.authz import allowed as _allowed
-try:
-    from services.queue_service import (
-        add_pending_request,
-        process_queue,
-        delete_pending_request,
-        postpone_request,
-        queue_cooldown_start,
-    )
-except Exception:
-    def add_pending_request(*args, **kwargs): return None
-    def process_queue(*args, **kwargs): return None
-    def delete_pending_request(*args, **kwargs): return None
-    def postpone_request(*args, **kwargs): return None
-    def queue_cooldown_start(*args, **kwargs): return None
-
+from services.queue_service import (
+    add_pending_request,
+    process_queue,
+    delete_pending_request,
+    postpone_request,
+    queue_cooldown_start,
+)
 from services.wallet_service import (
     register_user_if_not_exist,
     deduct_balance,
@@ -322,40 +314,43 @@ def _features_home_markup():
     )
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
     return kb
+
 def _features_markup(page: int = 0, page_size: int = 10):
-    # جلب القائمة من قاعدة البيانات
+    """يبني لوحة عرض جميع المزايا مع زر تشغيل/إيقاف لكل عنصر + صفحات."""
+    kb = types.InlineKeyboardMarkup(row_width=1)
     try:
         items = list_features() or []
     except Exception as e:
         logging.exception("[ADMIN] list_features failed: %s", e)
         items = []
-# ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
+
+    # إزالة الازدواجية حسب التسمية بشكل متساهل
     import re as _re
     def _norm_label(s: str) -> str:
         s = (s or "").strip()
         s = s.replace("—", "-")
-        s = _re.sub(r"[\u200f\u200e]+", "", s)         # إزالة علامات الاتجاه
-        s = _re.sub(r"\s+", " ", s)                     # مسافات موحّدة
-        # نُبقي الحروف العربية/اللاتينية والأرقام والشرطة
+        s = _re.sub(r"[\u200f\u200e]+", "", s)          # إزالة علامات الاتجاه
+        s = _re.sub(r"\s+", " ", s)                      # مسافات موحّدة
         s = _re.sub(r"[^0-9A-Za-z\u0600-\u06FF\- ]+", "", s)
         return s.lower()
 
-    seen_labels = set()
     unique = []
+    seen = set()
     for it in items:
-        label = (it.get("label") or it.get("key") or "")
-        nl = _norm_label(label)
-        if nl in seen_labels:
+        label = it.get("label") or it.get("key") or ""
+        if not label:
             continue
-        seen_labels.add(nl)
+        k = _norm_label(label)
+        if k in seen:
+            continue
+        seen.add(k)
         unique.append(it)
-    items = unique
-    # ===== انتهى منع التكرار =====
 
+    items = unique
     total = len(items)
-    kb = types.InlineKeyboardMarkup(row_width=1)
     if total == 0:
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
         return kb
 
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -364,8 +359,8 @@ def _features_markup(page: int = 0, page_size: int = 10):
     subset = items[start_i : start_i + page_size]
 
     for it in subset:
-        k = it.get("key")
-        label = (it.get("label") or k) or ""
+        k = it.get("key") or ""
+        label = it.get("label") or k
         active = bool(it.get("active", True))
         lamp = "🟢" if active else "🔴"
         to = 0 if active else 1
@@ -374,6 +369,7 @@ def _features_markup(page: int = 0, page_size: int = 10):
             callback_data=f"adm_feat_t:{k}:{to}:{page}"
         ))
 
+    # شريط الصفحات
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
@@ -382,8 +378,14 @@ def _features_markup(page: int = 0, page_size: int = 10):
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
             types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
         )
-    return kb
 
+    # أزرار التبديل الكلي
+    kb.row(
+        types.InlineKeyboardButton("✅ تشغيل الكل", callback_data=f"adm_feat_toggle:1:{page}"),
+        types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_toggle:0:{page}")
+    )
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
+    return kb
 
 def _features_groups_markup():
     """يعرض قائمة المجموعات وعدد العناصر النشطة/الإجمالي داخل كل مجموعة."""
@@ -487,7 +489,7 @@ def register(bot, history):
         if "__admin_pending_handlers__" in globals():
             globals()["__admin_pending_handlers__"].clear()
     except Exception as _e:
-
+        import logging
         logging.exception("Admin: failed to replay pending handlers: %s", _e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
