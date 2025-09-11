@@ -217,3 +217,23 @@ def set_data(user_id: int, data: Dict[str, Any], *, state_key: str = DEFAULT_STA
 def purge_state(user_id: int, *, state_key: str = DEFAULT_STATE_KEY) -> None:
     """Delete the entire state row for this user (no TTL, no leftovers)."""
     _delete_row(user_id, state_key=state_key)
+
+
+@bot.message_handler(commands=['cancel'])
+def cancel_cmd(m):
+    try:
+        for dct in (globals().get('_msg_by_id_pending', {}),
+                    globals().get('_disc_new_user_state', {}),
+                    globals().get('_admin_manage_user_state', {}),
+                    globals().get('_address_state', {}),
+                    globals().get('_phone_state', {})):
+            try:
+                dct.pop(m.from_user.id, None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        bot.reply_to(m, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
+    except Exception:
+        bot.send_message(m.chat.id, "✅ تم الإلغاء.")
