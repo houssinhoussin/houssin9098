@@ -79,7 +79,7 @@ PAYEER_RATE = _get("PAYEER_RATE", 9000, cast=int)
 
 # --- Supabase ---
 SUPABASE_URL        = _get("SUPABASE_URL", "https://azortroeejjomqweintc.supabase.co")
-SUPABASE_TABLE_NAME = _get("SUPABASE_TABLE_NAME", "USERS_TABLE")
+SUPABASE_TABLE_NAME = _get("SUPABASE_TABLE_NAME", "houssin363")
 
 # نُبقي نفس منطق التفضيل مع توفير مفاتيحك كقيمة افتراضية
 _supabase_key = _get("SUPABASE_KEY")
@@ -112,4 +112,3 @@ if _role != 'service_role':
 
 if not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_KEY (or SUPABASE_API_KEY) in environment")
-
