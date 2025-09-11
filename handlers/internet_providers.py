@@ -11,9 +11,6 @@ except Exception:
 
 import logging
 import re
-from handlers.start import _reset_user_flows
-_reset_user_flows(m.from_user.id)
-
 from telebot import types
 
 from services.wallet_service import (
@@ -198,6 +195,12 @@ def register(bot):
     # فتح القائمة الرئيسية
     @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
     def open_net_menu(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         if too_soon(msg.from_user.id, "internet_open", 1.2):
             return
         if _service_unavailable_guard(bot, msg.chat.id):
