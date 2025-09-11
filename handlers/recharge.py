@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-from handlers.start import _reset_user_flows
-_reset_user_flows(m.from_user.id)
+
 from telebot import types
 from config import ADMIN_MAIN_ID
 from services.recharge_service import apply_recharge
@@ -163,6 +162,12 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "💳 شحن محفظتي")
     def open_recharge(msg):
+        # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         start_recharge_menu(bot, msg, history)
 
     @bot.message_handler(func=lambda msg: msg.text in [
