@@ -1,11 +1,11 @@
-# handlers/products.py                                                                                      # handlers/products.py
+# handlers/products.py
 from services.products_admin import get_product_active
 import logging
 import math
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
-from services.discount_service import apply_discount
+from services.discount_service import apply_discount  # ✅ موجودة في النسخة 1
 from services.wallet_service import (
     register_user_if_not_exist,
     get_balance,
@@ -14,6 +14,8 @@ from services.wallet_service import (
 )
 from config import BOT_NAME
 from handlers import keyboards
+
+# مرونة: لو غابت queue_service (بيئة التطوير/النشر) نوفر بدائل صامتة
 try:
     from services.queue_service import process_queue, add_pending_request
 except Exception:
@@ -25,7 +27,7 @@ except Exception:
 from database.models.product import Product
 
 # (جديد) فلاغات المزايا للمنتجات الفردية
-from services.feature_flags import is_feature_enabled  # نستخدمه لتعطيل منتج معيّن (مثل 660 شدة)
+from services.feature_flags import is_feature_enabled  # لتعطيل خيار معيّن (مثل 660 شدة)
 from services.feature_flags import UNAVAILABLE_MSG
 
 # حارس التأكيد الموحّد: يحذف الكيبورد + يعمل Debounce
@@ -90,7 +92,7 @@ def _card(title: str, lines: list[str]) -> str:
 
 def _unavailable_short(product_name: str) -> str:
     return UNAVAILABLE_MSG.format(label=product_name)
-    
+
 # ===== تصنيف مرئي واضح للرسائل (حسب الطلبية) =====
 _CATEGORY_LABELS = {
     "PUBG": "شحن شدات ببجي",
@@ -146,7 +148,6 @@ def _visible_category_label(order: dict, product: Product) -> str:
                 key = "clashroyale"
             elif "app:siba" in d:
                 key = "siba"
-
 
         return _MIXED_SUB_LABELS.get(key, "ألعاب/تطبيقات")
 
@@ -227,7 +228,7 @@ PRODUCTS = {
         Product(8, "660 شدة", "ألعاب", 8.87, "زر 660 شدة"),
         Product(9, "840 شدة", "ألعاب", 11.32, "زر 840 شدة"),
         Product(10, "1800 شدة", "ألعاب", 22.10, "زر 1800 شدة"),
-         Product(11, "2125 شدة", "ألعاب", 25.65, "زر 2125 شدة"),
+        Product(11, "2125 شدة", "ألعاب", 25.65, "زر 2125 شدة"),
         Product(12, "3850 شدة", "ألعاب", 43.25, "زر 3850 شدة"),
         Product(13, "8100 شدة", "ألعاب", 86.32, "زر 8100 شدة"),
     ],
@@ -334,42 +335,34 @@ MIXEDAPPS_SUBCATS = [
     {"label": "تطبيق Kiyo Live",     "key": "kiyo"},
 ]
 
+def _fetch_any_text_attr(p: Product) -> str:
+    """يسحب أول خاصية نصية مفيدة من الكائن (للبحث عن app:*)."""
+    for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+        v = getattr(p, attr, None)
+        if isinstance(v, str) and v:
+            return v
+    try:
+        for v in getattr(p, "__dict__", {}).values():
+            if isinstance(v, str) and "app:" in v:
+                return v
+    except Exception:
+        pass
+    return ""
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
     """يرجع باقات التصنيف بحسب وسم التطبيق في أي حقل نصي داخل الكائن (app:cod / app:bigo)."""
     options = PRODUCTS.get(category, [])
     k = (key_text or "").strip().lower()
     tag = f"app:{k}"
-
     result = []
     for p in options:
-        desc = ""
-        # جرّب أسماء حقول شائعة
-        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
-            v = getattr(p, attr, None)
-            if isinstance(v, str) and v:
-                desc = v
-                break
-        # لو ما لقينا، دوّر بأي قيمة نصية داخل الكائن
-        if not desc:
-            try:
-                for v in getattr(p, "__dict__", {}).values():
-                    if isinstance(v, str) and "app:" in v:
-                        desc = v
-                        break
-            except Exception:
-                pass
-
-        desc_l = (desc or "").lower()
-        name_l = (p.name or "").lower()
-
-        if tag in desc_l or tag in name_l:
+        desc = _fetch_any_text_attr(p)
+        if tag in (desc or "").lower() or tag in (p.name or "").lower():
             result.append(p)
-
     return result
 
 def convert_price_usd_to_syp(usd):
-    # ✅ تنفيذ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية)
+    # ✅ شرطك: تحويل مرة واحدة + round() ثم int (بدون فواصل عشرية) مع شرائح
     if usd <= 5:
         return int(round(usd * 13100))
     elif usd <= 10:
@@ -385,7 +378,7 @@ def _button_label(p: Product) -> str:
         return f"{p.name}"
 
 def _build_products_keyboard(category: str, page: int = 0):
-    """لوحة منتجات مع صفحات + إبراز المنتجات الموقوفة + (جديد) فلاغ لكل كمية."""
+    """لوحة منتجات مع صفحات + إبراز المنتجات الموقوفة + فلاغ لكل كمية."""
     options = PRODUCTS.get(category, [])
     total = len(options)
 
@@ -444,9 +437,8 @@ def _build_products_keyboard(category: str, page: int = 0):
     kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
     return kb, pages
 
-# ======== (جديد) باني لوحة لجزء فرعي (subset) داخل نفس التصنيف ========
+# ======== باني لوحة لجزء فرعي (subset) داخل نفس التصنيف ========
 def _build_products_keyboard_subset(category: str, options: list[Product], page: int = 0):
-    """نسخة من الباني الرئيسي لكن تعمل على قائمة options المفلترة (مثل Call of Duty فقط داخل MixedApps)."""
     total = len(options)
 
     # 🌱 زرع مفاتيح features لكل زر كمية
@@ -522,7 +514,6 @@ def show_product_options(bot, message, category):
         reply_markup=keyboard
     )
 
-
 # ================= خطوات إدخال آيدي اللاعب =================
 
 def handle_player_id(message, bot):
@@ -542,18 +533,26 @@ def handle_player_id(message, bot):
         return
 
     order["player_id"] = player_id
-    price_syp = convert_price_usd_to_syp(product.price)
 
-    # خصم تلقائي (إن وجد)  ← نفس مستوى الإزاحة السابق
-    price_before  = int(price_syp)
-    price_syp, applied_disc = apply_discount(user_id, price_syp)
+    # سعر الأساس (SYP) مرة واحدة
+    base_price_syp = convert_price_usd_to_syp(product.price)
+
+    # خصم تلقائي (إن وجد)
+    price_before = int(base_price_syp)
+    final_price_syp, applied_disc = apply_discount(user_id, base_price_syp)
+
+    # خزّن ما يلزم لنستخدمه لاحقًا عند التأكيد
+    order["price_syp"] = int(final_price_syp)
+    order["price_before"] = int(price_before)
     if applied_disc:
         order["discount"] = {
             "id":      applied_disc.get("id"),
             "percent": applied_disc.get("percent"),
-            "before":  price_before,
-            "after":   price_syp,
+            "before":  int(price_before),
+            "after":   int(final_price_syp),
         }
+    else:
+        order.pop("discount", None)
 
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
@@ -562,17 +561,11 @@ def handle_player_id(message, bot):
         types.InlineKeyboardButton("❌ إلغاء",            callback_data="cancel_order"),
     )
 
-    # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها حسب المنتج
+    # تحديد تسمية الآيدي حسب المنتج/السابسِت
     id_label = "آيدي اللاعب"
     try:
         subset   = order.get("subset")
-        prod_text = ""
-        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
-            v = getattr(product, attr, None)
-            if isinstance(v, str) and v:
-                prod_text = v.lower()
-                break
-
+        prod_text = (_fetch_any_text_attr(product) or "").lower()
         if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (product.name or "").lower() or "سول" in (product.name or ""):
             id_label = "آيدي سول شيل"
         elif subset == "clashofclans" or "app:clashofclans" in prod_text or "clashofclans" in (product.name or "").lower():
@@ -592,7 +585,7 @@ def handle_player_id(message, bot):
                 [
                     f"• المنتج: {product.name}",
                     f"• الفئة: {_visible_category_label(order, product)}",
-                    f"• السعر: {_fmt_syp(price_syp)}",
+                    f"• السعر: {_fmt_syp(order['price_syp'])}",
                     f"• {id_label}: {player_id}",
                     "",
                     f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
@@ -611,7 +604,7 @@ def register_message_handlers(bot, history):
     def cancel_cmd(msg):
         uid = msg.from_user.id
 
-        # 👇 جديد: امسح أي next_step_handler قيد الانتظار (آمن لكل النسخ)
+        # 👇 امسح أي next_step_handler قيد الانتظار (آمن لكل النسخ)
         _clear_next_step(bot, msg.chat.id)
 
         user_orders.pop(uid, None)
@@ -676,7 +669,7 @@ def register_message_handlers(bot, history):
             finally:
                 return
 
-        # ===== (جديد) لو كان الزر هو "🎮 شحن العاب و تطبيقات مختلفة" اعرض قائمة فرعية ديناميكية =====
+        # ===== (جديد) MixedApps: قائمة فرعية ديناميكية =====
         if msg.text in ("🎮 شحن العاب و تطبيقات مختلفة", "🎮 شحن ألعاب و تطبيقات مختلفة"):
             kb = types.InlineKeyboardMarkup(row_width=2)
             for sc in MIXEDAPPS_SUBCATS:
@@ -688,13 +681,13 @@ def register_message_handlers(bot, history):
                 _with_cancel(f"🎮 يا {name}، اختر اللعبة/التطبيق:"),
                 reply_markup=kb
             )
-            return  # لا نكمل للخريطة العامة
+            return
 
         category_map = {
             "🎯 شحن شدات ببجي العالمية": "PUBG",
             "🔥 شحن جواهر فري فاير": "FreeFire",
             "🏏 تطبيق جواكر": "Jawaker",
-            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps",  # ✅ يبقى موجود لو احتجناه لاحقًا
+            "🎮 شحن العاب و تطبيقات مختلفة": "MixedApps",
         }
 
         category = category_map[msg.text]
@@ -739,47 +732,38 @@ def setup_inline_handlers(bot, admin_ids):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_products"))
 
-        # حدد نص الطلب للآيدي: لو المستخدم جاي من subset 'soulchill'
+        # نص طلب الآيدي حسب السابسِت
         prompt = f"💡 يا {name}، ابعت آيدي اللاعب لو سمحت:"
         try:
             subset = prev.get("subset")
-            prod_text = ""
-            for attr in ("description", "desc", "label", "button", "button_label", "extra"):
-                v = getattr(selected, attr, None)
-                if isinstance(v, str) and v:
-                    prod_text = v.lower()
-                    break
-    
-            # SoulChill
+            prod_text = (_fetch_any_text_attr(selected) or "").lower()
             if subset == "soulchill" or "app:soulchill" in prod_text or "soulchill" in (selected.name or "").lower():
                 prompt = f"💡 يا {name}، ابعت آيدي سول شيل لو سمحت:"
-            # Clash of Clans
             elif subset == "clashofclans" or "app:clashofclans" in prod_text or "clashofclans" in (selected.name or "").lower():
                 prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash of Clans لو سمحت:"
-            # Clash Royale
             elif subset == "clashroyale" or "app:clashroyale" in prod_text or "clashroyale" in (selected.name or "").lower():
                 prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash Royale لو سمحت:"
-            # Siba يبقى الافتراضي
         except Exception:
             pass
+
         msg = bot.send_message(user_id, _with_cancel(prompt), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
         bot.answer_callback_query(call.id)
 
-    # ✅ (جديد) فتح تصنيف فرعي داخل MixedApps (Call of Duty / Bigo Live ...)
+    # ✅ فتح تصنيف فرعي داخل MixedApps
     @bot.callback_query_handler(func=lambda c: c.data.startswith("open_subcat:"))
     def _open_subcategory(call):
         user_id = call.from_user.id
         try:
-            _, category, key_text = call.data.split(":", 2)  # مثال: open_subcat:MixedApps:Call of Duty
+            _, category, key_text = call.data.split(":", 2)
         except Exception:
             return bot.answer_callback_query(call.id)
         _hide_inline_kb(bot, call)
 
-        # خزّن التصنيف + المفتاح (subset) للمستخدم عشان التنقل والرجوع
+        # خزّن التصنيف + المفتاح (subset) للمستخدم
         user_orders[user_id] = {"category": category, "subset": key_text}
 
-        # فلترة المنتجات داخل التصنيف بحسب المفتاح
+        # فلترة المنتجات بحسب المفتاح
         options = _filter_products_by_key(category, key_text)
         if not options:
             bot.answer_callback_query(call.id, "❌ لا توجد خيارات متاحة حاليًا.", show_alert=True)
@@ -787,15 +771,12 @@ def setup_inline_handlers(bot, admin_ids):
 
         kb, pages = _build_products_keyboard_subset(category, options, page=0)
         
-        # أضف تنبيه خاص بالكلاش: لا تراجعنا قبل 12 ساعة
-        warning = ""
-        if key_text in ("clashofclans", "clashroyale"):
-            warning = "⚠️ ملاحظة: هذه العملية تحتاج وقتًا للتنفيذ — لا تراجعنا قبل 12 ساعة."
-        if warning:
-            txt = _with_cancel(f"{warning}\n\n📦 منتجات {key_text}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎")
-        else:
-            txt = _with_cancel(f"📦 منتجات {key_text}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎")
-
+        # تنبيه خاص بالكلاش: لا تراجعنا قبل 12 ساعة
+        warning = "⚠️ ملاحظة: هذه العملية تحتاج وقتًا للتنفيذ — لا تراجعنا قبل 12 ساعة." if key_text in ("clashofclans", "clashroyale") else ""
+        txt = _with_cancel(
+            (warning + "\n\n" if warning else "") +
+            f"📦 منتجات {key_text}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"
+        )
 
         try:
             bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=kb)
@@ -804,7 +785,7 @@ def setup_inline_handlers(bot, admin_ids):
 
         bot.answer_callback_query(call.id)
 
-    # ✅ عرض صفحة جديدة من المنتجات
+    # ✅ تبديل الصفحات
     @bot.callback_query_handler(func=lambda c: c.data.startswith("prodpage:"))
     def _paginate_products(call):
         try:
@@ -818,29 +799,20 @@ def setup_inline_handlers(bot, admin_ids):
         order = user_orders.get(user_id, {})
         subset = order.get("subset")
 
-        # إن كان المستخدم في subset داخل MixedApps، نحافظ على نفس الفلترة أثناء التنقل
         if subset and category == "MixedApps":
             options = _filter_products_by_key(category, subset)
             kb, pages = _build_products_keyboard_subset(category, options, page=page)
         else:
             kb, pages = _build_products_keyboard(category, page=page)
 
+        txt = _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎")
         try:
-            bot.edit_message_text(
-                _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎"),
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=kb
-            )
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=kb)
         except Exception:
-            bot.send_message(
-                call.message.chat.id,
-                _with_cancel(f"📦 منتجات {category}: (صفحة {page+1}/{pages}) — اختار اللي على مزاجك 😎"),
-                reply_markup=kb
-            )
-        bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
-    
-    # ✅ ضغط على منتج موقوف — نعطي تنبيه فقط
+            bot.send_message(call.message.chat.id, txt, reply_markup=kb)
+        bot.answer_callback_query(call.id)
+
+    # ✅ ضغط على منتج موقوف — تنبيه
     @bot.callback_query_handler(func=lambda c: c.data.startswith("prod_inactive:"))
     def _inactive_alert(call):
         pid = int(call.data.split(":", 1)[1])
@@ -852,19 +824,16 @@ def setup_inline_handlers(bot, admin_ids):
                     break
             if name:
                 break
-        _hide_inline_kb(bot, call)  # ← أولًا
+        _hide_inline_kb(bot, call)
         bot.answer_callback_query(call.id, _unavailable_short(name or "المنتج"), show_alert=True)
 
     @bot.callback_query_handler(func=lambda c: c.data == "prodnoop")
     def _noop(call):
-        # لا تفعل شيئًا ولا تُخْفِ الكيبورد
         bot.answer_callback_query(call.id)
-
 
     @bot.callback_query_handler(func=lambda c: c.data == "show_recharge_methods")
     def _show_recharge(call):
         _hide_inline_kb(bot, call)
-        # إن كانت recharge_menu ReplyKeyboardMarkup فهذا الطريق الصحيح:
         try:
             bot.send_message(call.message.chat.id, "💳 اختار طريقة شحن محفظتك:", reply_markup=keyboards.recharge_menu())
         except Exception:
@@ -873,7 +842,7 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
-        # 👇 جديد: أوقف انتظار إدخال الآيدي (آمن لكل النسخ)
+        # 👇 أوقف انتظار إدخال الآيدي
         _clear_next_step(bot, call.message.chat.id)
 
         _hide_inline_kb(bot, call)
@@ -891,42 +860,29 @@ def setup_inline_handlers(bot, admin_ids):
             )
             return bot.answer_callback_query(call.id)
 
-        if category:
-            if subset and category == "MixedApps":
-                options = _filter_products_by_key(category, subset)
-                kb, pages = _build_products_keyboard_subset(category, options, page=0)
-            else:
-                kb, pages = _build_products_keyboard(category, page=0)
-            try:
-                bot.edit_message_text(
-                    _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=kb
-                )
-            except Exception:
-                bot.send_message(
-                    call.message.chat.id,
-                    _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
-                    reply_markup=kb
-                )
+        if subset and category == "MixedApps":
+            options = _filter_products_by_key(category, subset)
+            kb, pages = _build_products_keyboard_subset(category, options, page=0)
+        else:
+            kb, pages = _build_products_keyboard(category, page=0)
+
+        txt = _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎")
+        try:
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=kb)
+        except Exception:
+            bot.send_message(call.message.chat.id, txt, reply_markup=kb)
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
-        # 👇 جديد: أوقف انتظار إدخال الآيدي (آمن لكل النسخ)
+        # 👇 أوقف انتظار إدخال الآيدي
         _clear_next_step(bot, call.message.chat.id)
 
         _hide_inline_kb(bot, call)
         name = _name_from_user(call.from_user)
         txt = _with_cancel(f"🎮 يا {name}، اختار اللعبة أو التطبيق اللي محتاجه:")
         try:
-            bot.edit_message_text(
-                txt,
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=keyboards.game_categories()
-            )
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=keyboards.game_categories())
         except Exception:
             bot.send_message(call.message.chat.id, txt, reply_markup=keyboards.game_categories())
         bot.answer_callback_query(call.id)
@@ -935,7 +891,7 @@ def setup_inline_handlers(bot, admin_ids):
     def cancel_order(call):
         user_id = call.from_user.id
 
-        # 👇 جديد: أوقف أي انتظار لإدخال آيدي (آمن لكل النسخ)
+        # 👇 أوقف أي انتظار لإدخال آيدي
         _clear_next_step(bot, call.message.chat.id)
 
         name = _name_from_user(call.from_user)
@@ -957,7 +913,7 @@ def setup_inline_handlers(bot, admin_ids):
         msg = bot.send_message(user_id, _with_cancel(f"📋 يا {name}، ابعت آيدي اللاعب الجديد:"), reply_markup=kb)
         bot.register_next_step_handler(msg, handle_player_id, bot)
         _hide_inline_kb(bot, call)
-        bot.answer_callback_query(call.id)  # ✅ يوقف المؤشّر الدوّار
+        bot.answer_callback_query(call.id)
         
     @bot.callback_query_handler(func=lambda c: c.data == "final_confirm_order")
     def final_confirm_order(call):
@@ -974,15 +930,16 @@ def setup_inline_handlers(bot, admin_ids):
 
         product   = order["product"]
         player_id = order["player_id"]
-        price_syp = convert_price_usd_to_syp(product.price)
 
-        # المنتج ما زال فعّال؟ (Alert برسالة احترافية)
+        # المنتج والخيار ما زالا فعّالين؟
         if not get_product_active(product.product_id):
             return bot.answer_callback_query(call.id, _unavailable_short(product.name), show_alert=True)
-
-        # 🔒 الخيار نفسه ما زال مفعّل؟ (مثلاً: 660 شدة مقفلة)
         if require_option_or_alert(bot, call.message.chat.id, order.get("category", ""), product.name):
             return bot.answer_callback_query(call.id)
+
+        # 💵 استخدم نفس السعر الذي حُسِب سابقًا بعد الخصم (إن وُجد)
+        price_syp = int(order.get("price_syp", convert_price_usd_to_syp(product.price)))
+        price_before = int(order.get("price_before", price_syp))
 
         # تحقق الرصيد (المتاح فقط)
         available = get_available_balance(user_id)
@@ -1053,7 +1010,7 @@ def setup_inline_handlers(bot, admin_ids):
             f"(select_{product.product_id})"
         )
 
-        # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
+        # ✅ تمرير hold_id + اسم المنتج + السعرين في الـ payload
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
@@ -1061,12 +1018,11 @@ def setup_inline_handlers(bot, admin_ids):
             payload={
                 "type": "order",
                 "product_id": product.product_id,
-                "product_name": product.name,   # مهم لرسالة التنفيذ باسم المنتج
+                "product_name": product.name,
                 "player_id": player_id,
-                "price_before": price_before,
-                "price": price_syp,
-
-                "reserved": price_syp,
+                "price_before": int(price_before),
+                "price": int(price_syp),
+                "reserved": int(price_syp),
                 "hold_id": hold_id
             }
         )
