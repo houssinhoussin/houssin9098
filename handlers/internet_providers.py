@@ -22,10 +22,11 @@ from services.wallet_service import (
 try:
     from services.queue_service import add_pending_request, process_queue
 except Exception:
-    def add_pending_request(*a, **k):
+    def add_pending_request(*args, **kwargs):
         return None
-    def process_queue(*a, **k):
+    def process_queue(*args, **kwargs):
         return None
+
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
 
