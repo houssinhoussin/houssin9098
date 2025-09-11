@@ -1,5 +1,7 @@
 # handlers/quiz.py
 # "🎯 الحزازير (ربحي)" شاشة واحدة تتحرّك بالتحرير + رسائل احترافية للخطأ/النجاح
+from handlers.start import _reset_user_flows
+_reset_user_flows(m.from_user.id)
 
 from __future__ import annotations
 import time
