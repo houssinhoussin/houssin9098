@@ -13,10 +13,11 @@ import httpx
 
 from config import SUPABASE_URL, SUPABASE_KEY
 from config import SUPABASE_TABLE_NAME
+from services.state_adapter import UserStateDictLike  # كاش بالذاكرة فقط
+
 USERS_TABLE = (SUPABASE_TABLE_NAME or 'houssin363')
 if USERS_TABLE == 'USERS_TABLE':
     USERS_TABLE = 'houssin363'
-from services.state_adapter import UserStateDictLike  # كاش بالذاكرة فقط
 
 # محاولة ربط اختيارية لإبلاغ الإدمن عند قفل المسابقة
 try:
