@@ -19,7 +19,13 @@ from services.wallet_service import (
     get_available_balance,   # ✅ المتاح = balance - held
     create_hold,             # ✅ إنشاء الحجز الذرّي
 )
-from services.queue_service import add_pending_request, process_queue
+try:
+    from services.queue_service import add_pending_request, process_queue
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
+    def process_queue(*a, **k):
+        return None
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
 
