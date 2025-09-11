@@ -9,7 +9,6 @@ import threading
 
 from database.db import get_table
 from config import ADMIN_MAIN_ID, ADMINS
-from services.ban_service import is_banned
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 QUEUE_TABLE = "pending_requests"
@@ -39,10 +38,7 @@ def _admin_targets():
 # حد أقصى آمن لكابتشن الصور
 _MAX_CAPTION = 900
 
-def add_pending_request(user_id: int, username: str, request_text: str, payload=None):
-    banned, until, reason = is_banned(user_id)
-    if banned:
-        raise RuntimeError(f"user {user_id} is banned until {until or 'forever'}: {reason or ''}")
+def _add_pending_request_text(user_id: int, username: str, request_text: str, payload=None):
     for attempt in range(1, 4):
         try:
             data = {
@@ -59,6 +55,33 @@ def add_pending_request(user_id: int, username: str, request_text: str, payload=
             logging.warning(f"Attempt {attempt}: ReadError in add_pending_request: {e}")
             time.sleep(0.5)
     logging.error(f"Failed to add pending request for user {user_id} after 3 attempts.")
+
+def add_pending_request(*args, **kwargs):
+    """
+    واجهة متوافقة ترسل طلبًا إلى طابور الإدمن.
+    - النمط القديم: add_pending_request(user_id, username, request_text, payload=None)
+    - النمط الجديد: add_pending_request(user_id=..., action="...", payload={...}, approve_channel="admin", meta={...})
+    """
+    # النمط الجديد بكلمات مفتاحية
+    if "action" in kwargs or ("user_id" in kwargs and "payload" in kwargs and "approve_channel" in kwargs):
+        user_id = int(kwargs.get("user_id", 0))
+        action = str(kwargs.get("action", "request"))
+        payload = kwargs.get("payload") or {}
+        meta    = kwargs.get("meta") or {}
+        username = meta.get("username") or meta.get("from") or "system"
+        # نص افتراضي مقروء
+        request_text = meta.get("text") or f"طلب إداري: {action}"
+        return _add_pending_request_text(user_id, username, request_text, payload)
+    # النمط القديم بالمواقع
+    if len(args) >= 3:
+        user_id, username, request_text = args[:3]
+        payload = args[3] if len(args) >= 4 else kwargs.get("payload")
+        return _add_pending_request_text(int(user_id), str(username), str(request_text), payload)
+    # محاولة أخيرة من kwargs
+    if set(kwargs.keys()) >= {"user_id","username","request_text"}:
+        return _add_pending_request_text(int(kwargs["user_id"]), str(kwargs["username"]), str(kwargs["request_text"]), kwargs.get("payload"))
+    raise TypeError("add_pending_request: استخدم النمط القديم (user_id, username, request_text, payload) أو الجديد (user_id=.., action=.., payload=..).")
+
 
 def delete_pending_request(request_id: int):
     try:
