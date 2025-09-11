@@ -6,8 +6,11 @@
 import uuid
 from datetime import datetime, timedelta
 
+import os
+import logging
 from database.db import (
     get_table,
+    DEFAULT_TABLE,
     # واجهات RPC الذرّية
     get_available_balance as _db_get_available_balance,
     create_hold_rpc as _rpc_create_hold,
@@ -18,7 +21,10 @@ from database.db import (
 )
 
 # أسماء الجداول
-USER_TABLE        = "USERS_TABLE"
+USER_TABLE = (os.getenv("SUPABASE_TABLE_NAME") or DEFAULT_TABLE or "houssin363")
+# توحيد: إن كانت القيمة قديمة "USERS_TABLE" حوّلها للاسم الفعلي
+if USER_TABLE == "USERS_TABLE":
+    USER_TABLE = "houssin363"
 TRANSACTION_TABLE = "transactions"
 PURCHASES_TABLE   = "purchases"
 PRODUCTS_TABLE    = "products"
@@ -39,10 +45,15 @@ def _is_uuid_like(x) -> bool:
 # ================= عمليات المستخدم =================
 
 def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None:
-    get_table(USER_TABLE).upsert(
-        {"user_id": user_id, "name": name},
-        on_conflict="user_id",
-    ).execute()
+    try:
+        get_table(USER_TABLE).upsert(
+            {"user_id": user_id, "name": name},
+            on_conflict="user_id",
+        ).execute()
+    except Exception as e:
+        logging.error(f"[wallet_service] upsert user failed: {e}")
+        # لا نرمي الاستثناء حتى لا يتوقف الهاندلر/البوت
+        return
 
 def get_balance(user_id: int) -> int:
     # نُبقيها كما كانت: تُرجع الرصيد الكامل (بدون طرح المحجوز)
