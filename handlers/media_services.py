@@ -107,6 +107,12 @@ def register_media_services(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "🎭 خدمات سوشيال/ميديا")
     def open_media(msg):
+         # ✅ إنهاء أي رحلة/مسار سابق عالق
+        try:
+            from handlers.start import _reset_user_flows
+            _reset_user_flows(msg.from_user.id)
+        except Exception:
+            pass
         if _service_unavailable_guard(bot, msg.chat.id):
             return
         user_id = msg.from_user.id
