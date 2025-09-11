@@ -11,9 +11,9 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_API_KEY")
 
-# اجعل اسم الجدول الافتراضي قادماً من البيئة، مع قيمة افتراضية سليمة houssin363
-# مثال: ضع في البيئة SUPABASE_TABLE_NAME=houssin363
-DEFAULT_TABLE = os.getenv("SUPABASE_TABLE_NAME", "houssin363")  # مثل: houssin363
+# اجعل اسم الجدول الافتراضي قادماً من البيئة، مع قيمة افتراضية سليمة USERS_TABLE
+# مثال: ضع في البيئة SUPABASE_TABLE_NAME=USERS_TABLE
+DEFAULT_TABLE = os.getenv("SUPABASE_TABLE_NAME", "USERS_TABLE")  # مثل: USERS_TABLE
 
 if not SUPABASE_URL:
     raise RuntimeError("Missing SUPABASE_URL in environment (.env)")
@@ -55,9 +55,9 @@ def table(table_name: Optional[str] = None):
     return _supabase.table(name)
 
 
-# ---------- دوال مساعدة لجدول المستخدمين (houssin363) ----------
+# ---------- دوال مساعدة لجدول المستخدمين (USERS_TABLE) ----------
 # ملاحظات:
-# - هذه الدوال تفترض أن DEFAULT_TABLE يشير لجدول المستخدمين (houssin363).
+# - هذه الدوال تفترض أن DEFAULT_TABLE يشير لجدول المستخدمين (USERS_TABLE).
 # - ما غيّرنا أي استدعاءات موجودة في المشروع؛ هذه فقط أدوات إضافية عند الحاجة.
 
 def get_user_by_id(user_id: int):
@@ -200,3 +200,23 @@ def try_deduct_rpc(user_id: int, amount: int):
     """
     params = {"p_user_id": user_id, "p_amount": amount}
     return _supabase.rpc("try_deduct", params).execute()
+
+
+@bot.message_handler(commands=['cancel'])
+def cancel_cmd(m):
+    try:
+        for dct in (globals().get('_msg_by_id_pending', {}),
+                    globals().get('_disc_new_user_state', {}),
+                    globals().get('_admin_manage_user_state', {}),
+                    globals().get('_address_state', {}),
+                    globals().get('_phone_state', {})):
+            try:
+                dct.pop(m.from_user.id, None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        bot.reply_to(m, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
+    except Exception:
+        bot.send_message(m.chat.id, "✅ تم الإلغاء.")
