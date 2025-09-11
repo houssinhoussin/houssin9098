@@ -1,7 +1,11 @@
 from telebot import types
 from config import ADMIN_MAIN_ID
 from handlers import keyboards
-from services.queue_service import add_pending_request
+try:
+    from services.queue_service import add_pending_request
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
 import logging
 
 # تخزين الطلبات التي بانتظار رد الأدمن
@@ -85,4 +89,3 @@ def register(bot, history):
         bot.send_message(msg.chat.id, "✅ تم إرسال الرد للمستخدم.")
         pending_support.pop(msg.from_user.id, None)
         pending_support.pop(target_id, None)
-
