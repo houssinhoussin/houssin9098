@@ -161,6 +161,16 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int):
     st.setdefault("stage_done", 0)
     st.setdefault("attempts_on_current", 0)
     st["no_charge_next"] = 0  # بداية جديدة تلغي أي إعفاء سابق
+
+    # ضمان وجود template_id لتفادي KeyError عند الدخول أول مرة
+    if not st.get("template_id"):
+        try:
+            st["template_id"] = pick_template_for_user(user_id)
+        except Exception:
+            st["template_id"] = "default"
+        user_quiz_state[user_id] = st
+        persist_state(user_id)
+
     st.pop("last_info_msg_id", None)
     st["last_click_ts"] = 0.0
     user_quiz_state[user_id] = st
