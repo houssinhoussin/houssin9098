@@ -22,6 +22,27 @@ from services.admin_ledger import (
 )
 from config import ADMINS, ADMIN_MAIN_ID, CHANNEL_USERNAME, FORCE_SUB_CHANNEL_USERNAME
 from database.db import get_table, DEFAULT_TABLE
+
+# ===== Safe bot proxy to avoid NameError and record handlers at import time =====
+try:
+    bot  # will be provided later by main via register(bot, history)
+except NameError:
+    __admin_pending_handlers__ = []
+    class _BotRecorder:
+        def __getattr__(self, name):
+            if name.endswith("_handler"):
+                def factory(*args, **kwargs):
+                    def decorator(fn):
+                        __admin_pending_handlers__.append((name, args, kwargs, fn))
+                        return fn
+                    return decorator
+                return factory
+            def noop(*args, **kwargs):
+                # Generic no-op for any other attribute access
+                return None
+            return noop
+    bot = _BotRecorder()
+# ===== End proxy =====
 USERS_TABLE = DEFAULT_TABLE  # ← إن كان اسمك مختلف، عدّله هنا فقط
 def _collect_clients_with_names():
     """
@@ -434,6 +455,17 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
 
 def register(bot, history):
 
+
+    globals()["bot"] = bot
+    try:
+        pending = globals().get("__admin_pending_handlers__", [])
+        for _name, _args, _kwargs, _fn in list(pending):
+            getattr(bot, _name)(*_args, **_kwargs)(_fn)
+        if "__admin_pending_handlers__" in globals():
+            globals()["__admin_pending_handlers__"].clear()
+    except Exception as _e:
+        import logging as _logging
+        _logging.exception("Admin: failed to replay pending handlers: %s", _e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
