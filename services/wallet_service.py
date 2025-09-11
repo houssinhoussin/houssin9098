@@ -4,10 +4,9 @@
 """
 
 import uuid
+from config import SUPABASE_TABLE_NAME
 from datetime import datetime, timedelta
 
-import os
-import logging
 from database.db import (
     get_table,
     DEFAULT_TABLE,
@@ -21,8 +20,7 @@ from database.db import (
 )
 
 # أسماء الجداول
-USER_TABLE = (os.getenv("SUPABASE_TABLE_NAME") or DEFAULT_TABLE or "houssin363")
-# توحيد: إن كانت القيمة قديمة "USERS_TABLE" حوّلها للاسم الفعلي
+USER_TABLE = (SUPABASE_TABLE_NAME or DEFAULT_TABLE or "houssin363")
 if USER_TABLE == "USERS_TABLE":
     USER_TABLE = "houssin363"
 TRANSACTION_TABLE = "transactions"
@@ -51,8 +49,8 @@ def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None
             on_conflict="user_id",
         ).execute()
     except Exception as e:
+        import logging
         logging.error(f"[wallet_service] upsert user failed: {e}")
-        # لا نرمي الاستثناء حتى لا يتوقف الهاندلر/البوت
         return
 
 def get_balance(user_id: int) -> int:
