@@ -19,8 +19,3 @@ def run_bot():
 
 threading.Thread(target=run_bot).start()
 run_dummy()
-
-
-        bot.reply_to(m, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
-    except Exception:
-        bot.send_message(m.chat.id, "✅ تم الإلغاء.")
