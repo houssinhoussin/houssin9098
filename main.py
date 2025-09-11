@@ -7,7 +7,8 @@ from telebot import types
 import threading
 import http.server
 import socketserver
-
+from handlers import cancel as cancel_handler
+cancel_handler.register(bot, history)
 from services.scheduled_tasks import post_ads_task
 from services.error_log_setup import install_global_error_logging
 from services.state_adapter import UserStateDictLike
