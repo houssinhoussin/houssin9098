@@ -2220,3 +2220,50 @@ def _register_admin_roles(bot):
         finally:
             _refund_state.pop(m.from_user.id, None)
     
+
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_t:"))
+def _features_toggle_one(c):
+    try:
+        _, key, to, page = c.data.split(":", 3)
+        to = int(to)
+        set_feature_active(key, bool(to))
+        try:
+            grouped = list_features_grouped() or {}
+        except Exception:
+            grouped = {}
+        found_group = None
+        for g, items in grouped.items():
+            if any((it.get("key") == key) for it in (items or [])):
+                found_group = g
+                break
+        kb = _features_group_items_markup(found_group, int(page)) if found_group else _features_markup(int(page))
+        try: bot.answer_callback_query(c.id, "تم التبديل.")
+        except Exception: pass
+        bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+    except Exception as e:
+        logging.exception("[ADMIN] feature toggle failed: %s", e)
+        try: bot.answer_callback_query(c.id, "تعذّر التبديل")
+        except Exception: pass
+
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_p:"))
+def _features_page_cb(c):
+    try:
+        _, page = c.data.split(":", 1)
+        page = int(page)
+        kb = _features_markup(page)
+        bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+    except Exception as e:
+        logging.exception("[ADMIN] feature page cb failed: %s", e)
+
+
+@bot.callback_query_handler(func=lambda c: c.data in ("adm_feat_home:flat","adm_feat_home:groups"))
+def _features_home_toggle(c):
+    try:
+        mode = "flat" if c.data.endswith(":flat") else "groups"
+        kb = _features_markup(0) if mode == "flat" else _features_groups_markup()
+        bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+        bot.answer_callback_query(c.id)
+    except Exception as e:
+        logging.exception("[ADMIN] feature home toggle failed: %s", e)
