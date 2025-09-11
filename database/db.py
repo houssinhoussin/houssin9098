@@ -13,7 +13,10 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_API_KEY")
 
 # اجعل اسم الجدول الافتراضي قادماً من البيئة، مع قيمة افتراضية سليمة USERS_TABLE
 # مثال: ضع في البيئة SUPABASE_TABLE_NAME=USERS_TABLE
-DEFAULT_TABLE = os.getenv("SUPABASE_TABLE_NAME", "USERS_TABLE")  # مثل: USERS_TABLE
+DEFAULT_TABLE = os.getenv("SUPABASE_TABLE_NAME", "USERS_TABLE")
+# fallback ذكي: لو بقيت القيمة USERS_TABLE (اسم عام قديم) استخدم houssin363 حتى يتم تغييرها في .env
+if DEFAULT_TABLE == "USERS_TABLE":
+    DEFAULT_TABLE = "houssin363"
 
 if not SUPABASE_URL:
     raise RuntimeError("Missing SUPABASE_URL in environment (.env)")
