@@ -980,6 +980,19 @@ def register(bot, history):
                 except Exception:
                     pass
 
+                # سجل استخدام الخصم (إن وُجد فرق بين السعر قبل/بعد)
+                try:
+                    before = int(payload.get("price_before") or amt)
+                    after  = int(payload.get("price") or amt)
+                    if before and after and before != after:
+                        try:
+                            percent = max(0, int(round((before - after) * 100.0 / before)))
+                        except Exception:
+                            percent = None
+                        record_discount_use(None, user_id, before, after, purchase_id=None)
+                except Exception:
+                    pass
+
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
