@@ -7,6 +7,10 @@ PRIMARY_ID = ADMIN_MAIN_ID
 SECONDARY_IDS = [i for i in ADMINS if i != PRIMARY_ID]
 
 ACTIONS: dict[str, Set[str]] = {
+    # إدارة المستخدم
+    "user:message_by_id": {"primary", "secondary"},
+    "user:ban": {"primary"},
+    "user:unban": {"primary"},
     # طابور الطلبات
     "queue:message": {"primary", "secondary"},
     "queue:photo":   {"primary", "secondary"},
