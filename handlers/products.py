@@ -515,12 +515,13 @@ def show_product_options(bot, message, category):
         reply_markup=keyboard
     )
 
+
 # ================= خطوات إدخال آيدي اللاعب =================
 
 def handle_player_id(message, bot):
-    user_id = message.from_user.id
+    user_id   = message.from_user.id
     player_id = (message.text or "").strip()
-    name = _name_from_user(message.from_user)
+    name      = _name_from_user(message.from_user)
 
     order = user_orders.get(user_id)
     if not order or "product" not in order:
@@ -536,22 +537,28 @@ def handle_player_id(message, bot):
     order["player_id"] = player_id
     price_syp = convert_price_usd_to_syp(product.price)
 
-        # خصم تلقائي (إن وجد)
-        price_before = int(price_syp)
-        price_syp, applied_disc = apply_discount(user_id, price_syp)
-        if applied_disc:
-            order["discount"] = {"id": applied_disc.get("id"), "percent": applied_disc.get("percent"), "before": price_before, "after": price_syp}
+    # خصم تلقائي (إن وجد)  ← نفس مستوى الإزاحة السابق
+    price_before  = int(price_syp)
+    price_syp, applied_disc = apply_discount(user_id, price_syp)
+    if applied_disc:
+        order["discount"] = {
+            "id":      applied_disc.get("id"),
+            "percent": applied_disc.get("percent"),
+            "before":  price_before,
+            "after":   price_syp,
+        }
+
     keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton("✅ تمام.. أكّد الطلب", callback_data="final_confirm_order"),
-        types.InlineKeyboardButton("✏️ أعدّل الآيدي", callback_data="edit_player_id"),
-        types.InlineKeyboardButton("❌ إلغاء", callback_data="cancel_order")
+        types.InlineKeyboardButton("✏️ أعدّل الآيدي",    callback_data="edit_player_id"),
+        types.InlineKeyboardButton("❌ إلغاء",            callback_data="cancel_order"),
     )
-    
-    # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها إذا المنتج/السابسيت خاصين بـ SoulChill أو الكلاش
+
+    # تحديد تسمية الآيدي (افتراضي: آيدي اللاعب)، نغيّرها حسب المنتج
     id_label = "آيدي اللاعب"
     try:
-        subset = order.get("subset")
+        subset   = order.get("subset")
         prod_text = ""
         for attr in ("description", "desc", "label", "button", "button_label", "extra"):
             v = getattr(product, attr, None)
@@ -588,7 +595,6 @@ def handle_player_id(message, bot):
         ),
         reply_markup=keyboard
     )
-
 
 # ================= تسجيل هاندلرات الرسائل =================
 
