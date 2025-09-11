@@ -87,7 +87,7 @@ def allowed(user_id: int, perm: str) -> bool:
 from handlers.products import PRODUCTS
 
 # لوحة المزايا (المحفظة وطرق الشحن…)
-from services.feature_flags import ensure_seed, list_features, set_feature_active
+from services.feature_flags import ensure_seed, list_features, set_feature_active, list_features_grouped
 
 # محاولة استيراد منظّم الشحن لإزالة القفل المحلي بعد القبول/الإلغاء (استيراد كسول وآمن)
 try:
@@ -102,9 +102,6 @@ _cancel_pending = {}
 _accept_pending = {}
 _msg_pending = {}
 _broadcast_pending = {}
-_msg_by_id_pending = {}
-_ban_pending = {}
-_unban_pending = {}
 
 # ─────────────────────────────────────
 #   تنسيقات ونصوص
@@ -274,6 +271,15 @@ def _admin_product_actions_markup(pid: int):
 #   لوحة المزايا (Feature Flags)
 # ─────────────────────────────────────
 
+
+def _features_home_markup():
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        types.InlineKeyboardButton("📂 حسب المجموعات", callback_data="adm_feat_home:groups"),
+        types.InlineKeyboardButton("📜 قائمة مسطحة", callback_data="adm_feat_home:flat"),
+    )
+    kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
+    return kb
 def _features_markup(page: int = 0, page_size: int = 10):
     try:
         items = list_features() or []
@@ -326,6 +332,71 @@ def _features_markup(page: int = 0, page_size: int = 10):
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
         return kb
 
+
+def _features_groups_markup():
+    """يعرض قائمة المجموعات وعدد العناصر النشطة/الإجمالي داخل كل مجموعة."""
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    try:
+        grouped = list_features_grouped() or {}
+    except Exception as e:
+        logging.exception("[ADMIN] list_features_grouped failed: %s", e)
+        grouped = {}
+    # فرز أسماء المجموعات أبجديًا بالعربية/الإنجليزية
+    names = sorted(grouped.keys(), key=lambda s: s or "")
+    for name in names:
+        items = grouped.get(name) or []
+        active = sum(1 for it in items if bool(it.get("active", True)))
+        total  = len(items)
+        kb.add(types.InlineKeyboardButton(f"📁 {name} — {active}/{total}", callback_data=f"adm_feat_g:{name}:0"))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
+    return kb
+
+def _features_group_items_markup(group_name: str, page: int = 0, page_size: int = 10):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    try:
+        grouped = list_features_grouped() or {}
+        items = grouped.get(group_name) or []
+    except Exception as e:
+        logging.exception("[ADMIN] list_features_grouped failed: %s", e)
+        items = []
+    total = len(items)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages-1))
+    start = page * page_size
+    page_items = items[start:start+page_size]
+
+    # أزرار التبديل الفردي
+    for it in page_items:
+        k = it.get("key") or ""
+        label = it.get("label") or k
+        active = bool(it.get("active", True))
+        lamp = "🟢" if active else "🔴"
+        to = 0 if active else 1
+        kb.add(types.InlineKeyboardButton(
+            text=f"{lamp} {label}",
+            callback_data=f"adm_feat_t:{k}:{to}:{page}"
+        ))
+
+    # شريط الصفحات
+    if total_pages > 1:
+        prev_page = (page - 1) % total_pages
+        next_page = (page + 1) % total_pages
+        kb.row(
+            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_g:{group_name}:{prev_page}"),
+            types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
+            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_g:{group_name}:{next_page}")
+        )
+
+    # أزرار تشغيل/إيقاف الكل في المجموعة
+    kb.row(
+        types.InlineKeyboardButton("✅ تشغيل الكل", callback_data=f"adm_feat_gtoggle:{group_name}:1:{page}"),
+        types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_gtoggle:{group_name}:0:{page}")
+    )
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع للمجموعات", callback_data="adm_feat_home:groups"))
+    return kb
+
+
+
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = max(0, min(page, total_pages - 1))
     start_i = page * page_size
@@ -354,6 +425,66 @@ def _features_markup(page: int = 0, page_size: int = 10):
     return kb
 
 def register(bot, history):
+
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_home:"))
+    def _features_home_cb(c):
+        try:
+            mode = c.data.split(":",1)[1]
+            if mode == "groups":
+                kb = _features_groups_markup()
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+            elif mode == "flat":
+                kb = _features_markup(0)
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+        except Exception as e:
+            logging.exception("[ADMIN] feat home cb failed: %s", e)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "adm_feat_sync")
+    def _features_sync_cb(c):
+        try:
+            created = ensure_seed() or 0
+        except Exception as e:
+            created = 0
+            logging.exception("[ADMIN] ensure_seed failed: %s", e)
+        try:
+            bot.answer_callback_query(c.id, f"تمت المزامنة. مضاف: {created}")
+        except Exception:
+            pass
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=_features_markup(0))
+        except Exception:
+            pass
+
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_g:"))
+    def _features_group_cb(c):
+        try:
+            _, group, page = c.data.split(":", 2)
+            kb = _features_group_items_markup(group, int(page))
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+        except Exception as e:
+            logging.exception("[ADMIN] feature group cb failed: %s", e)
+
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
+    def _features_group_toggle_all(c):
+        try:
+            _, group, to, page = c.data.split(":", 3)
+            to = int(to)
+            grouped = list_features_grouped() or {}
+            for it in grouped.get(group, []) or []:
+                k = it.get("key")
+                if k:
+                    try:
+                        set_feature_active(k, bool(to))
+                    except Exception:
+                        pass
+            try:
+                bot.answer_callback_query(c.id, "تم التحديث.")
+            except Exception:
+                pass
+            kb = _features_group_items_markup(group, int(page))
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+        except Exception as e:
+            logging.exception("[ADMIN] feature group toggle-all failed: %s", e)
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
@@ -934,8 +1065,6 @@ def register(bot, history):
             # ⛔️ حذف "إدارة المنتجات" كما طُلب + إضافة أزرار التقارير والبث
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
-            kb.row("✉️ رسالة لعميل", "⛔ حظر عميل")
-            kb.row("✅ فكّ الحظر")
             kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
             kb.row("⚙️ النظام", "⬅️ رجوع")
         else:
@@ -1580,220 +1709,3 @@ def _register_admin_roles(bot):
         # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
         ids_str = ", ".join(str(x) for x in ADMINS)
         bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
-
-    # =========================
-    # ✉️ رسالة لعميل (بالآيدي)
-    # =========================
-    @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and _allowed(m.from_user.id, "user:message_by_id"))
-    def msg_by_id_start(m):
-        _msg_by_id_pending[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/ cancel لإلغاء")
-
-    @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-    def msg_by_id_get_id(m):
-        from services.validators import parse_user_id
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
-            return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
-        _msg_by_id_pending[m.from_user.id] = {"step": "ask_text", "user_id": uid}
-        bot.send_message(m.chat.id, f"اكتب الرسالة التي سيتم إرسالها إلى <code>{uid}</code>:", parse_mode="HTML")
-
-    @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_text")
-    def msg_by_id_get_text(m):
-        st = _msg_by_id_pending.get(m.from_user.id) or {}
-        uid = st.get("user_id")
-        if not uid:
-            _msg_by_id_pending.pop(m.from_user.id, None)
-            return bot.reply_to(m, "❌ الحالة غير صالحة. أعد البدء.")
-        st["text"] = m.text
-        _msg_by_id_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup()
-        kb.row(
-            types.InlineKeyboardButton("✔️ إرسال", callback_data=f"adm_msgid:send:{uid}"),
-            types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_msgid:cancel"),
-        )
-        bot.send_message(m.chat.id, f"تأكيد إرسال الرسالة للعميل <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_msgid:"))
-    def msg_by_id_confirm(c):
-        st = _msg_by_id_pending.get(c.from_user.id)
-        if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية قيد التأكيد."); 
-            except Exception: pass
-            return
-        parts = c.data.split(":", 2)
-        action = parts[1]
-        if action == "cancel":
-            _msg_by_id_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي."); 
-            except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: pass
-            return
-        if action == "send":
-            uid = int(parts[2])
-            text = st.get("text") or ""
-            try:
-                from services.notification_service import notify_user
-                notify_user(bot, uid, text)
-                from services.activity_logger import log_action
-                log_action(c.from_user.id, "user:message_by_id", reason=f"to:{uid}")
-                bot.send_message(c.message.chat.id, "✅ تم الإرسال.")
-            except Exception as e:
-                bot.send_message(c.message.chat.id, f"❌ تعذّر الإرسال: {e}")
-            finally:
-                _msg_by_id_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "تم.")
-            except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: pass
-
-    # ===============
-    # ⛔ حظر عميل
-    # ===============
-    @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
-    def ban_start(m):
-        _ban_pending[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل المراد حظره.\n/ cancel لإلغاء")
-
-    @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-    def ban_get_id(m):
-        from services.validators import parse_user_id
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
-            return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
-        st = {"step": "ask_duration", "user_id": uid}
-        _ban_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup()
-        kb.row(
-            types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
-            types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
-        )
-        kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
-        bot.send_message(m.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_ban_dur:"))
-    def ban_choose_duration(c):
-        st = _ban_pending.get(c.from_user.id)
-        if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية."); 
-            except Exception: pass
-            return
-        choice = c.data.split(":",1)[1]
-        st["duration_choice"] = choice
-        st["step"] = "ask_reason"
-        _ban_pending[c.from_user.id] = st
-        try: bot.answer_callback_query(c.id, "تم.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-        bot.send_message(c.message.chat.id, "اكتب سبب الحظر (إلزامي):" )
-
-    @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_reason")
-    def ban_get_reason(m):
-        st = _ban_pending.get(m.from_user.id) or {}
-        reason = (m.text or '').strip()
-        if not reason:
-            return bot.reply_to(m, "❌ السبب إلزامي.")
-        st["reason"] = reason
-        st["step"] = "confirm"
-        _ban_pending[m.from_user.id] = st
-        uid = st.get("user_id")
-        kb = types.InlineKeyboardMarkup()
-        kb.row(
-            types.InlineKeyboardButton("✔️ تأكيد الحظر", callback_data="adm_ban:confirm"),
-            types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_ban:cancel"),
-        )
-        bot.send_message(m.chat.id, f"تأكيد حظر <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_ban:"))
-    def ban_confirm(c):
-        st = _ban_pending.get(c.from_user.id)
-        if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية."); 
-            except Exception: pass
-            return
-        action = c.data.split(":",1)[1]
-        if action == "cancel":
-            _ban_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: pass
-            return
-        # confirm
-        try:
-            from services.validators import parse_duration_choice
-            from services.ban_service import ban_user
-            secs = parse_duration_choice(st.get("duration_choice"))
-            until_iso = None
-            if secs is not None:
-                from datetime import datetime, timezone, timedelta
-                until_iso = (datetime.now(timezone.utc) + timedelta(seconds=secs)).isoformat()
-            ban_user(st["user_id"], c.from_user.id, st["reason"], banned_until_iso=until_iso)
-            from services.activity_logger import log_action
-            log_action(c.from_user.id, "user:ban", reason=f"uid:{st['user_id']} until:{until_iso or 'perm'} reason:{st['reason']}")
-            bot.send_message(c.message.chat.id, "✅ تم الحظر.")
-        except Exception as e:
-            bot.send_message(c.message.chat.id, f"❌ تعذّر الحظر: {e}")
-        finally:
-            _ban_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "تم.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
-
-    # ===============
-    # ✅ فكّ الحظر
-    # ===============
-    @bot.message_handler(func=lambda m: m.text == "✅ فكّ الحظر" and _allowed(m.from_user.id, "user:unban"))
-    def unban_start(m):
-        _unban_pending[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/ cancel لإلغاء")    
-
-    @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-    def unban_get_id(m):
-        from services.validators import parse_user_id
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
-            return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
-        _unban_pending[m.from_user.id] = {"step": "confirm", "user_id": uid}
-        kb = types.InlineKeyboardMarkup()
-        kb.row(
-            types.InlineKeyboardButton("✔️ تأكيد", callback_data="adm_unban:confirm"),
-            types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_unban:cancel"),
-        )
-        bot.send_message(m.chat.id, f"تأكيد فكّ الحظر عن <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_unban:"))
-    def unban_confirm(c):
-        st = _unban_pending.get(c.from_user.id)
-        if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية.")
-            except Exception: pass
-            return
-        action = c.data.split(":",1)[1]
-        if action == "cancel":
-            _unban_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: pass
-            return
-        try:
-            from services.ban_service import unban_user
-            unban_user(st["user_id"], c.from_user.id)
-            from services.activity_logger import log_action
-            log_action(c.from_user.id, "user:unban", reason=f"uid:{st['user_id']}")
-            bot.send_message(c.message.chat.id, "✅ تم فكّ الحظر.")
-        except Exception as e:
-            bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
-        finally:
-            _unban_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "تم.")
-        except Exception: pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: pass
