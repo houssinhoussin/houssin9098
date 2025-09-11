@@ -6,7 +6,13 @@ from services.recharge_service import apply_recharge
 from handlers import keyboards  # ✅ الكيبورد الموحد
 from services.wallet_service import register_user_if_not_exist, get_balance
 from types import SimpleNamespace
-from services.queue_service import add_pending_request, process_queue
+try:
+    from services.queue_service import add_pending_request, process_queue
+except Exception:
+    def add_pending_request(*a, **k):
+        return None
+    def process_queue(*a, **k):
+        return None
 from services.validators import parse_amount
 from services.telegram_safety import remove_inline_keyboard
 from services.anti_spam import too_soon
