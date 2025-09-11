@@ -17,12 +17,13 @@ from handlers import keyboards
 try:
     from services.queue_service import add_pending_request, process_queue, delete_pending_request
 except Exception:
-    def add_pending_request(*a, **k):
+    def add_pending_request(*args, **kwargs):
         return None
-    def process_queue(*a, **k):
+    def process_queue(*args, **kwargs):
         return None
-    def delete_pending_request(*a, **k):
+    def delete_pending_request(*args, **kwargs):
         return None
+
 from database.db import get_table
 import logging
 
