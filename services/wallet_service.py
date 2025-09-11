@@ -2,7 +2,8 @@
 """
 (نفس الهيدر التوضيحي السابق)
 """
-
+# أعلى الملف
+import logging
 import uuid
 from config import SUPABASE_TABLE_NAME
 from datetime import datetime, timedelta
