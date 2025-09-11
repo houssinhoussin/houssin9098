@@ -546,4 +546,3 @@ def capture_hold(hold_id: str):
 
 def release_hold(hold_id: str):
     return _rpc_release_hold(hold_id)
-
