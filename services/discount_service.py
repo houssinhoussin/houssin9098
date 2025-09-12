@@ -1,37 +1,96 @@
-
 # services/discount_service.py
 from __future__ import annotations
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Tuple
+from datetime import datetime, timedelta, timezone
 import logging
 from database.db import get_table
 
 DISCOUNTS_TABLE = "discounts"
 USES_TABLE      = "discount_uses"
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+def _parse_dt(val) -> Optional[datetime]:
+    if not val:
+        return None
+    try:
+        if isinstance(val, datetime):
+            return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        if isinstance(val, str):
+            s = val[:-1] + "+00:00" if val.endswith("Z") else val
+            return datetime.fromisoformat(s)
+    except Exception:
+        return None
+    return None
+
 def list_discounts(limit: int = 100) -> List[Dict[str, Any]]:
+    """
+    ترجع الخصومات مع حقل computed: r["effective_active"] = active and not expired
+    """
     try:
         res = (get_table(DISCOUNTS_TABLE)
                 .select("*")
                 .order("created_at", desc=True)
                 .limit(limit)
                 .execute())
-        return getattr(res, "data", []) or []
+        rows = getattr(res, "data", []) or []
+        now = _now()
+        for r in rows:
+            ends = _parse_dt(r.get("ends_at"))
+            ended = (ends is not None) and (ends <= now)
+            r["effective_active"] = bool(r.get("active")) and not ended
+        return rows
     except Exception as e:
         logging.exception("[discounts] list failed: %s", e)
         return []
 
-def create_discount(scope: str, percent: int, user_id: Optional[int] = None, active: bool = True) -> Any:
+def create_discount(scope: str,
+                    percent: int,
+                    user_id: Optional[int] = None,
+                    active: bool = True,
+                    days: Optional[int] = None) -> Any:
+    """
+    days=None => بدون مدة. days>0 => ends_at = الآن + days
+    """
     scope = scope or "global"
     percent = max(0, min(int(percent or 0), 100))
-    row = {"scope": scope, "percent": percent, "active": bool(active)}
+    row = {
+        "scope": scope,
+        "percent": percent,
+        "active": bool(active),
+        "starts_at": _now().isoformat(),
+    }
     if scope == "user":
         row["user_id"] = int(user_id) if user_id else None
+    if days and int(days) > 0:
+        row["ends_at"] = (_now() + timedelta(days=int(days))).isoformat()
     try:
         return get_table(DISCOUNTS_TABLE).insert(row).execute()
     except Exception as e:
         logging.exception("[discounts] create failed: %s", e)
         raise
+
+def end_discount_now(did: str) -> bool:
+    """
+    إنهاء فوري: يعطّل ويضبط ends_at = الآن
+    """
+    try:
+        get_table(DISCOUNTS_TABLE).update(
+            {"active": False, "ends_at": _now().isoformat()}
+        ).eq("id", did).execute()
+        return True
+    except Exception as e:
+        logging.exception("[discounts] end now failed: %s", e)
+        return False
+
+def delete_discount(did: str) -> bool:
+    try:
+        get_table(DISCOUNTS_TABLE).delete().eq("id", did).execute()
+        return True
+    except Exception as e:
+        logging.exception("[discounts] delete failed: %s", e)
+        return False
 
 def set_discount_active(did: str, active: bool) -> bool:
     try:
@@ -43,7 +102,7 @@ def set_discount_active(did: str, active: bool) -> bool:
 
 def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     """
-    يرجع أعلى خصم فعّال ينطبق على المستخدم (خصم خاص للمستخدم، أو خصم عام).
+    يرجع أعلى خصم فعّال وغير منتهٍ للمستخدم (خاص أو عام).
     """
     try:
         res = (get_table(DISCOUNTS_TABLE)
@@ -55,22 +114,22 @@ def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
         logging.exception("[discounts] get_active_for_user failed: %s", e)
         return None
 
+    now = _now()
     best = None
     for r in rows:
+        # استبعد المنتهي زمنيًا
+        ends = _parse_dt(r.get("ends_at"))
+        if ends is not None and ends <= now:
+            continue
         sc = (r.get("scope") or "global").lower()
-        if sc == "global":
-            ok = True
-        elif sc == "user":
-            ok = (int(r.get("user_id") or 0) == int(user_id))
-        else:
-            ok = False
+        ok = (sc == "global") or (sc == "user" and int(r.get("user_id") or 0) == int(user_id))
         if not ok:
             continue
         if (best is None) or (int(r.get("percent") or 0) > int(best.get("percent") or 0)):
             best = r
     return best
 
-def apply_discount(user_id: int, amount_syp: int) -> (int, Optional[Dict[str, Any]]):
+def apply_discount(user_id: int, amount_syp: int) -> Tuple[int, Optional[Dict[str, Any]]]:
     """
     يطبق أعلى خصم فعّال. يرجع (السعر_بعد_الخصم, {id, percent}) أو (السعر, None).
     """
