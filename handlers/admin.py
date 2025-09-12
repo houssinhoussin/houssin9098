@@ -664,7 +664,7 @@ def register(bot, history):
         except Exception: pass
 
 
-   @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and allowed(m.from_user.id, "user:message_by_id"))
+    @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and allowed(m.from_user.id, "user:message_by_id"))
     def msg_by_id_start(m):
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/cancel لإلغاء")
@@ -693,7 +693,7 @@ def register(bot, history):
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_text", "user_id": uid}
 
         kb = types.InlineKeyboardMarkup(row_width=1)
-        kb.add(types.InlineKeyboardButton("⬅️ إلغاء", callback_data="msgbyid_cancel"))
+        kb.add(types.InlineKeyboardButton("⬅️ إلغاء", callback_data="adm_msgid:cancel"))
 
         return bot.reply_to(
             m,
@@ -721,9 +721,12 @@ def register(bot, history):
     def msg_by_id_confirm(c):
         st = _msg_by_id_pending.get(c.from_user.id)
         if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية قيد التأكيد."); 
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id, "لا توجد عملية قيد التأكيد.")
+            except Exception:
+                pass
             return
+
         parts = c.data.split(":", 2)
         action = parts[1]
         if action == "cancel":
