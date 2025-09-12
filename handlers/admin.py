@@ -27,9 +27,6 @@ from telebot import types
 import threading
 import time
 
-# التحكم في حذف رسالة الأدمن عند أي إجراء على الطابور
-DELETE_ADMIN_MESSAGE_ON_ACTION = False
-
 from services.ads_service import add_channel_ad
 
 from services.admin_ledger import (
