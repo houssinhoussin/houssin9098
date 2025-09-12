@@ -1458,24 +1458,19 @@ def admin_menu(msg):
     # 📬 ترحيب — نحن شغالين (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    def bc_welcome(m):
+    def bc_welcome(m: types.Message):
         _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
-        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
-        kb.row(
-            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
-            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
+        kb = _dest_buttons("bw")
+        bot.reply_to(
+            m,
+            "🔎 *معاينة رسالة الترحيب:*\n"
+            f"{BAND}\n(سيتم إدراج اسم كل عميل تلقائيًا)\n{BAND}",
+            parse_mode="Markdown",
+            reply_markup=kb
         )
-        kb.row(
-            types.InlineKeyboardButton("✅ إرسال الآن", callback_data="bw_confirm"),
-            types.InlineKeyboardButton("❌ إلغاء",      callback_data="bw_cancel"),
-        )
-        bot.reply_to(m,
-                     "🔎 *معاينة رسالة الترحيب*:\n"
-                     f"{BAND}\n(سيتم إدراج اسم كل عميل تلقائيًا)\n{BAND}",
-                     parse_mode="Markdown", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-    def _bw_flow(c):
+    def _bw_flow(c: types.CallbackQuery):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "welcome":
             return
@@ -1486,14 +1481,12 @@ def admin_menu(msg):
             try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
             except Exception: pass
             return
-
         if c.data in ("bw_dest_clients","bw_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
             try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
             except Exception: pass
             return
-
         if c.data == "bw_confirm":
             sent = 0
             if st["dest"] == "clients":
@@ -1508,7 +1501,8 @@ def admin_menu(msg):
             else:
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
-                    bot.send_message(dest, _funny_welcome_text(None))
+                    text = _append_bot_link_for_channel(_funny_welcome_text(None))
+                    bot.send_message(dest, text, parse_mode="HTML")
                     sent = 1
                 except Exception:
                     pass
@@ -1518,7 +1512,6 @@ def admin_menu(msg):
             try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
-
 
     # =========================
     # 📢 عرض اليوم (مباشر)
