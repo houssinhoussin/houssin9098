@@ -594,7 +594,17 @@ def handle_player_id(message, bot):
                 [
                     f"• المنتج: {product.name}",
                     f"• الفئة: {_visible_category_label(order, product)}",
-                    f"• السعر: {_fmt_syp(price_syp)}",
+                    # قبل الكتلة مباشرة لديك:
+                    # price_before = int(price_syp قبل تطبيق الخصم)
+                    # price_syp, applied_disc = apply_discount(...)
+
+                    # ✨ استبدل سطر السعر الواحد بـ:
+                    (f"• السعر: {_fmt_syp(price_syp)}",) if not applied_disc else (
+                        f"• السعر قبل الخصم: {_fmt_syp(price_before)}",
+                        f"• الخصم: {int(applied_disc.get('percent', 0))}٪",
+                        f"• السعر بعد الخصم: {_fmt_syp(price_syp)}",
+                    ),
+
                     f"• {id_label}: {player_id}",
                     "",
                     f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
@@ -1011,7 +1021,12 @@ def setup_inline_handlers(bot, admin_ids):
                     "❌ رصيدك مش مكفّي",
                     [
                         f"المتاح: {_fmt_syp(available)}",
-                        f"السعر: {_fmt_syp(price_syp)}",
+                        # السعر قبل/بعد لو فيه خصم محفوظ في order["discount"]
+                        *( [
+                            f"السعر قبل الخصم: {_fmt_syp(int(order.get('discount',{}).get('before', price_syp)))}",
+                            f"السعر بعد الخصم: {_fmt_syp(int(order.get('discount',{}).get('after',  price_syp)))}",
+                        ] if order.get("discount") else [ f"السعر: {_fmt_syp(price_syp)}" ] ),
+
                         "🧾 اشحن المحفظة وبعدين جرّب تاني."
                     ]
                 ),
@@ -1108,13 +1123,33 @@ def setup_inline_handlers(bot, admin_ids):
                     f"✅ تمام يا {name}! طلبك اتبعت 🚀",
                     [
                         f"⏱️ التنفيذ {ETA_TEXT}.",
+                        *( [
+                            f"💵 قبل الخصم: {_fmt_syp(int(order.get('discount',{}).get('before', price_syp)))}",
+                            f"✅ بعد الخصم: {_fmt_syp(int(order.get('discount',{}).get('after',  price_syp)))}",
+                        ] if order.get("discount") else [] ),
                         f"📦 حجزنا {_fmt_syp(price_syp)} لطلب «{product.name}» لآيدي «{player_id}».",
+
                         "تقدر تبعت طلبات تانية — بنسحب من المتاح بس."
                     ]
                 )
             ),
         )
         process_queue(bot)
+        _card(
+          "🧾 فاتورة مؤقتة",
+          [
+            f"• رقم الحجز: {hold_id}",
+            f"• المنتج: {product.name}",
+            f"• الحساب/الآيدي: {player_id}",
+            *( [
+                f"• السعر قبل الخصم: {_fmt_syp(_pb)}",
+                f"• الخصم: {int(order.get('discount',{}).get('percent',0))}٪",
+                f"• الإجمالي بعد الخصم: {_fmt_syp(_pa)}",
+              ] if order.get("discount") else [ f"• الإجمالي: {_fmt_syp(price_syp)}" ] ),
+            f"• الزمن المتوقع: {ETA_TEXT}",
+          ]
+        )
+
 
 # ================= نقطة التسجيل من main.py =================
 
