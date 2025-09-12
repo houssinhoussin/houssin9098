@@ -384,7 +384,7 @@ def _features_home_markup():
     )
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
     return kb
-def _features_markup(page: int = 0, page_size: int = 10):
+def _features_markup(page: int = 0, page_size: int = 20):
 # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
     items = list_features() or []
  
