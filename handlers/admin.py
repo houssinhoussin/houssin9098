@@ -370,6 +370,8 @@ def _features_home_markup():
     return kb
 def _features_markup(page: int = 0, page_size: int = 10):
 # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
+    items = list_features() or []
+ 
     import re as _re
     def _norm_label(s: str) -> str:
         s = (s or "").strip()
@@ -544,9 +546,8 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def ban_get_id(m):
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
+        uid = parse_user_id(m.text)
+        if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
         st = {"step": "ask_duration", "user_id": uid}
         _ban_pending[m.from_user.id] = st
@@ -632,10 +633,10 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def unban_get_id(m):
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
+        uid = parse_user_id(m.text)
+        if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
+
         _unban_pending[m.from_user.id] = {"step": "confirm", "user_id": uid}
         kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
@@ -680,19 +681,35 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def msg_by_id_get_id(m):
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
+        # 1) قراءة الآيدي والتحقق
+        uid = parse_user_id(m.text)
+        if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
-        # تحقق أنه عميل مسجّل
+
+        # 2) تحقق أنه عميل مسجّل في قاعدة البيانات
         try:
-            ex = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
-            if not (getattr(ex, "data", None) or []):
-                return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في العملاء.")
-        except Exception:
-            return bot.reply_to(m, "❌ تعذّر التحقق من قاعدة البيانات الآن.")
+            q = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
+            exists = bool(q.data)  # عدّل حسب شكل الاسترجاع عندك (مثلاً: len(q.data) > 0)
+        except Exception as e:
+            # سجّل الخطأ لمرجعية سريعة
+            import logging
+            logging.exception("User lookup failed for uid=%s", uid)
+            return bot.reply_to(m, "⚠️ حدث خطأ أثناء التحقق من المستخدم. حاول لاحقًا.")
+
+        if not exists:
+            return bot.reply_to(m, f"❌ لا يوجد عميل بهذا الآيدي: {uid}")
+
+        # 3) انتقال للخطوة التالية: طلب نص الرسالة
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_text", "user_id": uid}
-        bot.send_message(m.chat.id, f"اكتب الرسالة التي سيتم إرسالها إلى <code>{uid}</code>:", parse_mode="HTML")
+
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("⬅️ إلغاء", callback_data="msgbyid_cancel"))
+
+        return bot.reply_to(
+            m,
+            f"✅ سيتم الإرسال إلى المستخدم {uid}.\nأرسل نص الرسالة الآن (أو أرسل /cancel للإلغاء):",
+            reply_markup=kb
+        )
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_text")
     def msg_by_id_get_text(m):
@@ -2080,13 +2097,6 @@ def _collect_all_user_ids() -> set[int]:
 
     return ids
     
-def _register_admin_roles(bot):
-    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id == ADMIN_MAIN_ID)
-    def admins_roles(m):
-        ids_str = ", ".join(str(x) for x in ADMINS)
-        bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
-
-
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
     def admins_roles(m):
