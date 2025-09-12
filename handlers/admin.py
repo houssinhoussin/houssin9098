@@ -166,7 +166,7 @@ except Exception:
     recharge_handlers = None
 
 # ─────────────────────────────────────
-#   حالة داخلية
+#   حالة داخلية (على مستوى الموديول)
 # ─────────────────────────────────────
 _cancel_pending = {}
 _accept_pending = {}
@@ -176,6 +176,24 @@ _msg_by_id_pending = {}
 _ban_pending = {}
 _unban_pending = {}
 
+# 👈 أضف هالثلاثة هنا (وانزع أي تعريف لها داخل register()):
+_disc_new_user_state: dict[int, dict] = {}
+_manage_user_state: dict[int, dict] = {}
+_refund_state: dict[int, dict] = {}
+
+# 👈 بعدها مباشرة: دالة تنظيف كل الحالات لهذا الأدمن
+def _clear_admin_states(uid: int):
+    for d in (
+        _msg_pending, _accept_pending, _broadcast_pending, _msg_by_id_pending,
+        _ban_pending, _unban_pending,
+        _disc_new_user_state,
+        _manage_user_state,
+        _refund_state,
+    ):
+        try:
+            d.pop(uid, None)
+        except Exception:
+            pass
 
 # ─────────────────────────────────────
 #   تنسيقات ونصوص
@@ -2182,8 +2200,6 @@ def _register_admin_roles(bot):
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.send_message(m.chat.id, "لوحة الخصومات:", reply_markup=kb)
 
-    # حالة إنشاء خصم لمستخدم
-    _disc_new_user_state: dict[int, dict] = {}
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
     def discounts_actions(c):
@@ -2362,7 +2378,6 @@ def _register_admin_roles(bot):
     # =========================
     # 👤 إدارة عميل — مبسّطة
     # =========================
-    _manage_user_state = {}
 
     @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
@@ -2474,9 +2489,6 @@ def _register_admin_roles(bot):
             bot.answer_callback_query(c.id, "❌ غير مفهوم")
         except Exception:
             pass
-
-
-    _refund_state = {}
 
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
     def _refund_amount(m):
