@@ -557,7 +557,7 @@ def handle_player_id(message, bot):
             "before":  price_before,
             "after":   price_syp,
         }
-keyboard = types.InlineKeyboardMarkup(row_width=2)
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         types.InlineKeyboardButton("✅ تمام.. أكّد الطلب", callback_data="final_confirm_order"),
         types.InlineKeyboardButton("✏️ أعدّل الآيدي",    callback_data="edit_player_id"),
