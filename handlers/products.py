@@ -1085,18 +1085,19 @@ def setup_inline_handlers(bot, admin_ids):
         else:
             _price_line = f"💵 السعر: {_fmt_syp(price_syp)}"
 
-        admin_msg = (
-            f"💰 رصيد المستخدم: {balance:,} ل.س\n"
-            f"🆕 طلب جديد\n"
-            f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
-            f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
-            f"آيدي: <code>{user_id}</code>\n"
-            f"آيدي اللاعب: <code>{player_id}</code>\n"
-            f"🔖 المنتج: {product.name}\n"
-            f"التصنيف: {_visible_category_label(order, product)}\n"
-            _price_line + "\n"
-            f"(select_{product.product_id})"
-        )
+        admin_msg = "\n".join([
+            f"💰 رصيد المستخدم: {balance:,} ل.س",
+            "🆕 طلب جديد",
+            f"👤 الاسم: <code>{call.from_user.full_name}</code>",
+            f"يوزر: <code>@{call.from_user.username or ''}</code>",
+            f"آيدي: <code>{user_id}</code>",
+            f"آيدي اللاعب: <code>{player_id}</code>",
+            f"🔖 المنتج: {product.name}",
+            f"التصنيف: {_visible_category_label(order, product)}",
+            _price_line,   # ← مباشرة بدون \n
+            f"(select_{product.product_id})",
+        ])
+
 
         # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
         add_pending_request(
