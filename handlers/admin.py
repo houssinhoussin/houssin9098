@@ -475,9 +475,10 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
 
     # أزرار تشغيل/إيقاف الكل في المجموعة
     kb.row(
-        types.InlineKeyboardButton("✅ تشغيل الكل", callback_data=f"adm_feat_gtoggle:{group_name}:1:{page}"),
-        types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_gtoggle:{group_name}:0:{page}")
+        types.InlineKeyboardButton("✅ تشغيل الكل", callback_data=f"adm_feat_gtoggle:{gslug}:1:{page}"),
+        types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_gtoggle:{gslug}:0:{page}")
     )
+
     kb.add(types.InlineKeyboardButton("⬅️ رجوع للمجموعات", callback_data="adm_feat_home:groups"))
     return kb
 
@@ -790,9 +791,15 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
     def _features_group_toggle_all(c):
         try:
-            _, group, to, page = c.data.split(":", 3)
+            _, slug, to, page = c.data.split(":", 3)
             to = int(to)
             grouped = list_features_grouped() or {}
+            # رجّع الاسم الحقيقي من الـslug
+            group = next((n for n in grouped.keys() if _slug(n) == slug), None)
+            if not group:
+                try: bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                except Exception: pass
+                return
             for it in grouped.get(group, []) or []:
                 k = it.get("key")
                 if k:
@@ -808,6 +815,7 @@ def register(bot, history):
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
         except Exception as e:
             logging.exception("[ADMIN] feature group toggle-all failed: %s", e)
+
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
@@ -2434,20 +2442,6 @@ def _register_admin_roles(bot):
         if act == "message":
             _msg_by_id_pending[c.from_user.id] = {"step": "ask_text", "user_id": uid}
             bot.send_message(c.message.chat.id, f"اكتب الرسالة للعميل <code>{uid}</code>:", parse_mode="HTML")
-            try:
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
-            return
-
-            # اطلب الآيدي من جديد
-            _manage_user_state[c.from_user.id] = {"step": "ask_id"}
-            try:
-                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                rk.row("⬅️ رجوع")
-                bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
-            except Exception:
-                pass
             try:
                 bot.answer_callback_query(c.id)
             except Exception:
