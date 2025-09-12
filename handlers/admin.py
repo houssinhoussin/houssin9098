@@ -517,15 +517,19 @@ def register(bot, history):
     def ban_choose_duration(c):
         st = _ban_pending.get(c.from_user.id)
         if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية."); 
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id, "لا توجد عملية.")
+            except Exception:
+                pass
             return
         choice = c.data.split(":",1)[1]
         st["duration_choice"] = choice
         st["step"] = "ask_reason"
         _ban_pending[c.from_user.id] = st
-        try: bot.answer_callback_query(c.id, "تم.")
-        except Exception: pass
+        try:
+            bot.answer_callback_query(c.id, "تم.")
+        except Exception:
+            pass
         try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception: pass
         bot.send_message(c.message.chat.id, "اكتب سبب الحظر (إلزامي):" )
@@ -551,8 +555,10 @@ def register(bot, history):
     def ban_confirm(c):
         st = _ban_pending.get(c.from_user.id)
         if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية."); 
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id, "لا توجد عملية.")
+            except Exception:
+                pass
             return
         action = c.data.split(":",1)[1]
         if action == "cancel":
@@ -575,8 +581,11 @@ def register(bot, history):
             bot.send_message(c.message.chat.id, f"❌ تعذّر الحظر: {e}")
         finally:
             _ban_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "تم.")
-        except Exception: pass
+        try:
+            bot.answer_callback_query(c.id, "تم.")
+        except Exception:
+            pass
+
         try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception: pass
 
@@ -622,7 +631,10 @@ def register(bot, history):
             bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
         finally:
             _unban_pending.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "تم.")
+        try:
+            bot.answer_callback_query(c.id, "تم.")
+        except Exception:
+            pass
         except Exception: pass
         try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception: pass
@@ -708,8 +720,10 @@ def register(bot, history):
                 bot.send_message(c.message.chat.id, f"❌ تعذّر الإرسال: {e}")
             finally:
                 _msg_by_id_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "تم.")
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id, "تم.")
+            except Exception:
+                pass
             try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
             except Exception: pass
 
@@ -2288,21 +2302,21 @@ def _register_admin_roles(bot):
                 pass
             return admin_menu(c.message)
 
-        if act == "profile":
+        if act == "last5":
             try:
-                r = get_table(USERS_TABLE).select(
-                    "user_id,balance,name,full_name,created_at"
-                ).eq("user_id", uid).limit(1).execute()
-                row = (getattr(r, "data", None) or [None])[0] or {}
-                text = ("👤 عميل\n"
-                        f"ID: <code>{uid}</code>\n"
-                        f"الاسم: {row.get('full_name') or row.get('name') or ''}\n"
-                        f"الرصيد: {int(row.get('balance') or 0):,} ل.س")
+                r = get_table("purchases").select(
+                    "created_at, product_name, price"
+                ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
+                rows = getattr(r, "data", []) or []
+                lines = ["🧾 آخر 5 عمليات:"] + [
+                    f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
+                    for x in rows
+                ]
+                bot.send_message(c.message.chat.id, "\n".join(lines))
             except Exception:
-                text = "لا يمكن جلب البيانات."
-            bot.send_message(c.message.chat.id, text, parse_mode="HTML")
+                bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
 
-            # اطلب الآيدي من جديد
+            # اطلب الآيدي من جديد...
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
             try:
                 rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -2328,18 +2342,33 @@ def _register_admin_roles(bot):
         # ban/unban shortcuts reuse existing handlers by sending text commands is OK, keeping it simple.
 
         if act == "last5":
-            r = get_table("purchases").select(
-                "created_at, product_name, price"
-            ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
-            rows = getattr(r, "data", []) or []
-            lines = ["🧾 آخر 5 عمليات:"] + [
-                f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
-                for x in rows
-            ]
-            bot.send_message(c.message.chat.id, "\n".join(lines))
-            
+            try:
+                r = get_table("purchases").select(
+                    "created_at, product_name, price"
+                ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
+                rows = getattr(r, "data", []) or []
+                lines = ["🧾 آخر 5 عمليات:"] + [
+                    f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
+                    for x in rows
+                ]
+                bot.send_message(c.message.chat.id, "\n".join(lines))
             except Exception:
                 bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
+
+            # اطلب الآيدي من جديد
+            _manage_user_state[c.from_user.id] = {"step": "ask_id"}
+            try:
+                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                rk.row("⬅️ رجوع")
+                bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
+            except Exception:
+                pass
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
+
 
             # اطلب الآيدي من جديد
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
