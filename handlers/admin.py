@@ -1115,10 +1115,9 @@ def register(bot, history):
                 pass
             queue_cooldown_start(bot)
             return
-             payload = _maybe_delete_admin_message(call, request_id, new_payload)
+            payload = _maybe_delete_admin_message(call, request_id, new_payload)
             queue_cooldown_start(bot)
             return
-
 
         # === إلغاء الطلب ===
         if action == "cancel":
