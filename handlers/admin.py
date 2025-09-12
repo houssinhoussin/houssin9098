@@ -18,9 +18,6 @@ def _norm_btn_text(s: str) -> str:
 def _match_admin_alias(txt: str, aliases: list[str]) -> bool:
     t = _norm_btn_text(txt)
     return any(_norm_btn_text(a) == t for a in aliases)
-
-# --- Helper: parse telegram user id from text (digits only) ---
-def parse_user_id(text: str) -> int | None:
     
 import re
 import logging
@@ -586,8 +583,8 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: m.text == "✅ فكّ الحظر" and _allowed(m.from_user.id, "user:unban"))
     def unban_start(m):
         _unban_pending[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/ cancel لإلغاء")    
-
+        bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/cancel لإلغاء")
+    
     @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def unban_get_id(m):
         uid = parse_user_id(m.text)
@@ -914,11 +911,7 @@ def register(bot, history):
                     bot.edit_message_caption(lock_line + req_text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=call.message.reply_markup)
             except Exception:
                 pass
-
-        if locked_by and int(locked_by) != int(call.from_user.id):
-            who = locked_by_username or _admin_mention(bot, locked_by)
-            return bot.answer_callback_query(call.id, f'🔒 محجوز بواسطة {who}')
-
+                
         # لو ما في قفل، فعِّل القفل (كما هو عندك)
         if not locked_by:
             try:
@@ -2335,16 +2328,16 @@ def _register_admin_roles(bot):
         # ban/unban shortcuts reuse existing handlers by sending text commands is OK, keeping it simple.
 
         if act == "last5":
-            try:
-                r = get_table("purchases").select(
-                    "created_at, product, price"
-                ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
-                rows = getattr(r, "data", []) or []
-                lines = ["🧾 آخر 5 عمليات:"] + [
-                    f"- {str(x.get('created_at',''))[:16]} — {x.get('product','')} — {int(x.get('price',0)):,} ل.س"
-                    for x in rows
-                ]
-                bot.send_message(c.message.chat.id, "\n".join(lines))
+            r = get_table("purchases").select(
+                "created_at, product_name, price"
+            ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
+            rows = getattr(r, "data", []) or []
+            lines = ["🧾 آخر 5 عمليات:"] + [
+                f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
+                for x in rows
+            ]
+            bot.send_message(c.message.chat.id, "\n".join(lines))
+            
             except Exception:
                 bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
 
