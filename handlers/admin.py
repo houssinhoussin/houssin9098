@@ -1278,7 +1278,6 @@ def register(bot, history):
                     parse_mode="HTML"
                 )
 
-                )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
@@ -1465,7 +1464,8 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n⚡ يا {_h(name)}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. ..."
+                    f"{BAND}\n⚡ يا {_h(name)}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح.\n{BAND}",
+                    parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
@@ -2085,7 +2085,7 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
     def quick_reports(m):
-        dep, pur, top = totals_deposits_and_purchases_syp()
+        dep, pur, _ = totals_deposits_and_purchases_syp()
         lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
         # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
         try:
