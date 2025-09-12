@@ -526,6 +526,33 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
 
     kb.add(types.InlineKeyboardButton("⬅️ رجوع للمجموعات", callback_data="adm_feat_home:groups"))
     return kb
+# ⬇️ ضع الدوال هنا قبل register()
+
+def _prune_admin_msg_from_payload(request_id: int, payload: dict, admin_id: int, message_id: int):
+    """يشيل رسالة الأدمن الحالية من payload.admin_msgs (لو موجودة) ويحدّث الصف."""
+    try:
+        admin_msgs = (payload.get("admin_msgs") or [])
+        new_msgs = [x for x in admin_msgs if not (x.get("admin_id") == admin_id and x.get("message_id") == message_id)]
+        if len(new_msgs) != len(admin_msgs):
+            new_payload = dict(payload)
+            new_payload["admin_msgs"] = new_msgs
+            get_table("pending_requests").update({"payload": new_payload}).eq("id", request_id).execute()
+            return new_payload
+    except Exception:
+        pass
+    return payload
+
+def _maybe_delete_admin_message(call, request_id: int, payload: dict):
+    """لو الميزة مفعّلة يحذف رسالة الأدمن الحالية ويحدّث payload."""
+    if not DELETE_ADMIN_MESSAGE_ON_ACTION:
+        return payload
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+    return _prune_admin_msg_from_payload(request_id, payload, call.message.chat.id, call.message.message_id)
+
+# ⬆️ قبل register()
 
 def register(bot, history):
 
@@ -1044,6 +1071,7 @@ def register(bot, history):
             except Exception as e:
                 logging.exception('[ADMIN] failed to set claimed: %s', e)
             bot.answer_callback_query(call.id, '✅ تم الاستلام — أنت المتحكم بهذا الطلب الآن.')
+            payload = _maybe_delete_admin_message(call, request_id, claimed_payload)
             return
 
         # === تأجيل الطلب ===
@@ -1086,6 +1114,8 @@ def register(bot, history):
                 pass
             queue_cooldown_start(bot)
             return
+            payload = _maybe_delete_admin_message(call, request_id, new_payload)
+            return
 
         # === إلغاء الطلب ===
         if action == "cancel":
@@ -1118,7 +1148,7 @@ def register(bot, history):
             if typ in ("recharge", "wallet_recharge", "deposit"):
                 _clear_recharge_local_lock_safe(user_id)
 
-            _prompt_admin_note(bot, call.from_user.id, user_id)
+            payload = _maybe_delete_admin_message(call, request_id, payload)
             return
 
         # === قبول الطلب ===
@@ -1126,6 +1156,10 @@ def register(bot, history):
             # ✅ فحص صلاحية التأكيد (مهم)
             if not allowed(call.from_user.id, "queue:confirm"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
+
+            # احذف رسالة الأدمن إن كان الخيار مفعلاً
+            payload = _maybe_delete_admin_message(call, request_id, payload)
+
 
             typ      = (payload.get("type") or "").strip()
             hold_id  = payload.get("hold_id")
@@ -1213,8 +1247,8 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
-
             # ——— إعلانات ———
             elif typ in ("ads", "media"):
                 amt     = int(amt or payload.get("price", 0) or 0)
@@ -1257,8 +1291,8 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
-
             elif typ in ("syr_unit", "mtn_unit"):
                 price = int(payload.get("price", 0) or amt or 0)
                 num   = _extract_identifier(payload, req_text, ["number","msisdn","phone"])
@@ -1285,6 +1319,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
 
             elif typ in ("syr_bill", "mtn_bill"):
@@ -1312,6 +1347,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
 
             elif typ == "internet":
@@ -1337,8 +1373,8 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
-
             elif typ == "cash_transfer":
                 amt       = int(amt or payload.get("price", 0) or 0)
                 number    = payload.get("number")
@@ -1393,6 +1429,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
 
             elif typ in ("university_fees",):
@@ -1417,6 +1454,7 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
 
             elif typ in ("recharge", "wallet_recharge", "deposit"):
@@ -1472,6 +1510,7 @@ def register(bot, history):
 
                 _clear_recharge_local_lock_safe(user_id)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
+                payload = _maybe_delete_admin_message(call, request_id, payload)
                 return
 
             else:
