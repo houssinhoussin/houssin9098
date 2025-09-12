@@ -54,6 +54,25 @@ from services.admin_ledger import (
     top5_clients_week,
 )
 from config import ADMINS, ADMIN_MAIN_ID, CHANNEL_USERNAME, FORCE_SUB_CHANNEL_USERNAME
+
+# === Injected: bot username/link for channel messages ===
+try:
+    from os import getenv as _getenv
+    BOT_USERNAME = (_getenv("BOT_USERNAME") or "my_fast_shop_bot").lstrip("@")
+    BOT_LINK_HTML = f'<a href="https://t.me/{BOT_USERNAME}">@{BOT_USERNAME}</a>'
+except Exception:
+    BOT_USERNAME = "my_fast_shop_bot"
+    BOT_LINK_HTML = '<a href="https://t.me/my_fast_shop_bot">@my_fast_shop_bot</a>'
+
+def _append_bot_link_for_channel(_t):
+    try:
+        t = (_t or "").rstrip()
+        if "@"+BOT_USERNAME in t or "t.me/"+BOT_USERNAME in t or "t.me/" + BOT_USERNAME in t:
+            return t
+        return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
+    except Exception:
+        return _t
+# === End Injected ===
 from database.db import get_table, DEFAULT_TABLE
 
 # ===== Safe bot proxy to avoid NameError and record handlers at import time =====
@@ -393,6 +412,7 @@ def _features_markup(page: int = 0, page_size: int = 10):
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
@@ -449,6 +469,7 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_g:{group_name}:{prev_page}"),
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
@@ -485,6 +506,7 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
@@ -523,6 +545,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
         st = {"step": "ask_duration", "user_id": uid}
         _ban_pending[m.from_user.id] = st
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
             types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
@@ -557,6 +580,7 @@ def register(bot, history):
         st["step"] = "confirm"
         _ban_pending[m.from_user.id] = st
         uid = st.get("user_id")
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("✔️ تأكيد الحظر", callback_data="adm_ban:confirm"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_ban:cancel"),
@@ -608,6 +632,7 @@ def register(bot, history):
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
         _unban_pending[m.from_user.id] = {"step": "confirm", "user_id": uid}
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("✔️ تأكيد", callback_data="adm_unban:confirm"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_unban:cancel"),
@@ -673,6 +698,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ الحالة غير صالحة. أعد البدء.")
         st["text"] = m.text
         _msg_by_id_pending[m.from_user.id] = st
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("✔️ إرسال", callback_data=f"adm_msgid:send:{uid}"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_msgid:cancel"),
@@ -1412,6 +1438,7 @@ def admin_menu(msg):
         # رئيسي أم مساعد؟
         is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
         if is_primary:
+            kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
             kb.row("🎟️ أكواد خصم", "👤 إدارة عميل")
@@ -1422,6 +1449,7 @@ def admin_menu(msg):
 
         else:
             # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
+            kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("⬅️ رجوع")
         bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
@@ -1432,6 +1460,7 @@ def admin_menu(msg):
     @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     def bc_welcome(m):
         _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
@@ -1507,6 +1536,7 @@ def admin_menu(msg):
         if not body:
             return bot.reply_to(m, "❌ النص فارغ.")
         _broadcast_pending[m.from_user.id] = {"mode": "deal_confirm", "body": body, "dest": "clients"}
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bd_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bd_dest_channel"),
@@ -1692,6 +1722,7 @@ def admin_menu(msg):
         if not text:
             return bot.reply_to(m, "❌ النص فارغ.")
         _broadcast_pending[m.from_user.id] = {"mode": "free_confirm", "text": text, "dest": "clients"}
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bf_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bf_dest_channel"),
@@ -2440,3 +2471,52 @@ def _features_home_toggle(c):
         bot.answer_callback_query(c.id)
     except Exception as e:
         logging.exception("[ADMIN] feature home toggle failed: %s", e)
+
+
+
+# === Injected: global discount toggles (on/off) ===
+try:
+    from services.discount_service import list_discounts, set_discount_active
+except Exception:
+    list_discounts = None
+    set_discount_active = None
+
+def _disc_toggle_all(_to: bool) -> int:
+    if not list_discounts or not set_discount_active:
+        return 0
+    try:
+        items = list_discounts() or []
+    except Exception:
+        items = []
+    changed = 0
+    for it in items:
+        code = (it.get("code") if isinstance(it, dict) else None) or None
+        if not code:
+            continue
+        try:
+            set_discount_active(code, bool(_to))
+            changed += 1
+        except Exception:
+            pass
+    return changed
+
+def _disc_reply(chat_id, bot, to):
+    try:
+        n = _disc_toggle_all(bool(to))
+        bot.send_message(chat_id, f"تم تحديث {n} كود خصم إلى {'تشغيل' if to else 'إيقاف'}.")
+    except Exception as _e:
+        try:
+            bot.send_message(chat_id, "تعذّر تنفيذ طلب تشغيل/إيقاف جميع الأكواد.")
+        except Exception:
+            pass
+
+try:
+    @bot.message_handler(commands=['disc_all_on'])
+    def __disc_all_on(m):
+        _disc_reply(m.chat.id, bot, True)
+    @bot.message_handler(commands=['disc_all_off'])
+    def __disc_all_off(m):
+        _disc_reply(m.chat.id, bot, False)
+except Exception:
+    pass
+# === End Injected ===
