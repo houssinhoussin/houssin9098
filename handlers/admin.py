@@ -56,8 +56,8 @@ def _append_bot_link_for_channel(_t):
         if "@"+BOT_USERNAME in t or "t.me/"+BOT_USERNAME in t or "t.me/" + BOT_USERNAME in t:
             return t
         return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
-    except Exception:
-        return _t
+ except Exception:
+     return _t
  def _append_bot_link_for_user(_t: str) -> str:
     try:
         t = (_t or "").rstrip()
@@ -928,12 +928,18 @@ def register(bot, history):
         if data["mode"] == "text":
             if m.content_type != "text":
                 return bot.reply_to(m, "❌ المطلوب نص فقط.")
-            bot.send_message(uid, f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{m.text}\n{BAND}", parse_mode="HTML")
+            # نص
+            msg = f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{m.text}\n{BAND}"
+            bot.send_message(uid, _append_bot_link_for_user(msg), parse_mode="HTML")
         else:
             if m.content_type != "photo":
                 return bot.reply_to(m, "❌ المطلوب صورة فقط.")
+            # صورة
             cap = m.caption or ""
-            bot.send_photo(uid, m.photo[-1].file_id, caption=f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{cap}\n{BAND}", parse_mode="HTML")
+            cap_msg = f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{cap}\n{BAND}"
+            bot.send_photo(uid, m.photo[-1].file_id,
+                           caption=_append_bot_link_for_user(cap_msg),
+                           parse_mode="HTML")
         bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
 
     @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and (call.from_user.id in ADMINS or call.from_user.id == ADMIN_MAIN_ID))
@@ -1459,10 +1465,16 @@ def register(bot, history):
         if msg.text and msg.text.strip() == "/skip":
             bot.send_message(msg.chat.id, "✅ تم التخطي.")
         elif msg.content_type == "text":
-            bot.send_message(user_id, f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{msg.text.strip()}\n{BAND}", parse_mode="HTML")
+            note = f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{msg.text.strip()}\n{BAND}"
+            bot.send_message(user_id, _append_bot_link_for_user(note), parse_mode="HTML")
             bot.send_message(msg.chat.id, "✅ أُرسلت الملاحظة للعميل.")
         elif msg.content_type == "photo":
-            bot.send_photo(user_id, msg.photo[-1].file_id, caption=f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{BAND}", parse_mode="HTML")
+            cap = msg.caption or ""
+            cap_note = f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{cap}\n{BAND}"
+            bot.send_photo(user_id, msg.photo[-1].file_id,
+                           caption=_append_bot_link_for_user(cap_note),
+                           parse_mode="HTML")
+
             bot.send_message(msg.chat.id, "✅ أُرسلت الصورة للعميل.")
         else:
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم. ابعت نص أو صورة، أو /skip للتخطي.")
@@ -2431,31 +2443,30 @@ def _register_admin_roles(bot):
         bot.send_message(m.chat.id, "أرسل آيدي العميل:")
     @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
     def manage_user_get_id(m):
+        # 1) قراءة الآيدي
         try:
             uid = parse_user_id(m.text)
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح.")
-        # تحقق من وجوده
-        try:
-            # نحاول user_id ثم id ثم tg_id
-            row = None
-            for col in ("user_id","id","tg_id"):
-                try:
-                    q = (
-                        get_table(USERS_TABLE)
-                        .select("user_id, id, tg_id, name, full_name")
-                        .or_(f"user_id.eq.{uid},id.eq.{uid},tg_id.eq.{uid}")
-                        .limit(1)
-                        .execute()
-                    )
-                    rows = getattr(q, "data", None) or []
-                    row = rows[0] if rows else None
-                    if not row:
-                        return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
-                except Exception as e:
-                    import logging; logging.exception("manage_user: DB error: %s", e)
-                    return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
 
+        # 2) التحقق من وجوده (نجرب user_id/id/tg_id بفلتر OR واحد)
+        try:
+            q = (
+                get_table(USERS_TABLE)
+                .select("user_id, id, tg_id, name, full_name")
+                .or_(f"user_id.eq.{uid},id.eq.{uid},tg_id.eq.{uid}")
+                .limit(1)
+                .execute()
+            )
+            rows = getattr(q, "data", None) or []
+            row = rows[0] if rows else None
+            if not row:
+                return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
+        except Exception as e:
+            import logging; logging.exception("manage_user: DB error: %s", e)
+            return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
+
+        # 3) عرض قائمة إجراءات العميل
         _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
