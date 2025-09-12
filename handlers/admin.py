@@ -58,6 +58,16 @@ def _append_bot_link_for_channel(_t):
         return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
     except Exception:
         return _t
+ def _append_bot_link_for_user(_t: str) -> str:
+    try:
+        t = (_t or "").rstrip()
+        # لو الرابط موجود مسبقًا لا نكرر
+        if "@"+BOT_USERNAME in t or "t.me/"+BOT_USERNAME in t or "t.me/" + BOT_USERNAME in t:
+            return t
+        return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
+    except Exception:
+        return _t
+       
 # === End Injected ===
 from database.db import get_table, DEFAULT_TABLE
 
@@ -93,7 +103,7 @@ def _collect_clients_with_names():
     يتجاوز أي صف لا يحوي user_id رقمي.
     """
     try:
-        res = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").execute()
+        res = get_table(USERS_TABLE).select("user_id, id, tg_id, full_name, name, first_name").execute()
         rows = res.data or []
     except Exception:
         rows = []
@@ -749,6 +759,9 @@ def register(bot, history):
             uid = int(parts[2])
             text = st.get("text") or ""
             try:
+                text = _append_bot_link_for_user(text)
+                # إن كانت notify_user تدعم HTML، اتركها؛ إن لم تكن كذلك استبدل بالسطر التالي:
+                # bot.send_message(uid, text, parse_mode="HTML")
                 notify_user(bot, uid, text)
                 log_action(c.from_user.id, "user:message_by_id", reason=f"to:{uid}")
                 bot.send_message(c.message.chat.id, "✅ تم الإرسال.")
@@ -1561,7 +1574,8 @@ def register(bot, history):
             if st["dest"] == "clients":
                 for i, (uid, nm) in enumerate(_collect_clients_with_names(), 1):
                     try:
-                        bot.send_message(uid, _funny_welcome_text(nm))
+                        text = _append_bot_link_for_user(_funny_welcome_text(nm))
+                        bot.send_message(uid, text, parse_mode="HTML")
                         sent += 1
                     except Exception:
                         pass
@@ -1571,7 +1585,7 @@ def register(bot, history):
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
                     text = _append_bot_link_for_channel(_funny_welcome_text(None))
-                    bot.send_message(dest, text, parse_mode="HTML")
+                    bot.send_message(dest, _append_bot_link_for_channel(text), parse_mode="HTML")
                     sent = 1
                 except Exception:
                     pass
@@ -1643,7 +1657,7 @@ def register(bot, history):
             if st["dest"] == "clients":
                 for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
                     try:
-                        bot.send_message(uid, text, parse_mode="HTML")
+                        bot.send_message(uid, _append_bot_link_for_user(text), parse_mode="HTML")
                         sent += 1
                     except Exception:
                         pass
@@ -1652,7 +1666,8 @@ def register(bot, history):
             else:
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
-                    bot.send_message(dest, text, parse_mode="HTML")
+                    bot.send_message(dest, _append_bot_link_for_channel(text), parse_mode="HTML")
+
                     sent = 1
                 except Exception:
                     pass
@@ -1806,7 +1821,7 @@ def register(bot, history):
             if st["dest"] == "clients":
                 for i, (uid, _) in enumerate(_collect_clients_with_names(), 1):
                     try:
-                        bot.send_message(uid, st["text"], parse_mode="HTML")
+                        bot.send_message(uid, _append_bot_link_for_user(st["text"]), parse_mode="HTML")
                         sent += 1
                     except Exception:
                         pass
@@ -1815,7 +1830,7 @@ def register(bot, history):
             else:
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
-                    bot.send_message(dest, st["text"], parse_mode="HTML")
+                    bot.send_message(dest, _append_bot_link_for_channel(st["text"]), parse_mode="HTML")
                     sent = 1
                 except Exception:
                     pass
@@ -2422,12 +2437,25 @@ def _register_admin_roles(bot):
             return bot.reply_to(m, "❌ آيدي غير صالح.")
         # تحقق من وجوده
         try:
-            ex = get_table(USERS_TABLE).select("user_id, name, full_name").eq("user_id", uid).limit(1).execute()
-            row = (getattr(ex, "data", None) or [None])[0]
-            if not row:
-                return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود.")
-        except Exception:
-            return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
+            # نحاول user_id ثم id ثم tg_id
+            row = None
+            for col in ("user_id","id","tg_id"):
+                try:
+                    q = (
+                        get_table(USERS_TABLE)
+                        .select("user_id, id, tg_id, name, full_name")
+                        .or_(f"user_id.eq.{uid},id.eq.{uid},tg_id.eq.{uid}")
+                        .limit(1)
+                        .execute()
+                    )
+                    rows = getattr(q, "data", None) or []
+                    row = rows[0] if rows else None
+                    if not row:
+                        return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
+                except Exception as e:
+                    import logging; logging.exception("manage_user: DB error: %s", e)
+                    return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
+
         _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
