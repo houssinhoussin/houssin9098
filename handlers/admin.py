@@ -1598,6 +1598,7 @@ def register(bot, history):
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
                     text = _append_bot_link_for_channel(_funny_welcome_text(None))
+                    bot.send_message(dest, text, parse_mode="HTML")
                     sent = 1
                 except Exception:
                     pass
@@ -1912,8 +1913,9 @@ def register(bot, history):
             try:
                 admin_msgs = (payload.get("admin_msgs") or [])
                 admin_msgs.append({"admin_id": m.chat.id, "message_id": sent.message_id})
-                payload["admin_msgs"] = admin_msgs
+                payload["admin_msgs"] = admin_msgs[-20:]  # احتفظ بآخر 20 فقط
                 get_table("pending_requests").update({"payload": payload}).eq("id", rid).execute()
+
             except Exception as ee:
                 logging.exception("[ADMIN] update admin_msgs failed: %s", ee)
 
@@ -2171,8 +2173,13 @@ def _register_admin_roles(bot):
             elif act == "maint_off":
                 set_maintenance(False); bot.answer_callback_query(c.id, "تم إلغاء الصيانة.")
             elif act == "health":
-                ok = "✅ كل شيء سليم" if get_table("features") else "ℹ️ قاعدة البيانات ترد"
-                bot.answer_callback_query(c.id, ok, show_alert=True)
+                try:
+                    _ = get_table("features").select("id").limit(1).execute()
+                    msg = "✅ كل شيء سليم"
+                except Exception:
+                    msg = "❌ مشكلة في الاتصال بقاعدة البيانات"
+                bot.answer_callback_query(c.id, msg, show_alert=True)
+
             elif act == "cleanup":
                 try:
                     purge_state()           # من services.state_service (مستوردة أعلى الملف)
