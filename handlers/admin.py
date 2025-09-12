@@ -1453,7 +1453,16 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     def bc_welcome(m: types.Message):
         _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
-        kb = _dest_buttons("bw")
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.row(
+            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bw_dest_clients"),
+            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bw_dest_channel"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("✅ بث الآن", callback_data="bw_confirm"),
+            types.InlineKeyboardButton("❌ إلغاء",   callback_data="bw_cancel"),
+        )
+
         bot.reply_to(
             m,
             "🔎 *معاينة رسالة الترحيب:*\n"
