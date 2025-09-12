@@ -419,7 +419,6 @@ def _features_markup(page: int = 0, page_size: int = 10):
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
-        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
@@ -476,7 +475,6 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
-        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_g:{group_name}:{prev_page}"),
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
@@ -489,36 +487,6 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
         types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_gtoggle:{group_name}:0:{page}")
     )
     kb.add(types.InlineKeyboardButton("⬅️ رجوع للمجموعات", callback_data="adm_feat_home:groups"))
-    return kb
-
-
-
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    page = max(0, min(page, total_pages - 1))
-    start_i = page * page_size
-    subset = items[start_i : start_i + page_size]
-
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    for it in subset:
-        k = it.get("key")
-        label = (it.get("label") or k) or ""
-        active = bool(it.get("active", True))
-        lamp = "🟢" if active else "🔴"
-        to = 0 if active else 1
-        kb.add(types.InlineKeyboardButton(
-            text=f"{lamp} {label}",
-            callback_data=f"adm_feat_t:{k}:{to}:{page}"
-        ))
-
-    if total_pages > 1:
-        prev_page = (page - 1) % total_pages
-        next_page = (page + 1) % total_pages
-        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
-        kb.row(
-            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_p:{prev_page}"),
-            types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
-            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_p:{next_page}")
-        )
     return kb
 
 def register(bot, history):
@@ -760,7 +728,7 @@ def register(bot, history):
             except Exception: pass
 
 
-    @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and allowed(m.from_user.id, "feature:toggle"))
     def features_home(m):
         try:
             bot.send_message(m.chat.id, "اختر طريقة العرض:", reply_markup=_features_home_markup())
@@ -1464,7 +1432,7 @@ def register(bot, history):
         except Exception:
             bot.send_message(c.message.chat.id, "قائمة الأدمن.")
     def admin_menu(msg):
-        if msg.from_user.id not in ADMINS:
+        if not allowed(msg.from_user.id, "admin:menu"):
             return bot.reply_to(msg, "صلاحية الأدمن فقط.")
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
