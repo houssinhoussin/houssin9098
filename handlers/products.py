@@ -1070,7 +1070,6 @@ def setup_inline_handlers(bot, admin_ids):
             _price_line = f"💵 السعر: {_fmt_syp(price_syp)}"
 
         admin_msg = (
-admin_msg = (
             f"💰 رصيد المستخدم: {balance:,} ل.س\n"
             f"🆕 طلب جديد\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
