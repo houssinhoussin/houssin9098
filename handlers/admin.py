@@ -2106,7 +2106,7 @@ def _register_admin_roles(bot):
 
     
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
-@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
     def system_actions(c):
         try:
             act = c.data.split(":",1)[1]
