@@ -2104,6 +2104,12 @@ def _register_admin_roles(bot):
     # =========================
     # 🎟️ أكواد/نِسَب خصم
     # =========================
+    from services.discount_service import (
+        list_discounts, create_discount, set_discount_active, discount_stats
+    )
+    from datetime import datetime
+    from telebot import types
+    # نفترض أن ADMINS, ADMIN_MAIN_ID, parse_user_id, USERS_TABLE, get_table معرفة فوق
 
     def _is_admin(uid: int) -> bool:
         return (uid in ADMINS) or (uid == ADMIN_MAIN_ID)
@@ -2123,57 +2129,48 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("➕ خصم عام 3٪", callback_data="disc:new:global:3"),
             types.InlineKeyboardButton("➕ خصم لعميل",   callback_data="disc:new_user"),
         )
-        # سرد الموجود
         try:
             rows = list_discounts(limit=25) or []
         except Exception:
             rows = []
-        if rows:
-            for r in rows:
-                did = str(r.get("id"))
-                pct = int(r.get("percent", 0))
-                scope = (r.get("scope") or "global")
-                ended = bool(r.get("ends_at"))
-                active = bool(r.get("active"))
-                title = f"٪{pct} — {'عام' if scope=='global' else 'عميل'}"
-                if scope != "global":
-                    uid = r.get('user_id') or r.get('user')
-                    title += f" (ID:{uid})"
-                state = "🟢" if active else "🔴"
-                if ended:
-                    state = "⏳"  # منتهي زمنياً
-                to = '0' if active else '1'
-                kb.add(types.InlineKeyboardButton(f"{state} {title}", callback_data=f"disc:toggle:{did}:{to}"))
-                # سطر ثانٍ لأزرار الإدارة الفردية
-                row = types.InlineKeyboardMarkup(row_width=3)
-                # ملاحظة: سنعالج الكولباكات أدناه
-                kb.row(
-                    types.InlineKeyboardButton("⏳ انهاء الآن", callback_data=f"disc:end:{did}"),
-                    types.InlineKeyboardButton("🗑 حذف", callback_data=f"disc:delete:{did}")
-                )
+        for r in rows:
+            did    = str(r.get("id"))
+            pct    = int(r.get("percent") or 0)
+            scope  = (r.get("scope") or "global").lower()
+            ended  = bool(r.get("ends_at"))
+            active = bool(r.get("active"))
+            title  = f"٪{pct} — {'عام' if scope=='global' else 'عميل'}"
+            if scope != "global":
+                uid = r.get('user_id') or r.get('user')
+                title += f" (ID:{uid})"
+            state = "🟢" if active else "🔴"
+            if ended: state = "⏳"
+            to = '0' if active else '1'
+            kb.add(types.InlineKeyboardButton(f"{state} {title}", callback_data=f"disc:toggle:{did}:{to}"))
+            kb.row(
+                types.InlineKeyboardButton("⏳ انهاء الآن", callback_data=f"disc:end:{did}"),
+                types.InlineKeyboardButton("🗑 حذف",        callback_data=f"disc:delete:{did}"),
+            )
+        kb.row(
+            types.InlineKeyboardButton("🟢 تشغيل جميع الأكواد", callback_data="disc:all:1"),
+            types.InlineKeyboardButton("🔴 إيقاف جميع الأكواد", callback_data="disc:all:0"),
+        )
         kb.add(types.InlineKeyboardButton("📊 إحصاءات الاستخدام", callback_data="disc:stats"))
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.send_message(m.chat.id, "لوحة الخصومات:", reply_markup=kb)
 
-                kb.row(
-                    types.InlineKeyboardButton("🟢 تشغيل جميع الأكواد", callback_data="disc:all:1"),
-                    types.InlineKeyboardButton("🔴 إيقاف جميع الأكواد", callback_data="disc:all:0"),
-                )
-
-    # حالة داخليّة للمشرف أثناء إنشاء خصم لمستخدم
+    # حالة إنشاء خصم لمستخدم
     _disc_new_user_state: dict[int, dict] = {}
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
     def discounts_actions(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
-
         parts = (c.data or "").split(":")
         act = parts[1] if len(parts) > 1 else None
         if not act:
             return bot.answer_callback_query(c.id)
 
-        # إنشاء خصم عام: disc:new:<scope>:<percent>  (scope = global)
         if act == "new":
             if len(parts) < 4:
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
@@ -2183,29 +2180,20 @@ def _register_admin_roles(bot):
                 bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم.")
             except Exception as e:
                 bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
-            try:
-                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception:
-                pass
             return discount_menu(c.message)
 
-        # بدء إنشاء خصم لمستخدم محدد
         elif act == "new_user":
             _disc_new_user_state[c.from_user.id] = {"step": "ask_user"}
-            bot.answer_callback_query(c.id)
             kb = types.InlineKeyboardMarkup(row_width=2)
-            kb.row(
-                types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"),
-                types.InlineKeyboardButton("✖️ إلغاء", callback_data="disc:cancel")
-            )
-            bot.send_message(
+            kb.row(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"),
+                   types.InlineKeyboardButton("✖️ إلغاء", callback_data="disc:cancel"))
+            bot.answer_callback_query(c.id)
+            return bot.send_message(
                 c.message.chat.id,
-                "أرسل آيدي العميل للخصم (أرقام فقط):\nيمكنك دائمًا كتابة /cancel للإلغاء.",
+                "أرسل آيدي العميل (أرقام فقط):\nيمكنك كتابة /cancel للإلغاء.",
                 reply_markup=kb
             )
 
-
-        # تفعيل/إيقاف خصم موجود: disc:toggle:<discount_id>:<0|1>
         elif act == "toggle":
             if len(parts) < 4:
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
@@ -2217,7 +2205,37 @@ def _register_admin_roles(bot):
                 bot.answer_callback_query(c.id, "تعذّر التبديل.")
             return discount_menu(c.message)
 
-        # إحصاءات الخصومات
+        elif act == "all":
+            to = bool(int(parts[2])) if len(parts) > 2 else False
+            try:
+                n = _disc_toggle_all(to)
+                bot.answer_callback_query(c.id, f"تم تحديث {n} كود.")
+            except Exception:
+                bot.answer_callback_query(c.id, "تعذّر التحديث.")
+            return discount_menu(c.message)
+
+        elif act == "end":
+            if len(parts) < 3:
+                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
+            did = parts[2]
+            try:
+                get_table('discounts').update({"ends_at": datetime.utcnow().isoformat()}).eq("id", did).execute()
+                bot.answer_callback_query(c.id, "⏳ تم إنهاء الخصم.")
+            except Exception:
+                bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
+            return discount_menu(c.message)
+
+        elif act == "delete":
+            if len(parts) < 3:
+                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
+            did = parts[2]
+            try:
+                get_table('discounts').delete().eq("id", did).execute()
+                bot.answer_callback_query(c.id, "🗑 تم الحذف.")
+            except Exception:
+                bot.answer_callback_query(c.id, "تعذّر الحذف.")
+            return discount_menu(c.message)
+
         elif act == "stats":
             try:
                 stats = discount_stats()
@@ -2226,49 +2244,16 @@ def _register_admin_roles(bot):
                 text = "لا تتوفر إحصاءات."
             bot.answer_callback_query(c.id)
             return bot.send_message(c.message.chat.id, text)
-        # تشغيل/إيقاف جميع الأكواد: disc:all:<0|1>
-        elif act == "all":
-            if len(parts) < 3:
-                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
-            to = parts[2]
-            try:
-                from handlers.admin import _disc_toggle_all  # موجودة بأسفل الملف
-                n = _disc_toggle_all(bool(int(to)))
-                bot.answer_callback_query(c.id, f"تم تحديث {n} كود.")
-            except Exception:
-                bot.answer_callback_query(c.id, "تعذّر التحديث.")
-            return discount_menu(c.message)
 
-        # انهاء خصم الآن: disc:end:<id>
-        elif act == "end":
-            if len(parts) < 3:
-                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
-            did = parts[2]
-            from services.discount_service import end_discount_now
-            try:
-                end_discount_now(did)
-                bot.answer_callback_query(c.id, "⏳ تم إنهاء الخصم.")
-            except Exception:
-                bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
-            return discount_menu(c.message)
+    @bot.callback_query_handler(func=lambda c: c.data == "disc:cancel")
+    def disc_cancel_cb(c):
+        _disc_new_user_state.pop(c.from_user.id, None)
+        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        except Exception: pass
+        return discount_menu(c.message)
 
-        # حذف خصم: disc:delete:<id>
-        elif act == "delete":
-            if len(parts) < 3:
-                return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
-            did = parts[2]
-            from services.discount_service import delete_discount
-            try:
-                delete_discount(did)
-                bot.answer_callback_query(c.id, "🗑 تم الحذف.")
-            except Exception:
-                bot.answer_callback_query(c.id, "تعذّر الحذف.")
-            return discount_menu(c.message)
-
-    # استلام آيدي المستخدم لخصم فردي
     @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
     def disc_new_user_get_id(m):
-        # بارسر مرن
         uid = None
         try:
             uid = parse_user_id(m.text)
@@ -2278,14 +2263,10 @@ def _register_admin_roles(bot):
             import re
             nums = re.findall(r"\d+", m.text or "")
             if nums:
-                try:
-                    uid = int("".join(nums))
-                except Exception:
-                    uid = None
+                try: uid = int("".join(nums))
+                except Exception: uid = None
         if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة أو /cancel.")
-
-        # تحقّق من وجوده بجدول العملاء
         try:
             ex = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
             if not (getattr(ex, "data", None) or []):
@@ -2300,69 +2281,55 @@ def _register_admin_roles(bot):
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         return bot.send_message(m.chat.id, "اختر نسبة الخصم:", reply_markup=kb)
 
-    @bot.callback_query_handler(func=lambda c: c.data == "disc:cancel")
-    def disc_cancel_cb(c):
-        _disc_new_user_state.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
-        except Exception: pass
-        return discount_menu(c.message)
-
-        # تحقق أنه موجود في جدول العملاء
-        try:
-            ex = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
-            if not (getattr(ex, "data", None) or []):
-                return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في العملاء.")
-        except Exception:
-            return bot.reply_to(m, "❌ تعذّر التحقق من قاعدة البيانات الآن.")
-
-        _disc_new_user_state[m.from_user.id] = {"step": "ask_pct", "user_id": uid}
-        kb = types.InlineKeyboardMarkup(row_width=3)
-        for p in (1, 2, 3):
-            kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
-        return bot.send_message(m.chat.id, "اختر نسبة الخصم:", reply_markup=kb)
-
-    # اختيار النسبة وإنشاء خصم للمستخدم
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
     def disc_new_user_choose_pct(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
-        # خزن الاختيار واسأل عن المدّة
-        _disc_new_user_state[c.from_user.id] = {"step": "ask_duration", "user_id": int(uid), "pct": int(pct)}
-        kb = types.InlineKeyboardMarkup(row_width=3)
+        uid = int(uid); pct = int(pct)
+        _disc_new_user_state[c.from_user.id] = {"step": "ask_dur", "user_id": uid, "pct": pct}
+        kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
-            types.InlineKeyboardButton("🕒 يوم",     callback_data=f"disc:new_user_dur:{uid}:{pct}:1"),
-            types.InlineKeyboardButton("🗓️ 3 أيام",  callback_data=f"disc:new_user_dur:{uid}:{pct}:3"),
-            types.InlineKeyboardButton("📅 أسبوع",   callback_data=f"disc:new_user_dur:{uid}:{pct}:7"),
+            types.InlineKeyboardButton("يوم",    callback_data=f"disc:new_user_dur:{uid}:{pct}:1"),
+            types.InlineKeyboardButton("3 أيام", callback_data=f"disc:new_user_dur:{uid}:{pct}:3"),
         )
-        kb.add(types.InlineKeyboardButton("♾ بدون مدة (يدوي)", callback_data=f"disc:new_user_dur:{uid}:{pct}:0"))
+        kb.row(
+            types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_user_dur:{uid}:{pct}:7"),
+            types.InlineKeyboardButton("♾ يدوي", callback_data=f"disc:new_user_dur:{uid}:{pct}:0"),
+        )
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.answer_callback_query(c.id)
-        bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
+        return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
+
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
-        from services.discount_service import create_discount
-        days = int(days)
         try:
-            create_discount(scope="user", user_id=int(uid), percent=int(pct), days=(days or None))
+            create_discount(scope="user", user_id=int(uid), percent=int(pct), days=(int(days) or None))
             _disc_new_user_state.pop(c.from_user.id, None)
             bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
         except Exception as e:
-        bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
-        return discount_menu(c.message)
-
-        except Exception as e:
             bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
-        try:
-            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception:
-            pass
         return discount_menu(c.message)
 
-        # =========================
+    def _disc_toggle_all(_to: bool) -> int:
+        try:
+            items = list_discounts() or []
+        except Exception:
+            return 0
+        changed = 0
+        for it in items:
+            did = str(it.get("id"))
+            try:
+                set_discount_active(did, bool(_to))
+                changed += 1
+            except Exception:
+                pass
+        return changed
+
+    # =========================
     # 👤 إدارة عميل — مبسّطة
     # =========================
     _manage_user_state = {}
