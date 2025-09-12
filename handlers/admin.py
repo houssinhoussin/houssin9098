@@ -21,18 +21,7 @@ def _match_admin_alias(txt: str, aliases: list[str]) -> bool:
 
 # --- Helper: parse telegram user id from text (digits only) ---
 def parse_user_id(text: str) -> int | None:
-    try:
-        if not isinstance(text, str):
-            return None
-        s = text.strip()
-        m = _re_mod.search(r"(\d{5,})", s)
-        if m:
-            return int(m.group(1))
-        return int(s)
-    except Exception:
-        return None
-
-
+    
 import re
 import logging
 import os
@@ -510,7 +499,7 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل المراد حظره.\n/ cancel لإلغاء")
+        bot.send_message(m.chat.id, "أرسل آيدي العميل المراد حظره.\n/cancel لإلغاء")
 
     @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def ban_get_id(m):
@@ -1626,7 +1615,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ لازم خيارين فريدين على الأقل.")
 
         _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
-
+        kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
@@ -1638,18 +1627,6 @@ def register(bot, history):
 
         preview = "🔎 *معاينة الاستفتاء:*\n" + q + "\n" + "\n".join(f"- {o}" for o in opts)
         bot.reply_to(m, preview, parse_mode="Markdown", reply_markup=kb)
-
-        _broadcast_pending[m.from_user.id] = {"mode": "poll_confirm", "q": q, "opts": opts, "dest": "clients"}
-        kb.row(
-            types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bp_dest_clients"),
-            types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bp_dest_channel"),
-        )
-        kb.row(
-            types.InlineKeyboardButton("✅ بث الآن", callback_data="bp_confirm"),
-            types.InlineKeyboardButton("❌ إلغاء",   callback_data="bp_cancel"),
-        )
-        bot.reply_to(m, f"🔎 *معاينة الاستفتاء:*\n{q}\n- {opts[0]}\n- {opts[1]}\n- {opts[2]}\n- {opts[3]}",
-                     parse_mode="Markdown", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
     def _bp_flow(c):
@@ -1906,15 +1883,6 @@ def register(bot, history):
         bot.answer_callback_query(call.id, "تم التحديث.")
 
     # ===== لوحة المزايا (Feature Flags) =====
-    @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and m.from_user.id in ADMINS)
-    def features_menu(m):
-        try:
-            kb = _features_markup(page=0)
-        except Exception as e:
-            logging.exception("[ADMIN] features markup failed: %s", e)
-            kb = types.InlineKeyboardMarkup(row_width=1)
-            kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
-        bot.send_message(m.chat.id, "بدّل حالة المزايا التالية:", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
     def adm_feature_toggle(call: types.CallbackQuery):
@@ -2005,17 +1973,6 @@ def register(bot, history):
         txt = summarize_all_admins(days=7)
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
-
-    @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
-    def assistants_daily_report(m):
-        txt = summarize_assistants(days=7)
-        bot.send_message(m.chat.id, txt, parse_mode="HTML")
-
-    @bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
-    def all_admins_report(m):
-        txt = summarize_all_admins(days=7)
-        bot.send_message(m.chat.id, txt, parse_mode="HTML")
-
     # ==== بث للجميع ====
     @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     def broadcast_menu(m):
@@ -2092,10 +2049,9 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("🔁 إعادة فحص الإشتراك الإجباري", callback_data="sys:forcesub"),
             types.InlineKeyboardButton("📜 آخر السجلات", callback_data="sys:logs"),
         )
-        bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
-
-    
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+        bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
+        
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
     def system_actions(c):
         try:
@@ -2450,54 +2406,6 @@ def _register_admin_roles(bot):
                 bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
-
-@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_t:"))
-def _features_toggle_one(c):
-    try:
-        _, key, to, page = c.data.split(":", 3)
-        to = int(to)
-        set_feature_active(key, bool(to))
-        try:
-            grouped = list_features_grouped() or {}
-        except Exception:
-            grouped = {}
-        found_group = None
-        for g, items in grouped.items():
-            if any((it.get("key") == key) for it in (items or [])):
-                found_group = g
-                break
-        kb = _features_group_items_markup(found_group, int(page)) if found_group else _features_markup(int(page))
-        try: bot.answer_callback_query(c.id, "تم التبديل.")
-        except Exception: pass
-        bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
-    except Exception as e:
-        logging.exception("[ADMIN] feature toggle failed: %s", e)
-        try: bot.answer_callback_query(c.id, "تعذّر التبديل")
-        except Exception: pass
-
-
-@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_p:"))
-def _features_page_cb(c):
-    try:
-        _, page = c.data.split(":", 1)
-        page = int(page)
-        kb = _features_markup(page)
-        bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
-    except Exception as e:
-        logging.exception("[ADMIN] feature page cb failed: %s", e)
-
-
-@bot.callback_query_handler(func=lambda c: c.data in ("adm_feat_home:flat","adm_feat_home:groups"))
-def _features_home_toggle(c):
-    try:
-        mode = "flat" if c.data.endswith(":flat") else "groups"
-        kb = _features_markup(0) if mode == "flat" else _features_groups_markup()
-        bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
-        bot.answer_callback_query(c.id)
-    except Exception as e:
-        logging.exception("[ADMIN] feature home toggle failed: %s", e)
-
-
 
 # === Injected: global discount toggles (on/off) ===
 try:
