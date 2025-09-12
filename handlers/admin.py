@@ -2332,28 +2332,37 @@ def _register_admin_roles(bot):
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
     def manage_user_actions(c):
         try:
-            _, act, uid = c.data.split(":")
+            _, act, uid = c.data.split(":", 2)  # نقيّد التقسيم إلى 3 أجزاء
             uid = int(uid)
         except Exception:
+            try:
+                bot.answer_callback_query(c.id, "❌ صيغة غير صحيحة.")
+            except Exception:
+                pass
+            return
 
         if act == "back":
             _manage_user_state.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id)
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
             return admin_menu(c.message)
-            return bot.answer_callback_query(c.id, "❌ غير مفهوم")
+
         if act == "profile":
             try:
-                r = get_table(USERS_TABLE).select("user_id,balance,name,full_name,created_at").eq("user_id", uid).limit(1).execute()
-                row = (getattr(r, "data", None) or [None])[0]
+                r = get_table(USERS_TABLE).select(
+                    "user_id,balance,name,full_name,created_at"
+                ).eq("user_id", uid).limit(1).execute()
+                row = (getattr(r, "data", None) or [None])[0] or {}
                 text = ("👤 عميل\n"
                         f"ID: <code>{uid}</code>\n"
-                        f"الاسم: {(row or {}).get('full_name') or (row or {}).get('name') or ''}\n"
-                        f"الرصيد: {(row or {}).get('balance') or 0} ل.س")
+                        f"الاسم: {row.get('full_name') or row.get('name') or ''}\n"
+                        f"الرصيد: {int(row.get('balance') or 0):,} ل.س")
             except Exception:
                 text = "لا يمكن جلب البيانات."
             bot.send_message(c.message.chat.id, text, parse_mode="HTML")
-            
+
             # اطلب الآيدي من جديد
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
             try:
@@ -2362,21 +2371,37 @@ def _register_admin_roles(bot):
                 bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
-return bot.answer_callback_query(c.id)
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
+
         if act == "message":
             _msg_by_id_pending[c.from_user.id] = {"step": "ask_text", "user_id": uid}
             bot.send_message(c.message.chat.id, f"اكتب الرسالة للعميل <code>{uid}</code>:", parse_mode="HTML")
-            return bot.answer_callback_query(c.id)
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
+
         # ban/unban shortcuts reuse existing handlers by sending text commands is OK, keeping it simple.
+
         if act == "last5":
             try:
-                r = get_table("purchases").select("created_at, product, price").eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
-                rows = getattr(r,"data",[]) or []
-                lines = ["🧾 آخر 5 عمليات:"] + [f"- {x.get('created_at','')[:16]} — {x.get('product','')} — {int(x.get('price',0)):,} ل.س" for x in rows]
+                r = get_table("purchases").select(
+                    "created_at, product, price"
+                ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
+                rows = getattr(r, "data", []) or []
+                lines = ["🧾 آخر 5 عمليات:"] + [
+                    f"- {str(x.get('created_at',''))[:16]} — {x.get('product','')} — {int(x.get('price',0)):,} ل.س"
+                    for x in rows
+                ]
                 bot.send_message(c.message.chat.id, "\n".join(lines))
             except Exception:
                 bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
-            
+
             # اطلب الآيدي من جديد
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
             try:
@@ -2385,16 +2410,35 @@ return bot.answer_callback_query(c.id)
                 bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
-return bot.answer_callback_query(c.id)
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
+
         if act == "refund":
             bot.send_message(c.message.chat.id, "اكتب قيمة التعويض (ل.س).")
             _refund_state[c.from_user.id] = {"user_id": uid}
-            return bot.answer_callback_query(c.id)
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
+
+        # فرع افتراضي لأي فعل غير معروف
+        try:
+            bot.answer_callback_query(c.id, "❌ غير مفهوم")
+        except Exception:
+            pass
+
 
     _refund_state = {}
+
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
     def _refund_amount(m):
         st = _refund_state.get(m.from_user.id)
+        if not st:
+            return
         uid = st["user_id"]
         try:
             amount = int(m.text)
@@ -2416,8 +2460,6 @@ return bot.answer_callback_query(c.id)
                 bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
-    
-
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_t:"))
 def _features_toggle_one(c):
