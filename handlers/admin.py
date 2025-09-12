@@ -90,19 +90,28 @@ def _collect_clients_with_names():
     """
     يرجع قائمة (user_id, name) من جدول العملاء المحدد.
     الأعمدة المقبولة للاسم: full_name / name / first_name (حسب المتوفر).
+    يتجاوز أي صف لا يحوي user_id رقمي.
     """
     try:
         res = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").execute()
         rows = res.data or []
     except Exception:
         rows = []
+
     out = []
     for r in rows:
         uid = r.get("user_id") or r.get("id") or r.get("tg_id")
-        if not uid:
+        if uid is None:
             continue
+        try:
+            uid_int = int(str(uid).strip())
+        except (TypeError, ValueError):
+            # نتجاهل الصف الذي لا يحمل آيدي رقمي
+            continue
+
         nm = r.get("full_name") or r.get("name") or r.get("first_name")
-        out.append((int(uid), nm))
+        nm = (nm or "").strip() or None
+        out.append((uid_int, nm))
     return out
 
 from services.state_service import purge_state
