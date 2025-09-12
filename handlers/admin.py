@@ -2327,7 +2327,7 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("🧾 آخر 5 طلبات", callback_data=f"mu:last5:{uid}"),
         )
         kb.row(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
-bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
+    bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
     def manage_user_actions(c):
