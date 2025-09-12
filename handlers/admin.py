@@ -1431,7 +1431,7 @@ def register(bot, history):
             return admin_menu(c.message)
         except Exception:
             bot.send_message(c.message.chat.id, "قائمة الأدمن.")
-def admin_menu(msg):
+    def admin_menu(msg):
         if msg.from_user.id not in ADMINS:
             return bot.reply_to(msg, "صلاحية الأدمن فقط.")
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
