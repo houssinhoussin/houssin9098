@@ -263,6 +263,13 @@ def _admin_mention(bot, user_id: int) -> str:
 def _safe(v, dash="—"):
     v = ("" if v is None else str(v)).strip()
     return v if v else dash
+    
+import html
+def _h(x):
+    try:
+        return html.escape(str(x or ""))
+    except Exception:
+        return ""
 
 # ====== Helpers for extracting number / ID / code safely ======
 def _pick_first(*vals):
@@ -1007,12 +1014,25 @@ def register(bot, history):
                 new_payload = dict(payload)
                 new_payload['locked_by'] = int(call.from_user.id)
                 new_payload['locked_by_username'] = locked_by_username
-                get_table('pending_requests').update({'payload': new_payload}).eq('id', request_id).execute()
+
+                # 👇 تحديث ذرّي: لا ينجح إلا إذا كان القفل فارغًا حاليًا
+                res = (
+                    get_table('pending_requests')
+                    .update({'payload': new_payload})
+                    .eq('id', request_id)
+                    .filter('payload->>locked_by', 'is', 'null')
+                    .execute()
+                )
+                if not getattr(res, "data", None):
+                    return bot.answer_callback_query(call.id, "🔒 الطلب مُقفل للتو من أدمن آخر.")
+
                 _disable_others(except_aid=call.message.chat.id, except_mid=call.message.message_id)
                 _mark_locked_here()
                 payload = new_payload  # حدّث النسخة المحلية
+
             except Exception as e:
                 logging.exception('[ADMIN] failed to set lock: %s', e)
+
 
         # === زر الاستلام (📌 استلمت) ===
         if action == 'claim':
@@ -1169,8 +1189,9 @@ def register(bot, history):
                     before, after = amt, amt
                 msg_lines = [
                     f"{BAND}",
-                    f"🎉 تمام يا {name}! تم تحويل «{product_name}» لآيدي «{_safe(player_id)}».",
-                ]
+                    f"🎉 تمام يا {_h(name)}! تم تحويل «{_h(product_name)}» لآيدي «{_h(_safe(player_id))}».",
+                    ]
+
                 if before != after:
                     try:
                         percent = max(0, int(round((before - after) * 100.0 / max(1, before))))
@@ -1252,9 +1273,11 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n✅ تمام يا {name}! تم تحويل {unit_name} للرقم «{_safe(num)}» "
+                    f"{BAND}\n✅ تمام يا {_h(name)}! تم تحويل {_h(unit_name)} للرقم «{_h(_safe(num))}» "
                     f"وتم خصم {_fmt_syp(price)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
+                )
+
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
@@ -1279,7 +1302,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🧾 تمام يا {name}! تم دفع {label} للرقم «{_safe(num)}» "
+                    f"{BAND}\n🧾 تمام يا {_h(name)}! تم دفع {_h(label)} للرقم «{_h(_safe(num))}» "
                     f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
@@ -1308,7 +1331,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🌐 تمام يا {name}! تم دفع فاتورة الإنترنت ({name_lbl}) للرقم «{_safe(phone)}» "
+                    f"{BAND}\n🌐 تمام يا {_h(name)}! تم دفع فاتورة الإنترنت ({_h(name_lbl)}) للرقم «{_h(_safe(phone))}» "
                     f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
@@ -1332,7 +1355,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n💸 تمام يا {name}! تم تنفيذ {name_lbl} للرقم «{_safe(number)}» "
+                    f"{BAND}\n💸 تمام يا {_h(name)}! تم تنفيذ {_h(name_lbl)} للرقم «{_h(_safe(number))}» "
                     f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML",
                 )
@@ -1360,7 +1383,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🏢 تمام يا {name}! تم تنفيذ {name_lbl} للمستفيد «{_safe(beneficiary_number)}» "
+                    f"{BAND}\n🏢 تمام يا {_h(name)}! تم تنفيذ {_h(name_lbl)} للمستفيد «{_h(_safe(beneficiary_number))}» "
                     f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML",
                 )
@@ -1388,7 +1411,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🎓 تمام يا {name}! تم دفع {name_lbl} للرقم الجامعي «{_safe(university_id)}» "
+                    f"{BAND}\n🎓 تمام يا {_h(name)}! تم دفع {_h(name_lbl)} للرقم الجامعي «{_h(_safe(university_id))}» "
                     f"وتم خصم {_fmt_syp(amt)} من محفظتك.\n{BAND}",
                     parse_mode="HTML"
                 )
@@ -1442,7 +1465,7 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n⚡ يا {name}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. دوس واشتري اللي نفسك فيه! 😉\n{BAND}"
+                    f"{BAND}\n⚡ يا {_h(name)}، تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح. ..."
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
                 queue_cooldown_start(bot)
@@ -1587,7 +1610,7 @@ def register(bot, history):
             if st["dest"] == "clients":
                 for i, (uid, nm) in enumerate(_collect_clients_with_names(), 1):
                     try:
-                        text = _append_bot_link_for_user(_funny_welcome_text(nm))
+                        text = _append_bot_link_for_user(_funny_welcome_text(_h(nm)))
                         bot.send_message(uid, text, parse_mode="HTML")
                         sent += 1
                     except Exception:
