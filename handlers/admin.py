@@ -829,10 +829,14 @@ def register(bot, history):
     # إلغاء لأي وضع إدخال للأدمن (/cancel)
     @bot.message_handler(commands=['cancel'])
     def _admin_cancel_any(msg: types.Message):
-        _msg_pending.pop(msg.from_user.id, None)
-        _accept_pending.pop(msg.from_user.id, None)
-        _broadcast_pending.pop(msg.from_user.id, None)
-        bot.reply_to(msg, "✅ تم الإلغاء.")
+        _clear_admin_states(msg.from_user.id)
+        bot.reply_to(msg, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
+        try:
+            if msg.from_user.id in ADMINS or msg.from_user.id == ADMIN_MAIN_ID:
+                admin_menu(msg)
+        except Exception:
+            pass
+
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and msg.from_user.id in ADMINS)
     def handle_done(msg):
@@ -1414,6 +1418,7 @@ def register(bot, history):
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
     def __admin_cmd(m):
+        _clear_admin_states(m.from_user.id)
         if m.from_user.id not in ADMINS:
             return bot.reply_to(m, "صلاحية الأدمن فقط.")
         return admin_menu(m)
@@ -2272,6 +2277,13 @@ def _register_admin_roles(bot):
 
     @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
     def disc_new_user_get_id(m):
+        txt = (m.text or "").strip()
+        if txt == "/cancel":
+            _disc_new_user_state.pop(m.from_user.id, None)
+            return bot.reply_to(m, "✅ تم الإلغاء.")
+        if txt == "/admin":
+            _disc_new_user_state.pop(m.from_user.id, None)
+            return admin_menu(m)
         uid = None
         try:
             uid = parse_user_id(m.text)
