@@ -50,23 +50,24 @@ except Exception:
     BOT_USERNAME = "my_fast_shop_bot"
     BOT_LINK_HTML = '<a href="https://t.me/my_fast_shop_bot">@my_fast_shop_bot</a>'
 
-def _append_bot_link_for_channel(_t):
+def _append_bot_link_for_channel(_t: str) -> str:
     try:
         t = (_t or "").rstrip()
-        if "@"+BOT_USERNAME in t or "t.me/"+BOT_USERNAME in t or "t.me/" + BOT_USERNAME in t:
-            return t
-        return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
- except Exception:
-     return _t
- def _append_bot_link_for_user(_t: str) -> str:
-    try:
-        t = (_t or "").rstrip()
-        # لو الرابط موجود مسبقًا لا نكرر
         if "@"+BOT_USERNAME in t or "t.me/"+BOT_USERNAME in t or "t.me/" + BOT_USERNAME in t:
             return t
         return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
     except Exception:
         return _t
+
+def _append_bot_link_for_user(_t: str) -> str:
+    try:
+        t = (_t or "").rstrip()
+        if "@"+BOT_USERNAME in t or "t.me/"+BOT_USERNAME in t or "t.me/" + BOT_USERNAME in t:
+            return t
+        return t + "\n\n🤖 اطلب الآن: " + BOT_LINK_HTML
+    except Exception:
+        return _t
+
        
 # === End Injected ===
 from database.db import get_table, DEFAULT_TABLE
@@ -1597,7 +1598,6 @@ def register(bot, history):
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
                     text = _append_bot_link_for_channel(_funny_welcome_text(None))
-                    bot.send_message(dest, _append_bot_link_for_channel(text), parse_mode="HTML")
                     sent = 1
                 except Exception:
                     pass
@@ -2498,10 +2498,8 @@ def _register_admin_roles(bot):
 
         if act == "back":
             _manage_user_state.pop(c.from_user.id, None)
-            try:
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
+            try: bot.answer_callback_query(c.id)
+            except Exception: pass
             return admin_menu(c.message)
 
         if act == "last5":
