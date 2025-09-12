@@ -430,7 +430,8 @@ def _features_groups_markup():
         items = grouped.get(name) or []
         active = sum(1 for it in items if bool(it.get("active", True)))
         total  = len(items)
-        kb.add(types.InlineKeyboardButton(f"📁 {name} — {active}/{total}", callback_data=f"adm_feat_g:{name}:0"))
+        slug = _slug(name)
+        kb.add(types.InlineKeyboardButton(f"📁 {name} — {active}/{total}", callback_data=f"adm_feat_g:{slug}:0"))
     kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
     return kb
 
@@ -464,11 +465,13 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
+        gslug = _slug(group_name)
         kb.row(
-            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_g:{group_name}:{prev_page}"),
+            types.InlineKeyboardButton("« السابق", callback_data=f"adm_feat_g:{gslug}:{prev_page}"),
             types.InlineKeyboardButton(f"الصفحة {page+1}/{total_pages}", callback_data="noop"),
-            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_g:{group_name}:{next_page}")
+            types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_g:{gslug}:{next_page}")
         )
+
 
     # أزرار تشغيل/إيقاف الكل في المجموعة
     kb.row(
@@ -645,7 +648,7 @@ def register(bot, history):
     @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and _allowed(m.from_user.id, "user:message_by_id"))
     def msg_by_id_start(m):
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/ cancel لإلغاء")
+        bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/cancel لإلغاء")
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def msg_by_id_get_id(m):
@@ -772,7 +775,13 @@ def register(bot, history):
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_g:"))
     def _features_group_cb(c):
         try:
-            _, group, page = c.data.split(":", 2)
+            _, slug, page = c.data.split(":", 2)
+            grouped = list_features_grouped() or {}
+            group = next((n for n in grouped.keys() if _slug(n) == slug), None)
+            if not group:
+                try: bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                except Exception: pass
+                return
             kb = _features_group_items_markup(group, int(page))
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
         except Exception as e:
@@ -2139,11 +2148,19 @@ def _register_admin_roles(bot):
             state     = "🟢" if effective else ("⏳" if ended else "🔴")
             to        = '0' if effective else '1'
 
-            kb.add(types.InlineKeyboardButton(f"{state} {title}", callback_data=f"disc:toggle:{did}:{to}"))
+            # عنوان الزر
+            if scope == "user" and r.get("user_id"):
+                title = f"{pct}٪ — عميل {r['user_id']}"
+            else:
+                title = f"{pct}٪ — عام"
+
+            kb.add(types.InlineKeyboardButton(f"{state} {title}",
+                                              callback_data=f"disc:toggle:{did}:{to}"))
             kb.row(
                 types.InlineKeyboardButton("⏳ انهاء الآن", callback_data=f"disc:end:{did}"),
                 types.InlineKeyboardButton("🗑 حذف",        callback_data=f"disc:delete:{did}"),
             )
+
         kb.row(
             types.InlineKeyboardButton("🟢 تشغيل جميع الأكواد", callback_data="disc:all:1"),
             types.InlineKeyboardButton("🔴 إيقاف جميع الأكواد", callback_data="disc:all:0"),
@@ -2217,11 +2234,7 @@ def _register_admin_roles(bot):
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
             return discount_menu(c.message)
-
-            except Exception:
-                bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
-            return discount_menu(c.message)
-
+            
         elif act == "delete":
             if len(parts) < 3:
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
@@ -2229,10 +2242,6 @@ def _register_admin_roles(bot):
             try:
                 delete_discount(did)
                 bot.answer_callback_query(c.id, "🗑 تم الحذف.")
-            except Exception:
-                bot.answer_callback_query(c.id, "تعذّر الحذف.")
-            return discount_menu(c.message)
-
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الحذف.")
             return discount_menu(c.message)
@@ -2430,8 +2439,6 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
             return
-
-        # ban/unban shortcuts reuse existing handlers by sending text commands is OK, keeping it simple.
 
             # اطلب الآيدي من جديد
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
