@@ -599,11 +599,12 @@ def handle_player_id(message, bot):
                     # price_syp, applied_disc = apply_discount(...)
 
                     # ✨ استبدل سطر السعر الواحد بـ:
-                    (f"• السعر: {_fmt_syp(price_syp)}",) if not applied_disc else (
+                    *( [f"• السعر: {_fmt_syp(price_syp)}"] if not applied_disc else [
                         f"• السعر قبل الخصم: {_fmt_syp(price_before)}",
                         f"• الخصم: {int(applied_disc.get('percent', 0))}٪",
                         f"• السعر بعد الخصم: {_fmt_syp(price_syp)}",
-                    ),
+                    ] ),
+
 
                     f"• {id_label}: {player_id}",
                     "",
@@ -1093,7 +1094,7 @@ def setup_inline_handlers(bot, admin_ids):
             f"آيدي اللاعب: <code>{player_id}</code>\n"
             f"🔖 المنتج: {product.name}\n"
             f"التصنيف: {_visible_category_label(order, product)}\n"
-            f"💵 السعر: {price_syp:,} ل.س" + (f" (بعد خصم {order.get('discount',{}).get('percent')}%)" if order.get('discount') else "") + "\n"
+            _price_line + "\n"
             f"(select_{product.product_id})"
         )
 
@@ -1134,22 +1135,25 @@ def setup_inline_handlers(bot, admin_ids):
                 )
             ),
         )
-        process_queue(bot)
-        _card(
-          "🧾 فاتورة مؤقتة",
-          [
-            f"• رقم الحجز: {hold_id}",
-            f"• المنتج: {product.name}",
-            f"• الحساب/الآيدي: {player_id}",
-            *( [
-                f"• السعر قبل الخصم: {_fmt_syp(_pb)}",
-                f"• الخصم: {int(order.get('discount',{}).get('percent',0))}٪",
-                f"• الإجمالي بعد الخصم: {_fmt_syp(_pa)}",
-              ] if order.get("discount") else [ f"• الإجمالي: {_fmt_syp(price_syp)}" ] ),
-            f"• الزمن المتوقع: {ETA_TEXT}",
-          ]
+        bot.send_message(
+            user_id,
+            _card(
+              "🧾 فاتورة مؤقتة",
+              [
+                f"• رقم الحجز: {hold_id}",
+                f"• المنتج: {product.name}",
+                f"• الحساب/الآيدي: {player_id}",
+                *( [
+                    f"• السعر قبل الخصم: {_fmt_syp(_pb)}",
+                    f"• الخصم: {int(order.get('discount',{}).get('percent',0))}٪",
+                    f"• الإجمالي بعد الخصم: {_fmt_syp(_pa)}",
+                  ] if order.get('discount') else [ f"• الإجمالي: {_fmt_syp(price_syp)}" ] ),
+                f"• الزمن المتوقع: {ETA_TEXT}",
+              ]
+            )
         )
 
+        process_queue(bot)
 
 # ================= نقطة التسجيل من main.py =================
 
