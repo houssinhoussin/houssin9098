@@ -920,7 +920,7 @@ def register(bot, history):
         # جلب الطلب
         res = (
             get_table("pending_requests")
-            .select("user_id", "request_text", "payload")
+            .select("user_id, request_text, payload")
             .eq("id", request_id)
             .execute()
         )
