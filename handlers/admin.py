@@ -108,7 +108,10 @@ def _collect_clients_with_names():
 from services.state_service import purge_state
 from services.products_admin import set_product_active, get_product_active, bulk_ensure_products
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
-from services.discount_service import list_discounts, create_discount, set_discount_active, discount_stats, record_discount_use
+from services.discount_service import (
+    list_discounts, create_discount, set_discount_active, discount_stats,
+    record_discount_use, end_discount_now, delete_discount
+)
 from services.system_service import set_maintenance, is_maintenance, maintenance_message, get_logs_tail, force_sub_recheck
 from services.activity_logger import log_action
 from services.authz import allowed as _allowed
@@ -635,7 +638,6 @@ def register(bot, history):
             bot.answer_callback_query(c.id, "تم.")
         except Exception:
             pass
-        except Exception: pass
         try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception: pass
 
@@ -2104,11 +2106,6 @@ def _register_admin_roles(bot):
     # =========================
     # 🎟️ أكواد/نِسَب خصم
     # =========================
-    from services.discount_service import (
-        list_discounts, create_discount, set_discount_active, discount_stats
-    )
-    from datetime import datetime
-    from telebot import types
     # نفترض أن ADMINS, ADMIN_MAIN_ID, parse_user_id, USERS_TABLE, get_table معرفة فوق
 
     def _is_admin(uid: int) -> bool:
@@ -2137,15 +2134,11 @@ def _register_admin_roles(bot):
             did    = str(r.get("id"))
             pct    = int(r.get("percent") or 0)
             scope  = (r.get("scope") or "global").lower()
-            ended  = bool(r.get("ends_at"))
-            active = bool(r.get("active"))
-            title  = f"٪{pct} — {'عام' if scope=='global' else 'عميل'}"
-            if scope != "global":
-                uid = r.get('user_id') or r.get('user')
-                title += f" (ID:{uid})"
-            state = "🟢" if active else "🔴"
-            if ended: state = "⏳"
-            to = '0' if active else '1'
+            effective = bool(r.get("effective_active", r.get("active")))
+            ended     = bool(r.get("ends_at")) and not effective
+            state     = "🟢" if effective else ("⏳" if ended else "🔴")
+            to        = '0' if effective else '1'
+
             kb.add(types.InlineKeyboardButton(f"{state} {title}", callback_data=f"disc:toggle:{did}:{to}"))
             kb.row(
                 types.InlineKeyboardButton("⏳ انهاء الآن", callback_data=f"disc:end:{did}"),
@@ -2219,8 +2212,12 @@ def _register_admin_roles(bot):
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
             did = parts[2]
             try:
-                get_table('discounts').update({"ends_at": datetime.utcnow().isoformat()}).eq("id", did).execute()
+                end_discount_now(did)
                 bot.answer_callback_query(c.id, "⏳ تم إنهاء الخصم.")
+            except Exception:
+                bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
+            return discount_menu(c.message)
+
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
             return discount_menu(c.message)
@@ -2230,8 +2227,12 @@ def _register_admin_roles(bot):
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
             did = parts[2]
             try:
-                get_table('discounts').delete().eq("id", did).execute()
+                delete_discount(did)
                 bot.answer_callback_query(c.id, "🗑 تم الحذف.")
+            except Exception:
+                bot.answer_callback_query(c.id, "تعذّر الحذف.")
+            return discount_menu(c.message)
+
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الحذف.")
             return discount_menu(c.message)
@@ -2432,35 +2433,6 @@ def _register_admin_roles(bot):
 
         # ban/unban shortcuts reuse existing handlers by sending text commands is OK, keeping it simple.
 
-        if act == "last5":
-            try:
-                r = get_table("purchases").select(
-                    "created_at, product_name, price"
-                ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
-                rows = getattr(r, "data", []) or []
-                lines = ["🧾 آخر 5 عمليات:"] + [
-                    f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
-                    for x in rows
-                ]
-                bot.send_message(c.message.chat.id, "\n".join(lines))
-            except Exception:
-                bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
-
-            # اطلب الآيدي من جديد
-            _manage_user_state[c.from_user.id] = {"step": "ask_id"}
-            try:
-                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                rk.row("⬅️ رجوع")
-                bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
-            except Exception:
-                pass
-            try:
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
-            return
-
-
             # اطلب الآيدي من جديد
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
             try:
@@ -2520,49 +2492,3 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
 
-# === Injected: global discount toggles (on/off) ===
-try:
-    from services.discount_service import list_discounts, set_discount_active
-except Exception:
-    list_discounts = None
-    set_discount_active = None
-
-def _disc_toggle_all(_to: bool) -> int:
-    if not list_discounts or not set_discount_active:
-        return 0
-    try:
-        items = list_discounts() or []
-    except Exception:
-        items = []
-    changed = 0
-    for it in items:
-        code = (it.get("code") if isinstance(it, dict) else None) or None
-        if not code:
-            continue
-        try:
-            set_discount_active(code, bool(_to))
-            changed += 1
-        except Exception:
-            pass
-    return changed
-
-def _disc_reply(chat_id, bot, to):
-    try:
-        n = _disc_toggle_all(bool(to))
-        bot.send_message(chat_id, f"تم تحديث {n} كود خصم إلى {'تشغيل' if to else 'إيقاف'}.")
-    except Exception as _e:
-        try:
-            bot.send_message(chat_id, "تعذّر تنفيذ طلب تشغيل/إيقاف جميع الأكواد.")
-        except Exception:
-            pass
-
-try:
-    @bot.message_handler(commands=['disc_all_on'])
-    def __disc_all_on(m):
-        _disc_reply(m.chat.id, bot, True)
-    @bot.message_handler(commands=['disc_all_off'])
-    def __disc_all_off(m):
-        _disc_reply(m.chat.id, bot, False)
-except Exception:
-    pass
-# === End Injected ===
