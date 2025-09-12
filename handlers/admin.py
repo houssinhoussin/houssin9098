@@ -1408,7 +1408,17 @@ def register(bot, history):
 
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
-    
+    def __admin_cmd(m):
+        if m.from_user.id not in ADMINS:
+            return bot.reply_to(m, "صلاحية الأدمن فقط.")
+        return admin_menu(m)
+
+    # افتح لوحة الأدمن بالضغط على أزرار مثل: "ادمن" / "الأدمن" / "لوحة الأدمن" / "Admin"…
+    @bot.message_handler(func=lambda m: (m.text and (m.from_user.id in ADMINS) and _match_admin_alias(
+        m.text, ["الأدمن", "الادمن", "لوحة الأدمن", "ادمن", "Admin", "ADMIN"]
+    )))
+    def __admin_alias_open(m):
+        return admin_menu(m)
 
     @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and (m.from_user.id in ADMINS))
     def _admin_back_text(m):
@@ -1449,7 +1459,6 @@ def register(bot, history):
 
         else:
             # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
-            kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("⬅️ رجوع")
         bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
