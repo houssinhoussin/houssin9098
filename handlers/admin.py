@@ -518,7 +518,7 @@ def register(bot, history):
         _register_admin_roles(bot)
     except Exception as __e:
         import logging; logging.exception("Admin roles setup failed: %s", __e)
-    @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and _allowed(m.from_user.id, "user:ban"))
+    @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل المراد حظره.\n/cancel لإلغاء")
@@ -614,7 +614,7 @@ def register(bot, history):
         try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception: pass
 
-    @bot.message_handler(func=lambda m: m.text == "✅ فكّ الحظر" and _allowed(m.from_user.id, "user:unban"))
+    @bot.message_handler(func=lambda m: m.text == "✅ فكّ الحظر" and allowed(m.from_user.id, "user:unban"))
     def unban_start(m):
         _unban_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/cancel لإلغاء")
@@ -664,7 +664,7 @@ def register(bot, history):
         except Exception: pass
 
 
-    @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and _allowed(m.from_user.id, "user:message_by_id"))
+   @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and allowed(m.from_user.id, "user:message_by_id"))
     def msg_by_id_start(m):
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/cancel لإلغاء")
@@ -924,6 +924,7 @@ def register(bot, history):
             .eq("id", request_id)
             .execute()
         )
+
         if not getattr(res, "data", None):
             return bot.answer_callback_query(call.id, "❌ الطلب غير موجود.")
         req      = res.data[0]
@@ -1006,8 +1007,17 @@ def register(bot, history):
                 remove_inline_keyboard(bot, call.message)
             except Exception:
                 pass
-            # تأجيل الطلب بإرجاعه لآخر الدور
+            # ... بعد remove_inline_keyboard و قبل أو بعد postpone_request
+            new_payload = dict(payload)
+            for k in ("locked_by", "locked_by_username", "claimed"):
+                new_payload.pop(k, None)
+            try:
+                get_table('pending_requests').update({'payload': new_payload}).eq('id', request_id).execute()
+            except Exception:
+                pass
+
             postpone_request(request_id)
+    
             # إبلاغ العميل برسالة اعتذار/تنظيم الدور
             try:
                 bot.send_message(
@@ -2123,10 +2133,12 @@ def _register_admin_roles(bot):
                 bot.answer_callback_query(c.id, ok, show_alert=True)
             elif act == "cleanup":
                 try:
-                    from services.cleanup_service import purge_state
+                    purge_state()           # من services.state_service (مستوردة أعلى الملف)
+                    delete_inactive_users() # من services.cleanup_service (مستوردة أعلى الملف)
+                    bot.answer_callback_query(c.id, "تم تنظيف الحالات المؤقتة.")
                 except Exception:
-                    purge_state = lambda: None
-                purge_state(); bot.answer_callback_query(c.id, "تم تنظيف الحالات المؤقتة.")
+                    bot.answer_callback_query(c.id, "تعذّر التنظيف.")
+
             elif act == "forcesub":
                 try:
                     force_sub_recheck(); bot.answer_callback_query(c.id, "تمت إعادة فحص الاشتراك.")
@@ -2482,6 +2494,51 @@ def _register_admin_roles(bot):
                 bot.answer_callback_query(c.id)
             except Exception:
                 pass
+            return
+        if act == "profile":
+            try:
+                u = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").eq("user_id", uid).limit(1).execute()
+                row = (getattr(u, "data", None) or [None])[0] or {}
+            except Exception:
+                row = {}
+            # الرصيد (لو الخدمة متوفرة)
+            try:
+                bal = get_balance(uid)
+            except Exception:
+                bal = None
+            txt = (
+                f"👤 العميل: {uid}\n"
+                f"الاسم: {(row.get('full_name') or row.get('name') or row.get('first_name') or '—')}\n"
+                f"الرصيد: {('—' if bal is None else f'{int(bal):,} ل.س')}"
+            )
+            bot.send_message(c.message.chat.id, txt)
+            try: bot.answer_callback_query(c.id)
+            except Exception: pass
+            return
+
+        if act == "ban":
+            # إعادة استخدام فلو الحظر العام
+            _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
+            kb = types.InlineKeyboardMarkup(row_width=2)
+            kb.row(
+                types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
+                types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
+            )
+            kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
+            bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
+            try: bot.answer_callback_query(c.id)
+            except Exception: pass
+            return
+
+        if act == "unban":
+            try:
+                unban_user(uid, c.from_user.id)
+                log_action(c.from_user.id, "user:unban", reason=f"uid:{uid}")
+                bot.send_message(c.message.chat.id, "✅ تم فكّ الحظر.")
+            except Exception as e:
+                bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
+            try: bot.answer_callback_query(c.id)
+            except Exception: pass
             return
 
         # فرع افتراضي لأي فعل غير معروف
