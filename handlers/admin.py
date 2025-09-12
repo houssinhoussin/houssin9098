@@ -325,13 +325,17 @@ def _slug(s: str) -> str:
     return re.sub(r'[^A-Za-z0-9]+', '-', s).strip('-')[:30]
 
 def _admin_products_groups_markup():
+    kb = types.InlineKeyboardMarkup(row_width=1)
     for group in PRODUCTS.keys():
-        kb.add(types.InlineKeyboardButton(text=f"📁 {group}", callback_data=f"adm_prod_g:{_slug(group)}"))
+        kb.add(types.InlineKeyboardButton(
+            text=f"📁 {group}",
+            callback_data=f"adm_prod_g:{_slug(group)}"
+        ))
     return kb
 
 def _admin_products_list_markup(group_name: str):
     kb = types.InlineKeyboardMarkup(row_width=1)
-    for p in PRODUCTS[group_name]:
+    for p in PRODUCTS.get(group_name, []):
         active = get_product_active(p.product_id)
         state = "🟢 شغّال" if active else "🔴 موقوف"
         kb.add(types.InlineKeyboardButton(
@@ -342,6 +346,7 @@ def _admin_products_list_markup(group_name: str):
     return kb
 
 def _admin_product_actions_markup(pid: int):
+    kb = types.InlineKeyboardMarkup(row_width=1)
     active = get_product_active(pid)
     if active:
         kb.add(types.InlineKeyboardButton("🚫 إيقاف المنتج", callback_data=f"adm_prod_t:{pid}:0"))
@@ -1445,22 +1450,20 @@ def register(bot, history):
         if msg.from_user.id not in ADMINS:
             return bot.reply_to(msg, "صلاحية الأدمن فقط.")
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        # رئيسي أم مساعد؟
         is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
+
         if is_primary:
-            kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-            kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين",)
+            kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين")
             kb.row("🎟️ أكواد خصم", "👤 إدارة عميل")
             kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
             kb.row("✉️ رسالة لعميل", "⛔ حظر عميل")
             kb.row("✅ فكّ الحظر", "⚙️ النظام")
             kb.row("⬅️ رجوع")
-
         else:
-            # الأدمن المساعد: يظهر فقط تشغيل/إيقاف المزايا + طابور الانتظار
             kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
             kb.row("⬅️ رجوع")
+
         bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
 
     # =========================
