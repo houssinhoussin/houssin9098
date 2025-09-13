@@ -2450,6 +2450,7 @@ def _register_admin_roles(bot):
         return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
 
     # --- Discounts: choose user duration ---
+    # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
@@ -2467,7 +2468,7 @@ def _register_admin_roles(bot):
     def _disc_toggle_all(_to: bool) -> int:
         """تشغيل/إيقاف جميع أكواد الخصم دفعة واحدة."""
         try:
-        items = list_discounts() or []
+            items = list_discounts() or []
         except Exception:
             return 0
         changed = 0
@@ -2479,7 +2480,6 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
         return changed
-
 
     def _get_user_by_id(uid: int):
         """قراءة صف العميل من جدول houssin363 عبر user_id فقط."""
