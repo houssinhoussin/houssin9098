@@ -2557,7 +2557,7 @@ def _register_admin_roles(bot):
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
     def manage_user_actions(c):
         try:
-            _, act, uid = c.data.split(":", 2)  # نقيّد التقسيم إلى 3 أجزاء
+            _, act, uid = c.data.split(":", 2)
             uid = int(uid)
         except Exception:
             try:
@@ -2568,8 +2568,10 @@ def _register_admin_roles(bot):
 
         if act == "back":
             _manage_user_state.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id)
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
             return admin_menu(c.message)
 
         if act == "last5":
@@ -2617,16 +2619,18 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
             return
+
         if act == "profile":
             try:
-                u = get_table(USERS_TABLE).select("user_id, name, balance, points").eq("user_id", uid).limit(1).execute()
+                u = get_table(USERS_TABLE).select("user_id,name,balance,points").eq("user_id", uid).limit(1).execute()
                 row = (getattr(u, "data", None) or [None])[0] or {}
             except Exception:
                 row = {}
+            # الرصيد من خدمة المحفظة إن متاحة
             try:
                 bal = get_balance(uid)
             except Exception:
-                bal = None
+                bal = row.get("balance")
             txt = (
                 f"👤 العميل: {uid}\n"
                 f"الاسم: {row.get('name') or '—'}\n"
@@ -2634,23 +2638,27 @@ def _register_admin_roles(bot):
                 f"النقاط: {int(row.get('points') or 0)}"
             )
             bot.send_message(c.message.chat.id, txt)
-            try: bot.answer_callback_query(c.id)
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
             return
 
-                if act == "ban":
-                    # إعادة استخدام فلو الحظر العام
-                    _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
-                    kb = types.InlineKeyboardMarkup(row_width=2)
-                    kb.row(
-                        types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
-                        types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
-                    )
-                    kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
-                    bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
-                    try: bot.answer_callback_query(c.id)
-                    except Exception: pass
-                    return
+        if act == "ban":
+            # إعادة استخدام فلو الحظر العام
+            _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
+            kb = types.InlineKeyboardMarkup(row_width=2)
+            kb.row(
+                types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
+                types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
+            )
+            kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
+            bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
 
         if act == "unban":
             try:
@@ -2659,8 +2667,10 @@ def _register_admin_roles(bot):
                 bot.send_message(c.message.chat.id, "✅ تم فكّ الحظر.")
             except Exception as e:
                 bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
-            try: bot.answer_callback_query(c.id)
-            except Exception: pass
+            try:
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
             return
 
         # فرع افتراضي لأي فعل غير معروف
@@ -2668,6 +2678,7 @@ def _register_admin_roles(bot):
             bot.answer_callback_query(c.id, "❌ غير مفهوم")
         except Exception:
             pass
+
 
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
     def _refund_amount(m):
