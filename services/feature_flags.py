@@ -122,6 +122,12 @@ LEGACY_UNIQUE: Dict[str, str] = {
     "internet_provider_yara": "مزود — يارا",
     "internet_provider_dunia": "مزود — دنيا",
     "internet_provider_aint": "مزود — آينت",
+    "internet_provider_cards":          "مزود — مزود بطاقات",
+    "internet_provider_scs":            "مزود — الجمعية SCS",
+    "internet_provider_view":           "مزود — فيو",
+    "internet_provider_haifi":          "مزود — هايفي",
+    "internet_provider_syrian_telecom": "مزود — السورية للاتصالات",
+
     # الإعلانات / الرسوم / خدمات الميديا التفصيلية
     "ads": "إعلانات",
     "university_fees": "رسوم جامعية",
