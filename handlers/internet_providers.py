@@ -19,6 +19,8 @@ from services.wallet_service import (
     get_available_balance,   # ✅ المتاح = balance - held
     create_hold,             # ✅ إنشاء الحجز الذرّي
 )
+
+# طابور/رسائل للأدمن (اختياري)
 try:
     from services.queue_service import add_pending_request, process_queue
 except Exception:
@@ -36,19 +38,30 @@ try:
 except Exception:
     from ui_guards import confirm_guard
 
-# (اختياري) حارس الصيانة/الإتاحة + ميزة إيقاف/تشغيل الخدمة
+# (اختياري) حارس الصيانة/الإتاحة + مفاتيح تعطيل عامة
 try:
     from services.system_service import is_maintenance, maintenance_message
 except Exception:
     def is_maintenance(): return False
     def maintenance_message(): return "🔧 النظام تحت الصيانة مؤقتًا. جرّب لاحقًا."
 
+# حارس الـ Feature Flags (عام/فردي)
 try:
-    # flag: "internet_adsl" أو "internet"
+    # flag: "internet_adsl" أو "internet" … إلخ
     from services.feature_flags import block_if_disabled
 except Exception:
     def block_if_disabled(bot, chat_id, flag_key, nice_name):
         return False
+
+# (اختياري) فحص تفعيل ميزة لإظهار "(موقوف 🔒)" على الأزرار بدون إخفاء
+try:
+    from services.feature_flags import is_feature_active as _feat_on
+except Exception:
+    try:
+        from services.feature_flags import is_active as _feat_on
+    except Exception:
+        def _feat_on(key: str, default: bool = True) -> bool:
+            return default
 
 # (اختياري) فتح قائمة الشحن عند الحاجة
 try:
@@ -63,21 +76,55 @@ BAND = "━━━━━━━━━━━━━━━━"
 COMMISSION_PER_10000 = 1400
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 
+# ✅ قائمة المزودات (حافظنا على القديم، حذفنا "ناس"، أضفنا المطلوب)
 INTERNET_PROVIDERS = [
     "هايبر نت", "أم تي أن", "تكامل", "آية", "أمواج", "دنيا", "ليزر",
     "رن نت", "آينت", "زاد", "لاين نت", "برو نت", "أمنية",
     "MTS", "سوا", "يارا",
+    # الإضافات
     "مزود بطاقات", "الجمعية SCS", "فيو", "سما نت", "هايفي", "السورية للاتصالات",
 ]
 
 INTERNET_SPEEDS = [
     {"label": "512 كيلو",  "price": 14500},
-    {"label": "1 ميغا",  "price": 19000},
-    {"label": "2 ميغا",  "price": 24500},
-    {"label": "4 ميغا",  "price": 38500},
-    {"label": "8 ميغا",  "price": 64500},
-    {"label": "16 ميغا", "price": 83500},
+    {"label": "1 ميغا",    "price": 19000},
+    {"label": "2 ميغا",    "price": 24500},
+    {"label": "4 ميغا",    "price": 38500},
+    {"label": "8 ميغا",    "price": 64500},
+    {"label": "16 ميغا",   "price": 83500},
 ]
+
+# 🔑 مفاتيح Feature لكل مزوّد (للمنع بدون إخفاء الزر)
+PROVIDER_KEYS = {
+    # الحاليون
+    "هايبر نت": "internet_provider_hypernet",
+    "أم تي أن": "internet_provider_mtn",
+    "تكامل": "internet_provider_takamol",
+    "آية": "internet_provider_aya",
+    "أمواج": "internet_provider_amwaj",
+    "دنيا": "internet_provider_dunia",
+    "ليزر": "internet_provider_laser",
+    "رن نت": "internet_provider_rannet",
+    "آينت": "internet_provider_aint",
+    "زاد": "internet_provider_zad",
+    "لاين نت": "internet_provider_linenet",
+    "برو نت": "internet_provider_pronet",
+    "أمنية": "internet_provider_omnia",
+    "MTS": "internet_provider_mts",
+    "سوا": "internet_provider_sawa",
+    "يارا": "internet_provider_yara",
+
+    # الإضافات
+    "مزود بطاقات": "internet_provider_cards",
+    "الجمعية SCS": "internet_provider_scs",
+    "فيو": "internet_provider_view",
+    "سما نت": "internet_provider_samanet",
+    "هايفي": "internet_provider_haifi",
+    "السورية للاتصالات": "internet_provider_syrian_telecom",
+}
+
+def _prov_flag_key(name: str):
+    return PROVIDER_KEYS.get(name)
 
 # حالة المستخدم (نوع الطلب والخطوات)
 user_net_state = {}  # { user_id: { step, provider?, speed?, price?, phone? } }
@@ -114,6 +161,7 @@ def _commission(amount: int) -> int:
     # سقف لأعلى (كل 10000 عليها 1400): بدون أعداد عشرية
     blocks = (amount + 10000 - 1) // 10000
     return blocks * COMMISSION_PER_10000
+
 def _client_card(title: str, lines: list[str]) -> str:
     body = "\n".join(lines)
     return f"{BAND}\n{title}\n{body}\n{BAND}"
@@ -129,7 +177,7 @@ def _service_unavailable_guard(bot, chat_id) -> bool:
     if is_maintenance():
         bot.send_message(chat_id, maintenance_message())
         return True
-    # استخدم أي مفتاح يناسب نظام الـ Feature Flags لديك
+    # تعطيل عام للخدمة
     if block_if_disabled(bot, chat_id, "internet_adsl", "دفع مزودات الإنترنت"):
         return True
     if block_if_disabled(bot, chat_id, "internet", "دفع مزودات الإنترنت"):
@@ -151,8 +199,14 @@ CB_RECHARGE      = "irecharge"     # شحن المحفظة (اختياري)
 #   لوحات أزرار Inline
 # =====================================
 def _provider_inline_kb() -> types.InlineKeyboardMarkup:
+    """الزر يبقى ظاهر دائمًا؛ نضيف وسم (موقوف 🔒) إن كان المزوّد متوقفًا."""
     kb = types.InlineKeyboardMarkup(row_width=3)
-    btns = [types.InlineKeyboardButton(f"🌐 {name}", callback_data=f"{CB_PROV_PREFIX}:{name}") for name in INTERNET_PROVIDERS]
+    btns = []
+    for name in INTERNET_PROVIDERS:
+        key = _prov_flag_key(name)
+        disabled = (key is not None and not _feat_on(key, True))
+        label = f"🌐 {name}" + (" (موقوف 🔒)" if disabled else "")
+        btns.append(types.InlineKeyboardButton(label, callback_data=f"{CB_PROV_PREFIX}:{name}"))
     kb.add(*btns)
     kb.add(types.InlineKeyboardButton("❌ إلغاء", callback_data=CB_CANCEL))
     return kb
@@ -200,7 +254,7 @@ def register(bot):
         txt = _client_card("✅ تم الإلغاء", [f"يا {_name(bot, uid)}، رجعناك لقائمة المزودين."])
         bot.send_message(msg.chat.id, _with_cancel(txt), reply_markup=_provider_inline_kb())
 
-    # فتح القائمة الرئيسية
+    # فتح القائمة الرئيسية (زر ريبلاي)
     @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
     def open_net_menu(msg):
         # ✅ إنهاء أي رحلة/مسار سابق عالق
@@ -215,7 +269,8 @@ def register(bot):
             return
         register_user_if_not_exist(msg.from_user.id, msg.from_user.full_name)
         start_internet_provider_menu(bot, msg)
-        
+
+    # أوامر مختصرة
     @bot.message_handler(commands=['internet', 'adsl'])
     def cmd_internet(msg):
         if too_soon(msg.from_user.id, "internet_open", 1.2):
@@ -235,6 +290,15 @@ def register(bot):
         provider = call.data.split(":", 1)[1]
         if provider not in INTERNET_PROVIDERS:
             return bot.answer_callback_query(call.id, "❌ خيار غير صالح.", show_alert=True)
+
+        # 🔒 منع الدخول لهذا المزوّد لو متوقّف (بدون إخفاء الزر)
+        k = _prov_flag_key(provider)
+        if k and block_if_disabled(bot, call.message.chat.id, k, f"مزود — {provider}"):
+            try:
+                bot.answer_callback_query(call.id, "🚫 هذا المزوّد موقوف مؤقتًا.", show_alert=True)
+            except Exception:
+                pass
+            return
 
         user_net_state[uid] = {"step": "choose_speed", "provider": provider}
         txt_raw = _client_card(
@@ -395,7 +459,10 @@ def register(bot):
             missing = total - available
             msg_txt = _client_card(
                 "❌ رصيدك مش مكفّي",
-                [f"المتاح الحالي: {_fmt_syp(available)}", f"المطلوب: {_fmt_syp(total)}", f"الناقص: {_fmt_syp(missing)}", "اشحن محفظتك وجرب تاني 😉"]
+                [f"المتاح الحالي: {_fmt_syp(available)}",
+                 f"المطلوب: {_fmt_syp(total)}",
+                 f"الناقص: {_fmt_syp(missing)}",
+                 "اشحن محفظتك وجرب تاني 😉"]
             )
             kb = _insufficient_kb()
             if kb:
