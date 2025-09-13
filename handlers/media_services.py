@@ -132,7 +132,7 @@ def register_media_services(bot, history):
             reply_markup=media_services_menu()
         )
 
-    @bot.message_handler(func=lambda msg: msg.text == "🎭 خدمات سوشيال/ميديا")
+    @bot.message_handler(func=lambda msg: _norm(msg.text) in LABELS_MEDIA)
     def open_media(msg):
          # ✅ إنهاء أي رحلة/مسار سابق عالق
         try:
