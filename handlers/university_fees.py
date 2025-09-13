@@ -26,6 +26,7 @@ except Exception:
 
 from database.db import get_table
 import logging
+from services.feature_flags import block_if_disabled
 
 # حارس تأكيد موحّد: يحذف الكيبورد فقط + يعمل Debounce
 try:
@@ -103,6 +104,8 @@ def register_university_fees(bot, history):
 
     @bot.message_handler(func=lambda msg: msg.text == "🎓 دفع رسوم جامعية")
     def open_uni_menu(msg):
+        if block_if_disabled(bot, msg.chat.id, "university_fees", "رسوم جامعية"):
+            return
         # ✅ إنهاء أي رحلة/مسار سابق عالق
         try:
             from handlers.start import _reset_user_flows
