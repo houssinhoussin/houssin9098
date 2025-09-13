@@ -4,7 +4,6 @@ from __future__ import annotations
 import time
 import threading
 import random
-
 from telebot import TeleBot, types
 
 from services.quiz_service import (
@@ -14,6 +13,7 @@ from services.quiz_service import (
     compute_stage_reward_and_finalize, set_runtime, get_runtime, clear_runtime, pick_template_for_user, persist_state,
     get_stage_time, convert_points_to_balance, award_points_for_correct, wipe_user_for_fresh_start, get_progress
 )
+from services.feature_flags import require_feature_or_alert
 
 # ---------- رسومات/نصوص ----------
 
@@ -195,7 +195,7 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int):
 def wire_handlers(bot: TeleBot):
 
     # بدء
-    @bot.message_handler(func=lambda m: isinstance(m.text, str) and ((m.text or "").strip() in {"/quiz", "🎯 الحزازير (ربحي)", "🎯 الحزازير", "الحزازير (ربحي)", "الحزازير", "quiz"}), content_types=['text'])
+    @bot.message_handler(func=lambda m: isinstance(m.text, str) and ((m.text or "").strip() in {"/quiz","🎯 الحزازير (ربحي)","🎯 الحزازير","الحزازير (ربحي)","الحزازير","quiz"}), content_types=['text'])
     def _catch_all(m):
         txt = (m.text or "").strip()
         QUIZ_TRIGGERS = {"/quiz", "🎯 الحزازير (ربحي)", "🎯 الحزازير", "الحزازير (ربحي)", "الحزازير", "quiz"}
@@ -206,11 +206,18 @@ def wire_handlers(bot: TeleBot):
                 _reset_user_flows(m.from_user.id)
             except Exception:
                 pass
+
             chat_id = m.chat.id
+
+            # 🔒 الحارس: لو الميزة مقفّلة، يرجّع True ويرسل اعتذار تلقائيًا
+            if require_feature_or_alert(bot, chat_id, "menu:riddles", "القائمة: الحزازير", default_active=True):
+                return
+
             user_id = m.from_user.id
             ensure_user_wallet(user_id, name=(m.from_user.first_name or "").strip())
             _intro_screen(bot, chat_id, user_id)
             return
+
         # ... باقي الراوترات إن لزم ...
 
     # ابدأ اللعب من الصفر — يبدأ السؤال الأول مباشرة وبنفس الشاشة
