@@ -2472,12 +2472,38 @@ def _register_admin_roles(bot):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
         try:
-            create_discount(scope="user", user_id=int(uid), percent=int(pct), days=(int(days) or None))
+            uid_i  = int(uid)
+            pct_i  = int(pct)
+            days_i = int(days)
+        except Exception:
+            uid_i, pct_i, days_i = int(uid), int(pct), 0
+
+        try:
+            create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
             _disc_new_user_state.pop(c.from_user.id, None)
             bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+
+            # ⬅️ إشعار العميل
+            try:
+                dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+                msg = (
+                    f"{BAND}\n"
+                    f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
+                    f"استمتع بالتوفير عند الشراء من البوت.\n"
+                    f"{BAND}"
+                )
+                try:
+                    # لو عندك notify_user مفعّلة
+                    notify_user(bot, uid_i, _append_bot_link_for_user(msg))
+                except Exception:
+                    bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
+            except Exception:
+                pass
+
         except Exception as e:
             bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
         return discount_menu(c.message)
+
 
 
     def _disc_toggle_all(_to: bool) -> int:
@@ -2563,9 +2589,13 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("✅ فكّ الحظر",  callback_data=f"mu:unban:{uid}"),
         )
         kb.row(
-            types.InlineKeyboardButton("💸 تعويض/استرجاع", callback_data=f"mu:refund:{uid}"),
-            types.InlineKeyboardButton("🧾 آخر 5 طلبات",   callback_data=f"mu:last5:{uid}"),
+            types.InlineKeyboardButton("💸 تعويض",              callback_data=f"mu:refund:{uid}"),
+            types.InlineKeyboardButton("٪ خصم لهذا العميل",     callback_data=f"mu:disc:{uid}"),
         )
+        kb.row(
+            types.InlineKeyboardButton("🧾 آخر 5 طلبات",        callback_data=f"mu:last5:{uid}"),
+        )
+
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
         bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
@@ -2588,6 +2618,24 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
             return admin_menu(c.message)
+        if act == "disc":
+            # فتح فلو الخصم الجاهز لكن لعميل معيّن
+            _disc_new_user_state[c.from_user.id] = {"step": "ask_pct", "user_id": uid}
+            kb = types.InlineKeyboardMarkup(row_width=3)
+            for p in (1, 2, 3):
+                kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
+            kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+            try:
+                bot.send_message(
+                    c.message.chat.id,
+                    f"اختر نسبة الخصم للعميل <code>{uid}</code>:",
+                    parse_mode="HTML",
+                    reply_markup=kb
+                )
+                bot.answer_callback_query(c.id)
+            except Exception:
+                pass
+            return
 
         if act == "last5":
             try:
@@ -2602,7 +2650,7 @@ def _register_admin_roles(bot):
                 bot.send_message(c.message.chat.id, "\n".join(lines))
             except Exception:
                 bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
-
+         
             # اطلب الآيدي من جديد...
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
             try:
@@ -2713,6 +2761,17 @@ def _register_admin_roles(bot):
         try:
             add_balance(uid, int(amount), "تعويض إداري")
             bot.reply_to(m, f"✅ تم تعويض <code>{uid}</code> بمقدار {amount:,} ل.س", parse_mode="HTML")
+        try:
+            note = (
+                f"{BAND}\n"
+                f"💸 تم إضافة تعويض إلى محفظتك بقيمة {_fmt_syp(amount)}.\n"
+                f"لو عندك أي استفسار راسلنا.\n"
+                f"{BAND}"
+            )
+            bot.send_message(uid, _append_bot_link_for_user(note), parse_mode="HTML")
+        except Exception:
+            pass
+    
         except Exception as e:
             bot.reply_to(m, f"❌ فشل التعويض: {e}")
         finally:
