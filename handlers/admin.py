@@ -2449,6 +2449,7 @@ def _register_admin_roles(bot):
         bot.answer_callback_query(c.id)
         return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
 
+    # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
@@ -2462,9 +2463,11 @@ def _register_admin_roles(bot):
             bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
         return discount_menu(c.message)
 
+
     def _disc_toggle_all(_to: bool) -> int:
+        """تشغيل/إيقاف جميع أكواد الخصم دفعة واحدة."""
         try:
-            items = list_discounts() or []
+        items = list_discounts() or []
         except Exception:
             return 0
         changed = 0
@@ -2476,18 +2479,25 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
         return changed
+
+
     def _get_user_by_id(uid: int):
-    try:
-        r = (get_table(USERS_TABLE)
-             .select("user_id, name, balance, admin_approved, points")
-             .eq("user_id", uid)
-             .limit(1)
-             .execute())
-        rows = getattr(r, "data", None) or []
-        return rows[0] if rows else None
-    except Exception as e:
-        import logging; logging.exception("manage_user: DB error: %s", e)
-        return None
+        """قراءة صف العميل من جدول houssin363 عبر user_id فقط."""
+        try:
+            r = (
+                get_table(USERS_TABLE)
+                .select("user_id,name,balance,admin_approved,points")
+                .eq("user_id", uid)
+                .limit(1)
+                .execute()
+            )
+            rows = getattr(r, "data", None) or []
+            return rows[0] if rows else None
+        except Exception as e:
+            import logging
+            logging.exception("manage_user: DB error: %s", e)
+            return None
+
  
     # =========================
     # 👤 إدارة عميل — مبسّطة
