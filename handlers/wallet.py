@@ -59,6 +59,7 @@ def _card_footer() -> str:
     return "━━━━━━━━━━━━━━━━"
 
 import logging
+from services.feature_flags import block_if_disabled
 
 transfer_steps = {}
 
@@ -246,6 +247,8 @@ def register(bot, history=None):
 
     @bot.message_handler(func=lambda msg: msg.text == "💰 محفظتي")
     def handle_wallet(msg):
+        if block_if_disabled(bot, msg.chat.id, "menu:wallet", "القائمة: محفظتي"):
+            return
         # ✅ إنهاء أي رحلة/مسار سابق عالق
         try:
             from handlers.start import _reset_user_flows
