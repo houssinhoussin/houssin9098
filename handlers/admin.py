@@ -121,24 +121,31 @@ def admin_menu(msg):
 
 def _collect_clients_with_names():
     """
-    يرجع قائمة [(user_id:int, name:str|None)] من جدول houssin363.
-    الأعمدة الموجودة لديك: user_id, name فقط.
+    يرجّع [(user_id:int, name:str|None), ...] من جدول العملاء المحدد USERS_TABLE.
+    يعتمد فقط على عمود user_id و name.
     """
     try:
-        res = get_table(USERS_TABLE).select("user_id,name").execute()
+        res = get_table(USERS_TABLE).select("user_id, name").execute()
         rows = res.data or []
     except Exception:
         rows = []
 
     out = []
     for r in rows:
+        uid = r.get("user_id")
+        if uid is None:
+            continue
+        # حوّل لرقم بأمان
         try:
-            uid_int = int(str(r.get("user_id")).strip())
+            uid_int = int(str(uid).strip())
+            if uid_int <= 0:
+                continue
         except Exception:
             continue
         nm = (r.get("name") or "").strip() or None
         out.append((uid_int, nm))
     return out
+
     
 from services.state_service import purge_state
 from services.products_admin import set_product_active, get_product_active, bulk_ensure_products
@@ -2692,22 +2699,22 @@ def _register_admin_roles(bot):
             return
         uid = st["user_id"]
         try:
-            amount = int(m.text)
+            amount = int((m.text or "").strip())
         except Exception:
             return bot.reply_to(m, "❌ أدخل رقم صحيح.")
+
         try:
             add_balance(uid, int(amount), "تعويض إداري")
             bot.reply_to(m, f"✅ تم تعويض <code>{uid}</code> بمقدار {amount:,} ل.س", parse_mode="HTML")
         except Exception as e:
             bot.reply_to(m, f"❌ فشل التعويض: {e}")
         finally:
+            # انهِ وضع التعويض وأعد المستخدم لمرحلة إدخال آيدي جديد
             _refund_state.pop(m.from_user.id, None)
-
-            # اطلب الآيدي من جديد
             _manage_user_state[m.from_user.id] = {"step": "ask_id"}
+            rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            rk.row("⬅️ رجوع")
             try:
-                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                rk.row("⬅️ رجوع")
                 bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
