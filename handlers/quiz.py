@@ -203,11 +203,13 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int):
 def wire_handlers(bot: TeleBot):
 
     # بدء
-    @bot.message_handler(func=lambda m: isinstance(m.text, str) and ((m.text or "").strip() in {"/quiz","🎯 الحزازير (ربحي)","🎯 الحزازير","الحزازير (ربحي)","الحزازير","quiz"}), content_types=['text'])
+    @bot.message_handler(func=lambda m: isinstance(m.text, str) and (
+        (m.text or "").strip() in {"/quiz", "quiz"} or
+        (m.text or "").strip().startswith("🎯 الحزازير")
+    ), content_types=['text'])
     def _catch_all(m):
         txt = (m.text or "").strip()
-        QUIZ_TRIGGERS = {"/quiz", "🎯 الحزازير (ربحي)", "🎯 الحزازير", "الحزازير (ربحي)", "الحزازير", "quiz"}
-        if txt in QUIZ_TRIGGERS:
+        if txt in {"/quiz", "quiz"} or txt.startswith("🎯 الحزازير"):
             # ✅ إنهاء أي رحلة/مسار سابق عالق
             try:
                 from handlers.start import _reset_user_flows
@@ -217,8 +219,8 @@ def wire_handlers(bot: TeleBot):
 
             chat_id = m.chat.id
 
-            # 🔒 الحارس: لو الميزة مقفّلة، يمنع الدخول
-            if _quiz_guard(bot, chat_id):
+            # 🔒 الحارس: يمنع الدخول عند الإيقاف ويعرض اعتذار
+            if require_feature_or_alert(bot, chat_id, "menu:riddles", "القائمة: الحزازير", default_active=True):
                 return
 
             user_id = m.from_user.id
