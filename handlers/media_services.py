@@ -12,6 +12,26 @@ except Exception:
 from handlers.keyboards import media_services_menu
 import logging
 
+# أعلى الملف بعد الاستيرادات:
+def _norm(s: str) -> str:
+    if not isinstance(s, str): return ""
+    s = s.strip()
+    # شيل الإيموجي والمسافات والفروقات البسيطة بالعربية
+    import re
+    s = re.sub(r"[\u2600-\u27BF\U0001F300-\U0001FAD6\U0001FA70-\U0001FAFF\U0001F900-\U0001F9FF]", "", s)
+    s = re.sub(r"\s+", "", s)
+    return s.replace("أ","ا").replace("إ","ا").replace("آ","ا").replace("ة","ه").replace("ى","ي")
+
+LABELS_MEDIA = {
+    _norm("🎭 خدمات سوشيال/ميديا"),
+    _norm("🖼️ خدمات إعلانية وتصميم"),
+}
+
+# داخل register_media_services(...)
+@bot.message_handler(func=lambda msg: _norm(msg.text) in LABELS_MEDIA)
+def open_media(msg):
+
+
 # حارس التأكيد الموحّد (يحذف الكيبورد + يمنع الدبل-كليك)
 try:
     from services.ui_guards import confirm_guard
