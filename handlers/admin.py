@@ -116,27 +116,7 @@ def _collect_clients_with_names():
         nm = (r.get("name") or "").strip() or None
         out.append((uid_int, nm))
     return out
-
-        rows = res.data or []
-    except Exception:
-        rows = []
-
-    out = []
-    for r in rows:
-        uid = r.get("user_id") or r.get("id") or r.get("tg_id")
-        if uid is None:
-            continue
-        try:
-            uid_int = int(str(uid).strip())
-        except (TypeError, ValueError):
-            # نتجاهل الصف الذي لا يحمل آيدي رقمي
-            continue
-
-        nm = r.get("full_name") or r.get("name") or r.get("first_name")
-        nm = (nm or "").strip() or None
-        out.append((uid_int, nm))
-    return out
-
+    
 from services.state_service import purge_state
 from services.products_admin import set_product_active, get_product_active, bulk_ensure_products
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
