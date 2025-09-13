@@ -216,11 +216,6 @@ def handle_companies_transfer(msg):
     from handlers.companies_transfer import register_companies_transfer
     register_companies_transfer(bot, history)
 
-@bot.message_handler(func=lambda msg: msg.text == "💳 تحويل رصيد سوري")
-def handle_syrian_units(msg):
-    from handlers.syr_units import start_syriatel_menu
-    start_syriatel_menu(bot, msg)
-
 @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
 def handle_internet(msg):
     from handlers.internet_providers import start_internet_provider_menu
