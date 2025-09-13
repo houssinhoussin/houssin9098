@@ -1,6 +1,15 @@
 from telebot import types
 import logging
 
+# ✅ استدعاء حالة الميزة بأمان (يدعم اسمين شائعين)
+try:
+    from services.feature_flags import is_feature_active as _feat_on
+except Exception:
+    try:
+        from services.feature_flags import is_active as _feat_on
+    except Exception:
+        def _feat_on(key: str) -> bool:
+            return True  # في حال غياب النظام، لا نعطّل شيء
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     # الصف 1: المنتجات + اللعبة
