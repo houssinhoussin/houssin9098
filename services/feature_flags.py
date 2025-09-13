@@ -117,7 +117,6 @@ LEGACY_UNIQUE: Dict[str, str] = {
     "internet_provider_rannet": "مزود — رن نت",
     "internet_provider_samanet": "مزود — سما نت",
     "internet_provider_omnia": "مزود — أمنية",
-    "internet_provider_nas": "مزود — ناس",
     "internet_provider_hypernet": "مزود — هايبر نت",
     "internet_provider_mts": "مزود — MTS",
     "internet_provider_yara": "مزود — يارا",
