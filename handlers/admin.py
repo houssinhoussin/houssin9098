@@ -1595,7 +1595,7 @@ def register(bot, history):
         return admin_menu(m)
 
     # افتح لوحة الأدمن بالضغط على أزرار مثل: "ادمن" / "الأدمن" / "لوحة الأدمن" / "Admin"…
-   @bot.message_handler(func=lambda m: (m.text and _is_admin_msg(m) and _match_admin_alias(
+    @bot.message_handler(func=lambda m: (m.text and _is_admin_msg(m) and _match_admin_alias(
         m.text, ["الأدمن","الادمن","لوحة الأدمن","ادمن","Admin","ADMIN"]
     )))
     def __open_admin_from_alias(m):
