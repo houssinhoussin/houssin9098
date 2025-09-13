@@ -539,7 +539,8 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
         to = 0 if active else 1
         kb.add(types.InlineKeyboardButton(
             text=f"{lamp} {label}",
-            callback_data=f"adm_feat_t:{k}:{to}:{page}"
+            callback_data=f"adm_feat_tg:{k}:{to}:{_slug(group_name)}:{page}"
+
         ))
 
     # شريط الصفحات
@@ -901,7 +902,29 @@ def register(bot, history):
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
         except Exception as e:
             logging.exception("[ADMIN] feature group cb failed: %s", e)
-
+            
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_tg:") and _is_admin_cb(c))
+    def adm_feature_toggle_in_group(call: types.CallbackQuery):
+        try:
+            _, key, to, gslug, page_s = call.data.split(":", 4)
+            set_feature_active(key, bool(int(to)))
+        except Exception:
+            try: bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+            except Exception: pass
+            return
+        try:
+            grouped = list_features_grouped() or {}
+            # رجّع اسم المجموعة الحقيقي من الـ slug
+            group = next((n for n in grouped.keys() if _slug(n) == gslug), None)
+            if not group:
+                return bot.answer_callback_query(call.id, "❌ المجموعة غير موجودة.")
+            kb = _features_group_items_markup(group, int(page_s))
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=kb)
+            bot.answer_callback_query(call.id, "✅ تم التحديث.")
+        except Exception:
+            try: bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
+            except Exception: pass
+        
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
     def _features_group_toggle_all(c):
         try:
@@ -1572,9 +1595,12 @@ def register(bot, history):
         return admin_menu(m)
 
     # افتح لوحة الأدمن بالضغط على أزرار مثل: "ادمن" / "الأدمن" / "لوحة الأدمن" / "Admin"…
-    @bot.message_handler(func=lambda m: (m.text and _is_admin_msg(m) and _match_admin_alias(
+   @bot.message_handler(func=lambda m: (m.text and _is_admin_msg(m) and _match_admin_alias(
         m.text, ["الأدمن","الادمن","لوحة الأدمن","ادمن","Admin","ADMIN"]
     )))
+    def __open_admin_from_alias(m):
+        _clear_admin_states(m.from_user.id)
+        return admin_menu(m)
 
     @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and _is_admin_msg(m))
     def _admin_back_text(m):
@@ -1978,7 +2004,7 @@ def register(bot, history):
                 logging.exception("[ADMIN] update admin_msgs failed: %s", ee)
 
     # ✅ بدّل إدخال الـID بمتصفح ملفات/منتجات إنلاين
-    @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and _is_admin_msg(m))
     def admin_products_browser(m):
         bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
 
@@ -2745,8 +2771,7 @@ def _register_admin_roles(bot):
             bot.answer_callback_query(c.id, "❌ غير مفهوم")
         except Exception:
             pass
-
-
+            
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
     def _refund_amount(m):
         st = _refund_state.get(m.from_user.id)
@@ -2761,21 +2786,22 @@ def _register_admin_roles(bot):
         try:
             add_balance(uid, int(amount), "تعويض إداري")
             bot.reply_to(m, f"✅ تم تعويض <code>{uid}</code> بمقدار {amount:,} ل.س", parse_mode="HTML")
-        try:
-            note = (
-                f"{BAND}\n"
-                f"💸 تم إضافة تعويض إلى محفظتك بقيمة {_fmt_syp(amount)}.\n"
-                f"لو عندك أي استفسار راسلنا.\n"
-                f"{BAND}"
-            )
-            bot.send_message(uid, _append_bot_link_for_user(note), parse_mode="HTML")
-        except Exception:
-            pass
-    
+
+            # إشعار العميل (اختياري)
+            try:
+                note = (
+                    f"{BAND}\n"
+                    f"💸 تم إضافة تعويض إلى محفظتك بقيمة {_fmt_syp(amount)}.\n"
+                    f"لو عندك أي استفسار راسلنا.\n"
+                    f"{BAND}"
+                )
+                bot.send_message(uid, _append_bot_link_for_user(note), parse_mode="HTML")
+            except Exception:
+                pass
+
         except Exception as e:
             bot.reply_to(m, f"❌ فشل التعويض: {e}")
         finally:
-            # انهِ وضع التعويض وأعد المستخدم لمرحلة إدخال آيدي جديد
             _refund_state.pop(m.from_user.id, None)
             _manage_user_state[m.from_user.id] = {"step": "ask_id"}
             rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
