@@ -1999,7 +1999,7 @@ def register(bot, history):
             logging.exception("[ADMIN] bulk ensure products failed: %s", e)
             bot.reply_to(m, "❌ فشلت المزامنة. تفقد السجلات.")
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_g:") and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_g:") and _is_admin_cb(c))
     def adm_group_open(call: types.CallbackQuery):
         slug = call.data.split(":", 1)[1]
         group_name = next((g for g in PRODUCTS.keys() if _slug(g) == slug), None)
@@ -2013,7 +2013,7 @@ def register(bot, history):
             bot.send_message(call.message.chat.id, f"📁 {group_name} — اختر منتجًا:", reply_markup=_admin_products_list_markup(group_name))
         bot.answer_callback_query(call.id)
 
-    @bot.callback_query_handler(func=lambda c: c.data == "adm_prod_back" and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data == "adm_prod_back" and _is_admin_cb(c))
     def adm_back(call: types.CallbackQuery):
         try:
             bot.edit_message_text("اختر الملف لعرض منتجاته:", call.message.chat.id, call.message.message_id,
@@ -2022,7 +2022,7 @@ def register(bot, history):
             bot.send_message(call.message.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
         bot.answer_callback_query(call.id)
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_i:") and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_i:") and _is_admin_cb(c))
     def adm_product_open(call: types.CallbackQuery):
         pid = int(call.data.split(":", 1)[1])
         state = "شغّال 🟢" if get_product_active(pid) else "موقوف 🔴"
@@ -2034,7 +2034,7 @@ def register(bot, history):
             bot.send_message(call.message.chat.id, txt, reply_markup=_admin_product_actions_markup(pid))
         bot.answer_callback_query(call.id)
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and _is_admin_cb(c))
     def adm_product_toggle(call: types.CallbackQuery):
         # كان سابقًا: _, pid, to = call.data.split(":")
         try:
@@ -2057,7 +2057,7 @@ def register(bot, history):
 
     # ===== لوحة المزايا (Feature Flags) =====
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and _is_admin_cb(c))
     def adm_feature_toggle(call: types.CallbackQuery):
         try:
             prefix = "adm_feat_t:"
@@ -2097,7 +2097,7 @@ def register(bot, history):
                 pass
         bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and _is_admin_cb(c))
     def adm_feature_page(call: types.CallbackQuery):
         try:
             page = int(call.data.split(":", 1)[1])
