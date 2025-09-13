@@ -96,6 +96,29 @@ except NameError:
 # ===== End proxy =====
 USERS_TABLE = "houssin363"
 logging.info(f"[admin] USERS_TABLE set to: {USERS_TABLE}")
+# ====== Admin menu (global) ======
+def admin_menu(msg):
+    if not allowed(msg.from_user.id, "admin:menu"):
+        return bot.reply_to(msg, "صلاحية الأدمن فقط.")
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
+
+    if is_primary:
+        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+        kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين")
+        kb.row("🎟️ أكواد خصم", "👤 إدارة عميل")
+        kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
+        kb.row("✉️ رسالة لعميل", "⛔ حظر عميل")
+        kb.row("✅ فكّ الحظر", "⚙️ النظام")
+        kb.row("🛒 إدارة المنتجات")
+        kb.row("⬅️ رجوع")
+    else:
+        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+        kb.row("🛒 إدارة المنتجات")
+        kb.row("⬅️ رجوع")
+
+    bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
+
 def _collect_clients_with_names():
     """
     يرجع قائمة [(user_id:int, name:str|None)] من جدول houssin363.
@@ -1558,28 +1581,6 @@ def register(bot, history):
             return admin_menu(c.message)
         except Exception:
             bot.send_message(c.message.chat.id, "قائمة الأدمن.")
-    def admin_menu(msg):
-        if not allowed(msg.from_user.id, "admin:menu"):
-            return bot.reply_to(msg, "صلاحية الأدمن فقط.")
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
-
-        if is_primary:
-            kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-            kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين")
-            kb.row("🎟️ أكواد خصم", "👤 إدارة عميل")
-            kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
-            kb.row("✉️ رسالة لعميل", "⛔ حظر عميل")
-            kb.row("✅ فكّ الحظر", "⚙️ النظام")
-            kb.row("🛒 إدارة المنتجات")  # ← أضف هذا السطر هنا
-            kb.row("⬅️ رجوع")
-        else:
-            kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-            kb.row("🛒 إدارة المنتجات")      # ← وأضِفه هنا أيضًا لغير الأدمن الرئيسي
-            kb.row("⬅️ رجوع")
-
-        bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
-
 
     # =========================
     # 📬 ترحيب — نحن شغالين (مباشر)
@@ -2612,13 +2613,17 @@ def _register_admin_roles(bot):
             return
 
         if act == "refund":
-            bot.send_message(c.message.chat.id, "اكتب قيمة التعويض (ل.س).")
+            # أوقف ask_id مؤقتًا كي لا يتداخل مع إدخال مبلغ التعويض
+            _manage_user_state.pop(c.from_user.id, None)
             _refund_state[c.from_user.id] = {"user_id": uid}
+
+            bot.send_message(c.message.chat.id, "اكتب قيمة التعويض (ل.س).")
             try:
                 bot.answer_callback_query(c.id)
             except Exception:
-                pass
+              pass
             return
+
 
         if act == "profile":
             try:
