@@ -16,6 +16,9 @@ from services.commands_setup import setup_bot_commands
 # NEW: عُمّال الإشعارات والصيانة
 from services.outbox_worker import start_outbox_worker
 from services.maintenance_worker import start_housekeeping
+from handlers import links as links_handler
+
+links_handler.register(bot, history)
 
 # ✅ تعديل بسيط ليتوافق مع ويندوز: تشغيل الخادم الوهمي يصبح اختياريًا
 ENABLE_DUMMY_SERVER = os.environ.get("ENABLE_DUMMY_SERVER", "0") == "1"
