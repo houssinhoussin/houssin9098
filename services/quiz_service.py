@@ -326,13 +326,13 @@ def get_wallet(user_id: int) -> Tuple[int, int]:
 def add_points(user_id: int, delta: int) -> Tuple[int, int]:
     bal, pts = get_wallet(user_id)
     new_pts = max(0, pts + int(delta))
-    sb_update("USERS_TABLE", {"user_id": f"eq.{user_id}"}, {"points": new_pts})
+    sb_update(USERS_TABLE, {"user_id": f"eq.{user_id}"}, {"points": new_pts})
     return (bal, new_pts)
 
 def change_balance(user_id: int, delta: int) -> Tuple[int, int]:
     bal, pts = get_wallet(user_id)
     new_bal = max(0, bal + int(delta))
-    sb_update("USERS_TABLE", {"user_id": f"eq.{user_id}"}, {"balance": new_bal})
+    sb_update(USERS_TABLE, {"user_id": f"eq.{user_id}"}, {"balance": new_bal})
     return (new_bal, pts)
 
 # تسجيل دخل المحاولة
@@ -843,7 +843,7 @@ def wipe_user_for_fresh_start(user_id: int):
     يصفر نقاط اللاعب ويحذف تقدّمه (لا يمس رصيده النقدي).
     """
     try:
-        sb_update("USERS_TABLE", {"user_id": f"eq.{user_id}"}, {"points": 0})
+        sb_update(USERS_TABLE, {"user_id": f"eq.{user_id}"}, {"points": 0})
         sb_delete("quiz_progress", {"user_id": f"eq.{user_id}"})
         sb_delete("quiz_templates_completed", {"user_id": f"eq.{user_id}"})
     except Exception as e:
