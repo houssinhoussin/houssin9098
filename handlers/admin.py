@@ -94,19 +94,29 @@ except NameError:
             return noop
     bot = _BotRecorder()
 # ===== End proxy =====
-USERS_TABLE = (os.getenv("SUPABASE_TABLE_NAME") or DEFAULT_TABLE or "houssin363")  # ← يُحدَّد من .env أولاً
-# توحيد الأسماء: لو ما زالت القيمة USERS_TABLE (الافتراضية القديمة) استبدلها بـ houssin363 لتفادي 404
-if USERS_TABLE == "USERS_TABLE":
-    USERS_TABLE = "houssin363"
+USERS_TABLE = "houssin363"
 logging.info(f"[admin] USERS_TABLE set to: {USERS_TABLE}")
 def _collect_clients_with_names():
     """
-    يرجع قائمة (user_id, name) من جدول العملاء المحدد.
-    الأعمدة المقبولة للاسم: full_name / name / first_name (حسب المتوفر).
-    يتجاوز أي صف لا يحوي user_id رقمي.
+    يرجع قائمة [(user_id:int, name:str|None)] من جدول houssin363.
+    الأعمدة الموجودة لديك: user_id, name فقط.
     """
     try:
-        res = get_table(USERS_TABLE).select("user_id, id, tg_id, full_name, name, first_name").execute()
+        res = get_table(USERS_TABLE).select("user_id,name").execute()
+        rows = res.data or []
+    except Exception:
+        rows = []
+
+    out = []
+    for r in rows:
+        try:
+            uid_int = int(str(r.get("user_id")).strip())
+        except Exception:
+            continue
+        nm = (r.get("name") or "").strip() or None
+        out.append((uid_int, nm))
+    return out
+
         rows = res.data or []
     except Exception:
         rows = []
@@ -2486,36 +2496,49 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
         return changed
-
+    def _get_user_by_id(uid: int):
+    try:
+        r = (get_table(USERS_TABLE)
+             .select("user_id, name, balance, admin_approved, points")
+             .eq("user_id", uid)
+             .limit(1)
+             .execute())
+        rows = getattr(r, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as e:
+        import logging; logging.exception("manage_user: DB error: %s", e)
+        return None
+ 
     # =========================
     # 👤 إدارة عميل — مبسّطة
     # =========================
 
     @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
-    def manage_user_menu_alias(m):
-        return manage_user_menu(m)
-
     def manage_user_menu(m):
         _manage_user_state[m.from_user.id] = {"step": "ask_id"}
-        bot.send_message(m.chat.id, "أرسل آيدي العميل:")
+        rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        rk.row("⬅️ رجوع")
+        bot.send_message(m.chat.id, "أرسل آيدي العميل (أرقام):\n/cancel لإلغاء", reply_markup=rk)
     @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
     def manage_user_get_id(m):
-        # 1) قراءة الآيدي
-        try:
-            uid = parse_user_id(m.text)
-        except Exception:
-            return bot.reply_to(m, "❌ آيدي غير صالح.")
+        txt = (m.text or "").strip()
+        if txt in ("/admin", "/cancel", "⬅️ رجوع"):
+            _clear_admin_states(m.from_user.id)
+            return admin_menu(m)
 
-        # 2) التحقق من وجوده (نجرب user_id/id/tg_id بفلتر OR واحد)
         try:
-            q = (
-                get_table(USERS_TABLE)
-                .select("user_id, id, tg_id, name, full_name")
-                .or_(f"user_id.eq.{uid},id.eq.{uid},tg_id.eq.{uid}")
-                .limit(1)
-                .execute()
-            )
+            uid = parse_user_id(txt)
+        except Exception:
+            return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
+
+        # التحقق بالـ user_id فقط
+        try:
+            q = (get_table(USERS_TABLE)
+                 .select("user_id,name,balance,points")
+                 .eq("user_id", uid)
+                 .limit(1)
+                 .execute())
             rows = getattr(q, "data", None) or []
             row = rows[0] if rows else None
             if not row:
@@ -2524,22 +2547,21 @@ def _register_admin_roles(bot):
             import logging; logging.exception("manage_user: DB error: %s", e)
             return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
 
-        # 3) عرض قائمة إجراءات العميل
         _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("👁️ عرض مختصر", callback_data=f"mu:profile:{uid}"),
-            types.InlineKeyboardButton("✉️ رسالة", callback_data=f"mu:message:{uid}"),
+            types.InlineKeyboardButton("✉️ رسالة",      callback_data=f"mu:message:{uid}"),
         )
         kb.row(
-            types.InlineKeyboardButton("⛔ حظر", callback_data=f"mu:ban:{uid}"),
-            types.InlineKeyboardButton("✅ فكّ الحظر", callback_data=f"mu:unban:{uid}"),
+            types.InlineKeyboardButton("⛔ حظر",        callback_data=f"mu:ban:{uid}"),
+            types.InlineKeyboardButton("✅ فكّ الحظر",  callback_data=f"mu:unban:{uid}"),
         )
         kb.row(
             types.InlineKeyboardButton("💸 تعويض/استرجاع", callback_data=f"mu:refund:{uid}"),
-            types.InlineKeyboardButton("🧾 آخر 5 طلبات", callback_data=f"mu:last5:{uid}"),
+            types.InlineKeyboardButton("🧾 آخر 5 طلبات",   callback_data=f"mu:last5:{uid}"),
         )
-        kb.row(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
         bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
@@ -2607,38 +2629,38 @@ def _register_admin_roles(bot):
             return
         if act == "profile":
             try:
-                u = get_table(USERS_TABLE).select("user_id, full_name, name, first_name").eq("user_id", uid).limit(1).execute()
+                u = get_table(USERS_TABLE).select("user_id, name, balance, points").eq("user_id", uid).limit(1).execute()
                 row = (getattr(u, "data", None) or [None])[0] or {}
             except Exception:
                 row = {}
-            # الرصيد (لو الخدمة متوفرة)
             try:
                 bal = get_balance(uid)
             except Exception:
                 bal = None
             txt = (
                 f"👤 العميل: {uid}\n"
-                f"الاسم: {(row.get('full_name') or row.get('name') or row.get('first_name') or '—')}\n"
-                f"الرصيد: {('—' if bal is None else f'{int(bal):,} ل.س')}"
+                f"الاسم: {row.get('name') or '—'}\n"
+                f"الرصيد: {('—' if bal is None else f'{int(bal):,} ل.س')}\n"
+                f"النقاط: {int(row.get('points') or 0)}"
             )
             bot.send_message(c.message.chat.id, txt)
             try: bot.answer_callback_query(c.id)
             except Exception: pass
             return
 
-        if act == "ban":
-            # إعادة استخدام فلو الحظر العام
-            _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
-            kb = types.InlineKeyboardMarkup(row_width=2)
-            kb.row(
-                types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
-                types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
-            )
-            kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
-            bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
-            try: bot.answer_callback_query(c.id)
-            except Exception: pass
-            return
+                if act == "ban":
+                    # إعادة استخدام فلو الحظر العام
+                    _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
+                    kb = types.InlineKeyboardMarkup(row_width=2)
+                    kb.row(
+                        types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
+                        types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
+                    )
+                    kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
+                    bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
+                    try: bot.answer_callback_query(c.id)
+                    except Exception: pass
+                    return
 
         if act == "unban":
             try:
