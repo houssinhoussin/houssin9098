@@ -14,6 +14,7 @@ except Exception:
 
 import logging
 import re
+from services.feature_flags import block_if_disabled
 
 # حرس نقر سريع + تنظيف كيبورد (لو استخدمنا Inline)
 try:
@@ -99,6 +100,9 @@ def register(bot, user_state):
 
     @bot.message_handler(func=lambda msg: msg.text == "📦 طلب احتياجات منزلية او تجارية")
     def start_wholesale(msg):
+        if block_if_disabled(bot, msg.chat.id, "wholesale", "شراء جملة"):
+            return
+
         # ✅ إنهاء أي رحلة/مسار سابق عالق
         try:
             from handlers.start import _reset_user_flows
