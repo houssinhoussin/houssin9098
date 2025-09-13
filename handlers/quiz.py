@@ -16,7 +16,15 @@ from services.quiz_service import (
 from services.feature_flags import require_feature_or_alert
 
 # ---------- رسومات/نصوص ----------
-
+# 🔒 حارس ميزة الحزازير: يمنع أي دخول لو كانت مطفّاة
+def _quiz_guard(bot: TeleBot, chat_id: int) -> bool:
+    """
+    يرجّع True لو لازم نوقف (الميزة مطفّاة). يرسل تنبيه لطيف تلقائيًا.
+    """
+    if require_feature_or_alert(bot, chat_id, "menu:riddles", "الحزازير", default_active=True):
+        return True
+    return False
+    
 def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
     table = settings.get(group_key, {})
     acc = []
@@ -209,8 +217,8 @@ def wire_handlers(bot: TeleBot):
 
             chat_id = m.chat.id
 
-            # 🔒 الحارس: لو الميزة مقفّلة، يرجّع True ويرسل اعتذار تلقائيًا
-            if require_feature_or_alert(bot, chat_id, "menu:riddles", "القائمة: الحزازير", default_active=True):
+            # 🔒 الحارس: لو الميزة مقفّلة، يمنع الدخول
+            if _quiz_guard(bot, chat_id):
                 return
 
             user_id = m.from_user.id
@@ -223,6 +231,9 @@ def wire_handlers(bot: TeleBot):
     # ابدأ اللعب من الصفر — يبدأ السؤال الأول مباشرة وبنفس الشاشة
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_startover")
     def on_startover(call):
+        # 🔒 امنع التنفيذ لو الميزة مطفّاة
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id, "تم بدء لعبة جديدة: تصفير النقاط وحذف التقدّم.")
@@ -319,6 +330,8 @@ def wire_handlers(bot: TeleBot):
     # نقاطي — شاشة واحدة (تحرير الرسالة)
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_points")
     def on_points(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         bal, pts = get_wallet(user_id)
@@ -334,6 +347,8 @@ def wire_handlers(bot: TeleBot):
     # تحويل النقاط إلى رصيد — Alert دائمًا
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_convert")
     def on_convert(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         try:
             pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
@@ -352,6 +367,8 @@ def wire_handlers(bot: TeleBot):
     # الترتيب — شاشة واحدة (تحرير الرسالة)
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_rank")
     def on_rank(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         try: bot.answer_callback_query(call.id)
@@ -375,6 +392,8 @@ def wire_handlers(bot: TeleBot):
     # شرح — شاشة واحدة (تحرير الرسالة)
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_help")
     def on_help(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         try: bot.answer_callback_query(call.id)
         except: pass
@@ -387,6 +406,8 @@ def wire_handlers(bot: TeleBot):
     # التالي/متابعة — شاشة واحدة
     @bot.callback_query_handler(func=lambda c: c.data in ("quiz_next", "quiz_resume"))
     def on_next(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         ensure_user_wallet(user_id)
@@ -478,6 +499,8 @@ def wire_handlers(bot: TeleBot):
     # اختيار الإجابة
     @bot.callback_query_handler(func=lambda c: c.data.startswith("quiz_ans:"))
     def on_answer(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
@@ -571,6 +594,8 @@ def wire_handlers(bot: TeleBot):
     # إلغاء — يعيد إلى "القائمة الرئيسية" بتحديث نفس الشاشة
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_cancel")
     def on_cancel(call):
+        if _quiz_guard(bot, call.message.chat.id):
+            return
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id, "تم الإلغاء.")
