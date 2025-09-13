@@ -185,6 +185,20 @@ from services.wallet_service import (
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
+def _is_admin_user_id(uid: int) -> bool:
+    return (uid == ADMIN_MAIN_ID) or (uid in ADMINS)
+
+def _is_admin_msg(m) -> bool:
+    try:
+        return _is_admin_user_id(m.from_user.id)
+    except Exception:
+        return False
+
+def _is_admin_cb(c) -> bool:
+    try:
+        return _is_admin_user_id(c.from_user.id)
+    except Exception:
+        return False
 
 # ===== Override 'allowed' محليًا: ADMINS و ADMIN_MAIN_ID لديهم كل الصلاحيات مؤقتًا =====
 def allowed(user_id: int, perm: str) -> bool:
@@ -938,13 +952,13 @@ def register(bot, history):
             pass
 
 
-    @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and msg.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and _is_admin_msg(msg))
     def handle_done(msg):
         req_id = int(re.match(r'/done_(\d+)', msg.text).group(1))
         delete_pending_request(req_id)
         bot.reply_to(msg, f"✅ تم إنهاء الطلب {req_id}")
 
-    @bot.message_handler(func=lambda msg: msg.text and re.match(r'/cancel_(\d+)', msg.text) and msg.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda msg: msg.text and re.match(r'/cancel_(\d+)', msg.text) and _is_admin_msg(msg))
     def handle_cancel(msg):
         req_id = int(re.match(r'/cancel_(\d+)', msg.text).group(1))
         delete_pending_request(req_id)
@@ -953,7 +967,7 @@ def register(bot, history):
     # ────────────────────────────────────────────────
     #  ✉️ رسالة/🖼️ صورة للعميل (HTML + ترويسة بسيطة)
     # ────────────────────────────────────────────────
-    @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_message_")) and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_message_")) and _is_admin_cb(c))
     def cb_queue_message(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:message'):
             return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
@@ -965,7 +979,7 @@ def register(bot, history):
         bot.answer_callback_query(c.id)
         bot.send_message(c.from_user.id, f"📝 اكتب رسالتك بصيغة HTML.\n{CANCEL_HINT_ADMIN}")
 
-    @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and c.from_user.id in ADMINS)
+    @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and _is_admin_cb(c))
     def cb_queue_photo(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:photo'):
             return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
@@ -1556,18 +1570,16 @@ def register(bot, history):
     @bot.message_handler(commands=['admin'])
     def __admin_cmd(m):
         _clear_admin_states(m.from_user.id)
-        if m.from_user.id not in ADMINS:
+        if not _is_admin_msg(m):
             return bot.reply_to(m, "صلاحية الأدمن فقط.")
         return admin_menu(m)
 
     # افتح لوحة الأدمن بالضغط على أزرار مثل: "ادمن" / "الأدمن" / "لوحة الأدمن" / "Admin"…
-    @bot.message_handler(func=lambda m: (m.text and (m.from_user.id in ADMINS) and _match_admin_alias(
-        m.text, ["الأدمن", "الادمن", "لوحة الأدمن", "ادمن", "Admin", "ADMIN"]
+    @bot.message_handler(func=lambda m: (m.text and _is_admin_msg(m) and _match_admin_alias(
+        m.text, ["الأدمن","الادمن","لوحة الأدمن","ادمن","Admin","ADMIN"]
     )))
-    def __admin_alias_open(m):
-        return admin_menu(m)
 
-    @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and (m.from_user.id in ADMINS))
+    @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and _is_admin_msg(m))
     def _admin_back_text(m):
         try:
             return admin_menu(m)
@@ -1903,7 +1915,7 @@ def register(bot, history):
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
     
-    @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and _is_admin_msg(m))
     def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.row("🚫 إيقاف منتج", "✅ تشغيل منتج")
@@ -1912,7 +1924,7 @@ def register(bot, history):
         bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
  
     # ⏳ عرض طابور الانتظار للأدمن
-    @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and _is_admin_msg(m))
     def admin_queue_list(m: types.Message):
         # حمّل أول 30 طلب أقدم فالأحدث
         try:
@@ -1974,7 +1986,7 @@ def register(bot, history):
         bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
 
     # 🔄 مزامنة كل المنتجات المعرفة في PRODUCTS إلى جدول products
-    @bot.message_handler(func=lambda m: m.text == "🔄 مزامنة المنتجات (DB)" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "🔄 مزامنة المنتجات (DB)" and _is_admin_msg(m))
     def seed_products(m):
         try:
             items = []
@@ -2184,15 +2196,13 @@ def _collect_all_user_ids() -> set[int]:
     return ids
     
 def _register_admin_roles(bot):
-    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and _is_admin_msg(m))
     def admins_roles(m):
         # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
         ids_str = ", ".join(str(x) for x in ADMINS)
         bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
 
-
-
-    @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and m.from_user.id in ADMINS)
+    @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and _is_admin_msg(m))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام","إعدادات النظام","اعدادات النظام","الاعدادات"]))
     def system_menu_alias(m):
         return system_menu(m)
