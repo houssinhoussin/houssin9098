@@ -6,6 +6,7 @@ try:
 except Exception:
     def add_pending_request(*args, **kwargs):
         return None
+from services.feature_flags import block_if_disabled
 
 import logging
 
@@ -15,6 +16,9 @@ pending_support = {}
 def register(bot, history):
     @bot.message_handler(func=lambda msg: msg.text == "🛠️ الدعم الفني")
     def request_support(msg):
+        if block_if_disabled(bot, msg.chat.id, "menu:support", "القائمة: الدعم الفني"):
+            return
+
         user_id = msg.from_user.id
         if user_id in pending_support:
             bot.send_message(msg.chat.id, "⏳ تم إرسال استفسارك بالفعل. الرجاء الانتظار حتى يتم الرد من الإدارة.")
