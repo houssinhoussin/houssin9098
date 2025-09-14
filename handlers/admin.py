@@ -437,6 +437,7 @@ def _features_home_markup():
         types.InlineKeyboardButton("📜 قائمة مسطحة", callback_data="adm_feat_home:flat"),
     )
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
     return kb
 def _features_markup(page: int = 0, page_size: int = 20):
 # ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
@@ -468,6 +469,8 @@ def _features_markup(page: int = 0, page_size: int = 20):
     kb = types.InlineKeyboardMarkup(row_width=1)
     if total == 0:
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
+    # زر رجوع للقائمة الرئيسية للأدمن
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         return kb
 
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -513,7 +516,7 @@ def _features_groups_markup():
         total  = len(items)
         slug = _slug(name)
         kb.add(types.InlineKeyboardButton(f"📁 {name} — {active}/{total}", callback_data=f"adm_feat_g:{slug}:0"))
-    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="adm_feat_home:flat"))
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
     return kb
 
 def _features_group_items_markup(group_name: str, page: int = 0, page_size: int = 10):
@@ -853,7 +856,7 @@ def register(bot, history):
     def features_home(m):
         try:
             bot.send_message(m.chat.id, "اختر طريقة العرض:", reply_markup=_features_home_markup())
-        except Exception as e:
+except Exception as e:
             logging.exception("[ADMIN] features home failed: %s", e)
             bot.send_message(m.chat.id, "تعذّر فتح لوحة المزايا.")
 
@@ -864,10 +867,13 @@ def register(bot, history):
             mode = c.data.split(":",1)[1]
             if mode == "groups":
                 kb = _features_groups_markup()
-                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+                bot.edit_message_text("📁 اختر مجموعة:", c.message.chat.id, c.message.message_id, reply_markup=kb)
             elif mode == "flat":
                 kb = _features_markup(0)
-                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+                bot.edit_message_text("قائمة المزايا (صفحة 1):", c.message.chat.id, c.message.message_id, reply_markup=kb)
+            elif mode == "home":
+                kb = _features_home_markup()
+                bot.edit_message_text("اختر طريقة العرض:", c.message.chat.id, c.message.message_id, reply_markup=kb)
         except Exception as e:
             logging.exception("[ADMIN] feat home cb failed: %s", e)
 
@@ -1602,11 +1608,12 @@ def register(bot, history):
         return admin_menu(m)
 
     @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and _is_admin_msg(m))
-    def _admin_back_text(m):
-        try:
-            return admin_menu(m)
-        except Exception:
-            bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
+def _admin_back_text(m):
+    try:
+        _clear_admin_states(m.from_user.id)
+        return admin_menu(m)
+    except Exception:
+        bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
 
     @bot.callback_query_handler(func=lambda c: c.data == "admin:home")
     def _admin_home_cb(c):
