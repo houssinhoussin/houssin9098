@@ -608,6 +608,61 @@ def _maybe_delete_admin_message(call, request_id: int, payload: dict):
 
 def register(bot, history):
 
+    # === Global back/cancel handlers (ensure they run before per-step handlers) ===
+    @bot.callback_query_handler(func=lambda c: c.data in ("admin:home","adm_flow:cancel"))
+    def _admin_cb_back_or_cancel(c):
+        try:
+            _clear_admin_states(c.from_user.id)
+        except Exception:
+            pass
+        try:
+            bot.answer_callback_query(c.id, "تم.")
+        except Exception:
+            pass
+        # remove inline keyboard from the triggering message
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        # notify and go to main menu
+        try:
+            if c.data == "admin:home":
+                bot.send_message(c.from_user.id, "تم الرجوع إلى القائمة الرئيسية.")
+            else:
+                bot.send_message(c.from_user.id, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
+        except Exception:
+            pass
+        try:
+            if _is_admin_cb(c):
+                admin_menu(c.message)
+        except Exception:
+            try:
+                # fallback: open menu in private chat
+                from types import SimpleNamespace
+                dummy = SimpleNamespace(from_user=SimpleNamespace(id=c.from_user.id), chat=SimpleNamespace(id=c.from_user.id))
+                admin_menu(dummy)
+            except Exception:
+                pass
+
+    _ADMIN_CANCEL_BACK_ALIASES = ["⬅️ رجوع","رجوع","✖️ إلغاء","إلغاء","الغاء","/cancel","كانسل","cancel"]
+
+    @bot.message_handler(func=lambda m: bool(getattr(m, "text", None)) and _is_admin_msg(m) and _match_admin_alias(m.text, _ADMIN_CANCEL_BACK_ALIASES))
+    def _admin_text_back_or_cancel(m):
+        try:
+            _clear_admin_states(m.from_user.id)
+        except Exception:
+            pass
+        try:
+            bot.reply_to(m, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
+        except Exception:
+            pass
+        try:
+            admin_menu(m)
+        except Exception:
+            pass
+        return
+
+
 
     globals()["bot"] = bot
     try:
