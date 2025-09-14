@@ -459,7 +459,7 @@ def wire_handlers(bot: TeleBot):
         else:
             lines = ["🏆 <b>الترتيب حسب التقدّم</b>"]
             for i, row in enumerate(top, start=1):
-                nm = row.get("name") or f"UID{row.get("user_id")}"
+                nm = row.get("name") or f"UID{row.get('user_id')}"
                 stg = row.get("stage", 0); done = row.get("stage_done", 0)
                 lines.append(f"{i}. <b>{nm}</b> — مرحلة <b>{stg}</b>، منجز <b>{done}</b> سؤالًا")
             text = "\n".join(lines)
