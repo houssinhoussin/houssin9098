@@ -112,7 +112,7 @@ CASH_TYPES = [
 ]
 
 CASH_PAGE_SIZE = 3
-COMMISSION_PER_50000 = 3500
+COMMISSION_PER_100000 = 6000
 
 # ===== مظهر الرسائل + /cancel =====
 BAND = "━━━━━━━━━━━━━━━━"
@@ -166,11 +166,11 @@ def build_cash_menu(page: int = 0):
 
 def calculate_commission(amount: int) -> int:
     # حساب بالعدد الصحيح لتفادي float
-    blocks = amount // 50000
-    remainder = amount % 50000
-    commission = blocks * COMMISSION_PER_50000
+    blocks = amount // 100000
+    remainder = amount % 100000
+    commission = blocks * COMMISSION_PER_100000
     # جزء نسبي من العمولة
-    commission += (remainder * COMMISSION_PER_50000) // 50000
+    commission += (remainder * COMMISSION_PER_100000) // 100000
     return int(commission)
 
 # التفافات بسيطة للرصيد (نحافظ على بنية ملفك الأصلي)
@@ -283,7 +283,7 @@ def register(bot, history):
         name = _name_of(call.from_user)
         text = with_cancel_hint(
             f"⚠️ يا {name}، تنويه مهم:\n"
-            f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_50000:,} ل.س.\n\n"
+            f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_100000:,} ل.س.\n\n"
             "لو تمام، دوس موافق وكمل اكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
@@ -322,7 +322,7 @@ def register(bot, history):
         name = _name_of(msg.from_user)
         text = with_cancel_hint(
             f"⚠️ يا {name}، تنويه مهم:\n"
-            f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_50000:,} ل.س.\n\n"
+            f"• العمولة لكل 100,000 ليرة = {COMMISSION_PER_100000:,} ل.س.\n\n"
             "لو تمام، دوس موافق وكمل اكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
