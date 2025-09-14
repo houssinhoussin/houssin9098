@@ -75,7 +75,7 @@ except Exception:
 
 from services.state_adapter import UserStateDictLike
 user_states = UserStateDictLike()
-COMMISSION_PER_50000 = 1500
+COMMISSION_PER_100000 = 6000
 
 # ===== مظهر الرسائل + /cancel =====
 BAND = "━━━━━━━━━━━━━━━━"
@@ -107,11 +107,11 @@ def _service_unavailable_guard(bot, chat_id) -> bool:
     return False
 
 def calculate_commission(amount: int) -> int:
-    # حساب عددي صحيح: عمولة 1500 لكل 50,000 + جزء نسبي
-    blocks = amount // 50000
-    remainder = amount % 50000
-    commission = blocks * COMMISSION_PER_50000
-    commission += (remainder * COMMISSION_PER_50000) // 50000
+    # حساب عددي صحيح: عمولة 6000 لكل 100,000 + جزء نسبي
+    blocks = amount // 100000
+    remainder = amount % 100000
+    commission = blocks * COMMISSION_PER_100000
+    commission += (remainder * COMMISSION_PER_100000) // 100000
     return int(commission)
 
 def make_inline_buttons(*buttons):
@@ -233,7 +233,7 @@ def register_companies_transfer(bot, history):
 
         text = with_cancel_hint(
             f"⚠️ تنويه سريع يا {name}:\n"
-            f"• عمولة كل 50,000 ل.س = {COMMISSION_PER_50000:,} ل.س.\n\n"
+            f"• عمولة كل 100,000 ل.س = {COMMISSION_PER_100000:,} ل.س.\n\n"
             "لو تمام، ابعت بيانات المستفيد ونكمل على طول."
         )
         kb = make_inline_buttons(
