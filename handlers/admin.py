@@ -470,7 +470,7 @@ def _features_markup(page: int = 0, page_size: int = 20):
     if total == 0:
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
     # زر رجوع للقائمة الرئيسية للأدمن
-    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         return kb
 
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -856,7 +856,7 @@ def register(bot, history):
     def features_home(m):
         try:
             bot.send_message(m.chat.id, "اختر طريقة العرض:", reply_markup=_features_home_markup())
-except Exception as e:
+        except Exception as e:
             logging.exception("[ADMIN] features home failed: %s", e)
             bot.send_message(m.chat.id, "تعذّر فتح لوحة المزايا.")
 
@@ -1608,12 +1608,12 @@ except Exception as e:
         return admin_menu(m)
 
     @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and _is_admin_msg(m))
-def _admin_back_text(m):
-    try:
-        _clear_admin_states(m.from_user.id)
-        return admin_menu(m)
-    except Exception:
-        bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
+    def _admin_back_text(m):
+        try:
+            _clear_admin_states(m.from_user.id)
+            return admin_menu(m)
+        except Exception:
+            bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
 
     @bot.callback_query_handler(func=lambda c: c.data == "admin:home")
     def _admin_home_cb(c):
@@ -2816,4 +2816,3 @@ def _register_admin_roles(bot):
                 bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
-
