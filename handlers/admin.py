@@ -853,7 +853,6 @@ def register(bot, history):
     def features_home(m):
         try:
             bot.send_message(m.chat.id, "اختر طريقة العرض:", reply_markup=_features_home_markup())
-            bot.send_message(m.chat.id, "قائمة المزايا (صفحة 1):", reply_markup=_features_markup(0))
         except Exception as e:
             logging.exception("[ADMIN] features home failed: %s", e)
             bot.send_message(m.chat.id, "تعذّر فتح لوحة المزايا.")
