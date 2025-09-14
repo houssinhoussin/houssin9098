@@ -454,7 +454,7 @@ def wire_handlers(bot: TeleBot):
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
         chat_id = call.message.chat.id
         msg_id = _edit_or_send(bot, chat_id, st, _help_text(load_settings()), kb)
-        st["active_msg_id"] = msg_id; user_quiz_state[user_id] = st; persist_state[user_id)
+        st["active_msg_id"] = msg_id; user_quiz_state[user_id] = st; persist_state(user_id)
 
     # التالي/متابعة — شاشة واحدة
     @bot.callback_query_handler(func=lambda c: c.data in ("quiz_next", "quiz_resume"))
