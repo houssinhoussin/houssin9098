@@ -17,6 +17,20 @@ from services.feature_flags import require_feature_or_alert
 
 # ---------------------- أدوات أمان وتماسك الحالة ----------------------
 
+# Throttle للنقرات (مضاد دبل-كليك) — نحاول استخدام خدمة خارجيّة وإن لم تتوفر نوفر بديل بسيط
+try:
+    from services.anti_spam import too_soon  # too_soon(user_id, key, seconds=...)
+except Exception:
+    _TS_CACHE: dict[tuple[int, str], float] = {}
+    def too_soon(user_id: int, key: str, seconds: float = 0.8) -> bool:
+        now = time.monotonic()
+        k = (user_id, key)
+        last = _TS_CACHE.get(k, 0.0)
+        if now - last < max(0.05, float(seconds)):
+            return True
+        _TS_CACHE[k] = now
+        return False
+
 DEFAULT_TEMPLATE_FALLBACK = "default"
 
 def _ensure_template_id(st: dict, user_id: int) -> str:
@@ -280,6 +294,12 @@ def wire_handlers(bot: TeleBot):
         # 🔒 امنع التنفيذ لو الميزة مطفّاة
         if _quiz_guard(bot, call.message.chat.id):
             return
+        # Throttle بسيط للنقرات المتكررة على بدء جديد
+        if too_soon(call.from_user.id, "quiz:startover", seconds=0.8):
+            try: bot.answer_callback_query(call.id, "⏱️ تم الاستلام..")
+            except Exception: pass
+            return
+
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try:
@@ -400,6 +420,11 @@ def wire_handlers(bot: TeleBot):
     def on_convert(call):
         if _quiz_guard(bot, call.message.chat.id):
             return
+        # Throttle اختياري لمنع الإساءة
+        if too_soon(call.from_user.id, "quiz:convert", seconds=0.8):
+            try: bot.answer_callback_query(call.id, "⏱️ تم الاستلام..")
+            except Exception: pass
+            return
         user_id = call.from_user.id
         try:
             pts_before, syp_added, pts_after = convert_points_to_balance(user_id)
@@ -434,7 +459,7 @@ def wire_handlers(bot: TeleBot):
         else:
             lines = ["🏆 <b>الترتيب حسب التقدّم</b>"]
             for i, row in enumerate(top, start=1):
-                nm = row.get("name") or f"UID{row.get('user_id')}"
+                nm = row.get("name") or f"UID{row.get("user_id")}"
                 stg = row.get("stage", 0); done = row.get("stage_done", 0)
                 lines.append(f"{i}. <b>{nm}</b> — مرحلة <b>{stg}</b>، منجز <b>{done}</b> سؤالًا")
             text = "\n".join(lines)
@@ -461,6 +486,12 @@ def wire_handlers(bot: TeleBot):
     def on_next(call):
         if _quiz_guard(bot, call.message.chat.id):
             return
+        # Throttle بسيط للنقرات المتكررة على التالي/متابعة
+        if too_soon(call.from_user.id, "quiz:next", seconds=0.8):
+            try: bot.answer_callback_query(call.id, "⏱️ تم الاستلام..")
+            except Exception: pass
+            return
+
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         ensure_user_wallet(user_id)
@@ -556,6 +587,12 @@ def wire_handlers(bot: TeleBot):
     def on_answer(call):
         if _quiz_guard(bot, call.message.chat.id):
             return
+        # Throttle مُركّز على أزرار الإجابات لتفادي السبام
+        if too_soon(call.from_user.id, "quiz:ans", seconds=0.8):
+            try: bot.answer_callback_query(call.id, "⏱️ تم الاستلام..")
+            except Exception: pass
+            return
+
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
