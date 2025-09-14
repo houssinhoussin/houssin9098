@@ -15,7 +15,51 @@ from services.quiz_service import (
 )
 from services.feature_flags import require_feature_or_alert
 
+# ---------------------- أدوات أمان وتماسك الحالة ----------------------
+
+DEFAULT_TEMPLATE_FALLBACK = "default"
+
+def _ensure_template_id(st: dict, user_id: int) -> str:
+    """
+    يضمن وجود template_id داخل حالة المستخدم ويُعيده.
+    يعتمد على pick_template_for_user أو default_template_id من الإعدادات ثم fallback "default".
+    """
+    tid = st.get("template_id")
+    if not tid:
+        settings = load_settings()
+        try:
+            tid = pick_template_for_user(user_id) or settings.get("default_template_id") or DEFAULT_TEMPLATE_FALLBACK
+        except Exception:
+            tid = settings.get("default_template_id") or DEFAULT_TEMPLATE_FALLBACK
+        st["template_id"] = tid
+        user_quiz_state[user_id] = st
+        persist_state(user_id)
+    return st["template_id"]
+
+def _load_template_safe(template_id: str) -> dict:
+    """
+    تحميل آمن للقالب مع fallback للقالب الافتراضي عند الفشل.
+    لا يرفع استثناءات. يعيد dict على الأقل فيه items_by_stage.
+    """
+    try:
+        tpl = load_template(template_id)
+        if isinstance(tpl, dict):
+            return tpl
+    except Exception:
+        pass
+    # جرّب الافتراضي من الإعدادات
+    try:
+        fallback_id = load_settings().get("default_template_id") or DEFAULT_TEMPLATE_FALLBACK
+        tpl = load_template(fallback_id)
+        if isinstance(tpl, dict):
+            return tpl
+    except Exception:
+        pass
+    # آخر حل: قالب فارغ
+    return {"items_by_stage": {}}
+
 # ---------- رسومات/نصوص ----------
+
 # 🔒 حارس ميزة الحزازير: يمنع أي دخول لو كانت مطفّاة
 def _quiz_guard(bot: TeleBot, chat_id: int) -> bool:
     """
@@ -24,7 +68,7 @@ def _quiz_guard(bot: TeleBot, chat_id: int) -> bool:
     if require_feature_or_alert(bot, chat_id, "menu:riddles", "الحزازير", default_active=True):
         return True
     return False
-    
+
 def _pick_banter(group_key: str, stage_no: int, settings: dict) -> str:
     table = settings.get(group_key, {})
     acc = []
@@ -52,10 +96,9 @@ def _fmt_error(kind: str, price: int, settings: dict, banter: str | None, bal: i
     )
     reason_line = "❌ <b>انتهى الوقت</b>" if kind == "timeout" else "❌ <b>إجابة خاطئة</b>"
     head = (banter + "\n\n") if banter else ""
-    body = tpl.replace("{price}", str(price))
+    body = tpl.replace("{price}", f"{price:,}")
     footer = f"\n\n💰 رصيدك: <b>{bal:,}</b> ل.س — 🏅 نقاطك: <b>{pts:,}</b>"
     return head + reason_line + "\n" + body + footer
-
 
 def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str | None, bal: int) -> str:
     tpl = settings.get("windows_success_template") or (
@@ -66,8 +109,8 @@ def _fmt_success_end(award_pts: int, total_pts: int, settings: dict, banter: str
         "<b>التالي:</b> اضغط «متابعة» للانتقال."
     )
     body = (tpl
-            .replace("{award_pts}", str(award_pts))
-            .replace("{total_pts}", str(total_pts)))
+            .replace("{award_pts}", f"{award_pts:,}")
+            .replace("{total_pts}", f"{total_pts:,}"))
     footer = f"\n\n💰 رصيدك: <b>{bal:,}</b> ل.س — 🏅 نقاطك: <b>{total_pts:,}</b>"
     return (banter + "\n\n" + body if banter else body) + footer
 
@@ -78,7 +121,7 @@ def _fmt_success_mid(settings: dict, banter: str | None, delta_pts: int, bal: in
     )
     banter_block = (banter + "\n") if banter else ""
     body = tpl.replace("{banter}", banter_block)
-    info = f"\n\n🏅 +{delta_pts} نقاط (الإجمالي: <b>{pts:,}</b>) — 💰 رصيدك: <b>{bal:,}</b> ل.س"
+    info = f"\n\n🏅 +{delta_pts:,} نقاط (الإجمالي: <b>{pts:,}</b>) — 💰 رصيدك: <b>{bal:,}</b> ل.س"
     return body + info
 
 def _timer_bar(remaining: int, full_seconds: int, settings: dict) -> str:
@@ -164,6 +207,7 @@ def _help_text(settings: dict) -> str:
 def _intro_screen(bot: TeleBot, chat_id: int, user_id: int):
     settings = load_settings()
     st = user_quiz_state.get(user_id) or get_progress(user_id) or reset_progress(user_id)
+    # ضمان مفاتيح أساسية
     st.setdefault("stage_stars", 0)
     st.setdefault("stage_wrong_attempts", 0)
     st.setdefault("stage_done", 0)
@@ -174,22 +218,24 @@ def _intro_screen(bot: TeleBot, chat_id: int, user_id: int):
     user_quiz_state[user_id] = st
     persist_state(user_id)
 
+    # ✅ المهم: ضمان template_id ثم تحميل القالب بأمان
+    template_id = _ensure_template_id(st, user_id)
     stage_no = int(st.get("stage", 1))
-    tpl = load_template(st["template_id"])
+    tpl = _load_template_safe(template_id)
     items = tpl.get("items_by_stage", {}).get(str(stage_no), []) or []
     q_count = len(items)
-    price   = get_attempt_price(stage_no, settings)
+    price = get_attempt_price(stage_no, settings)
 
     bal, pts = get_wallet(user_id)
     can_resume = bool(q_count and (int(st.get("q_index", 0)) > 0 or int(st.get("stage_done", 0)) > 0))
 
     text = (
         "🎮 <b>مرحبًا!</b>\n\n"
-        f"القالب: <b>{st['template_id']}</b>\n"
+        f"القالب: <b>{template_id}</b>\n"
         f"المرحلة الحالية: <b>{stage_no}</b>\n"
         f"عدد أسئلة المرحلة: <b>{q_count}</b>\n"
-        f"سعر المحاولة: <b>{price}</b> ل.س\n"
-        f"💰 رصيدك: <b>{bal}</b> ل.س — 🏅 نقاطك: <b>{pts}</b>\n"
+        f"سعر المحاولة: <b>{price:,}</b> ل.س\n"
+        f"💰 رصيدك: <b>{bal:,}</b> ل.س — 🏅 نقاطك: <b>{pts:,}</b>\n"
         "اختر: <b>🆕 ابدأ اللعب</b> لبداية جديدة (تصفيير النقاط والتقدّم)، أو <b>▶️ متابعة</b> إن كان لديك تقدّم."
     )
     kb = _intro_markup(can_resume=can_resume)
@@ -218,16 +264,14 @@ def wire_handlers(bot: TeleBot):
                 pass
 
             chat_id = m.chat.id
-
             # 🔒 الحارس: يمنع الدخول عند الإيقاف ويعرض اعتذار
-            if require_feature_or_alert(bot, chat_id, "menu:riddles", "القائمة: الحزازير", default_active=True):
+            if _quiz_guard(bot, chat_id):
                 return
 
             user_id = m.from_user.id
             ensure_user_wallet(user_id, name=(m.from_user.first_name or "").strip())
             _intro_screen(bot, chat_id, user_id)
             return
-
         # ... باقي الراوترات إن لزم ...
 
     # ابدأ اللعب من الصفر — يبدأ السؤال الأول مباشرة وبنفس الشاشة
@@ -238,15 +282,17 @@ def wire_handlers(bot: TeleBot):
             return
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        try: bot.answer_callback_query(call.id, "تم بدء لعبة جديدة: تصفير النقاط وحذف التقدّم.")
-        except: pass
+        try:
+            bot.answer_callback_query(call.id, "تم بدء لعبة جديدة: تصفير النقاط وحذف التقدّم.")
+        except Exception:
+            pass
 
         # أوقف مؤقّت سابق
         rt_prev = get_runtime(user_id)
         cancel_prev = rt_prev.get("timer_cancel")
         if cancel_prev:
             try: cancel_prev.set()
-            except: pass
+            except Exception: pass
         clear_runtime(user_id)
 
         # صفّر النقاط والتقدّم (الرصيد يبقى)
@@ -256,14 +302,16 @@ def wire_handlers(bot: TeleBot):
         ok, bal_or_new, price, reason = ensure_paid_before_show(user_id)
         if not ok:
             try: bot.answer_callback_query(call.id, "رصيدك غير كافٍ لهذه المحاولة.", show_alert=True)
-            except: pass
+            except Exception: pass
             # أعِد شاشة البداية بنفس الرسالة
             _intro_screen(bot, chat_id, user_id)
             return
 
         st, item, stage_no, q_idx = next_question(user_id)
-        settings = load_settings()
+        # ✅ تأكيد وجود template_id بعد استرجاع الحالة المحدثة
+        template_id = _ensure_template_id(st, user_id)
 
+        settings = load_settings()
         seconds_total = get_stage_time(stage_no, settings)
         remain = int(seconds_total)
 
@@ -339,10 +387,11 @@ def wire_handlers(bot: TeleBot):
         bal, pts = get_wallet(user_id)
         syp_val = get_points_value_syp(pts)
         try: bot.answer_callback_query(call.id)
-        except: pass
+        except Exception: pass
         st = user_quiz_state.get(user_id) or get_progress(user_id) or reset_progress(user_id)
+        _ensure_template_id(st, user_id)
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
-        text = f"🏅 نقاطك: <b>{pts}</b> (≈ {syp_val} ل.س)\n💰 رصيدك: <b>{bal}</b> ل.س"
+        text = f"🏅 نقاطك: <b>{pts:,}</b> (≈ {syp_val:,} ل.س)\n💰 رصيدك: <b>{bal:,}</b> ل.س"
         msg_id = _edit_or_send(bot, chat_id, st, text, kb)
         st["active_msg_id"] = msg_id; user_quiz_state[user_id] = st; persist_state(user_id)
 
@@ -359,12 +408,12 @@ def wire_handlers(bot: TeleBot):
             else:
                 bot.answer_callback_query(
                     call.id,
-                    f"✅ تم التحويل!\nحُوِّل {pts_before - pts_after} نقطة إلى {syp_added} ل.س.\nنقاطك الآن: {pts_after}.",
+                    f"✅ تم التحويل!\nحُوِّل {pts_before - pts_after} نقطة إلى {syp_added:,} ل.س.\nنقاطك الآن: {pts_after:,}.",
                     show_alert=True
                 )
         except Exception:
             try: bot.answer_callback_query(call.id, "تعذّر التحويل مؤقتًا. حاول لاحقًا.", show_alert=True)
-            except: pass
+            except Exception: pass
 
     # الترتيب — شاشة واحدة (تحرير الرسالة)
     @bot.callback_query_handler(func=lambda c: c.data == "quiz_rank")
@@ -374,10 +423,11 @@ def wire_handlers(bot: TeleBot):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         try: bot.answer_callback_query(call.id)
-        except: pass
+        except Exception: pass
         from services.quiz_service import get_leaderboard_by_progress
         top = get_leaderboard_by_progress(10)
         st = user_quiz_state.get(user_id) or get_progress(user_id) or reset_progress(user_id)
+        _ensure_template_id(st, user_id)
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
         if not top:
             text = "لا توجد بيانات ترتيب بعد."
@@ -398,12 +448,13 @@ def wire_handlers(bot: TeleBot):
             return
         user_id = call.from_user.id
         try: bot.answer_callback_query(call.id)
-        except: pass
+        except Exception: pass
         st = user_quiz_state.get(user_id) or get_progress(user_id) or reset_progress(user_id)
+        _ensure_template_id(st, user_id)
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="quiz_cancel"))
         chat_id = call.message.chat.id
         msg_id = _edit_or_send(bot, chat_id, st, _help_text(load_settings()), kb)
-        st["active_msg_id"] = msg_id; user_quiz_state[user_id] = st; persist_state(user_id)
+        st["active_msg_id"] = msg_id; user_quiz_state[user_id] = st; persist_state[user_id)
 
     # التالي/متابعة — شاشة واحدة
     @bot.callback_query_handler(func=lambda c: c.data in ("quiz_next", "quiz_resume"))
@@ -419,18 +470,20 @@ def wire_handlers(bot: TeleBot):
         cancel_prev = rt_prev.get("timer_cancel")
         if cancel_prev:
             try: cancel_prev.set()
-            except: pass
+            except Exception: pass
 
         # خصم هذه المحاولة إن لزم (يحترم no_charge_next)
         ok, bal_or_new, price, reason = ensure_paid_before_show(user_id)
         if not ok:
             try: bot.answer_callback_query(call.id, "رصيدك غير كافٍ لهذه المحاولة.", show_alert=True)
-            except: pass
+            except Exception: pass
             return
 
         st, item, stage_no, q_idx = next_question(user_id)
-        settings = load_settings()
+        # ✅ تأكيد وجود template_id
+        template_id = _ensure_template_id(st, user_id)
 
+        settings = load_settings()
         seconds_total = get_stage_time(stage_no, settings)
         remain = int(seconds_total)
 
@@ -506,14 +559,14 @@ def wire_handlers(bot: TeleBot):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id)
-        except: pass
+        except Exception: pass
 
         # أوقف المؤقّت الجاري
         rt = get_runtime(user_id)
         cancel = rt.get("timer_cancel")
         if cancel:
             try: cancel.set()
-            except: pass
+            except Exception: pass
 
         st, item, stage_no, q_idx = next_question(user_id)
         msg_id = st.get("active_msg_id")
@@ -549,13 +602,14 @@ def wire_handlers(bot: TeleBot):
                 pass
             return
 
-        # صح
+        # ✅ إجابة صحيحة
+        template_id = _ensure_template_id(st, user_id)
         register_correct_answer(user_id)
         # منح نقاط فورية بحسب ترتيب المحاولة لهذا السؤال، وتسجيلها في transactions
-        delta_pts, pts_now, bal_now = award_points_for_correct(user_id, st["template_id"], stage_no, item, q_idx)
+        delta_pts, pts_now, bal_now = award_points_for_correct(user_id, template_id, stage_no, item, q_idx)
 
         # تحديث التقدّم: انتقل للسؤال التالي وصفّر عدّاد محاولات السؤال
-        tpl = load_template(st["template_id"])
+        tpl = _load_template_safe(template_id)
         total_q = len(tpl.get("items_by_stage", {}).get(str(stage_no), []) or [])
         st["q_index"] = int(st.get("q_index", 0)) + 1
         st["attempts_on_current"] = 0
@@ -601,14 +655,14 @@ def wire_handlers(bot: TeleBot):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         try: bot.answer_callback_query(call.id, "تم الإلغاء.")
-        except: pass
+        except Exception: pass
 
         # أوقف أي مؤقّت
         rt = get_runtime(user_id)
         cancel = rt.get("timer_cancel")
         if cancel:
             try: cancel.set()
-            except: pass
+            except Exception: pass
         clear_runtime(user_id)
 
         # امسح paid_key وألغِ إعفاء الخصم + فك ارتباط الرسالة النشطة
