@@ -625,12 +625,12 @@ def register(bot, history):
     except Exception as __e:
         import logging; logging.exception("Admin roles setup failed: %s", __e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and allowed(m.from_user.id, "user:ban"))
-def ban_start(m):
+    def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل المراد حظره.\n/cancel لإلغاء", reply_markup=_admin_back_cancel_kb())
 
     @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-def ban_get_id(m):
+    def ban_get_id(m):
         try:
             uid = parse_user_id(m.text)
         except Exception:
@@ -648,7 +648,7 @@ def ban_get_id(m):
         bot.send_message(m.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_ban_dur:"))
-def ban_choose_duration(c):
+    def ban_choose_duration(c):
         st = _ban_pending.get(c.from_user.id)
         if not st:
             try:
@@ -664,12 +664,14 @@ def ban_choose_duration(c):
             bot.answer_callback_query(c.id, "تم.")
         except Exception:
             pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            pass
         except Exception: pass
         bot.send_message(c.message.chat.id, "اكتب سبب الحظر (إلزامي):" )
 
     @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_reason")
-def ban_get_reason(m):
+    def ban_get_reason(m):
         st = _ban_pending.get(m.from_user.id) or {}
         reason = (m.text or '').strip()
         if not reason:
@@ -686,7 +688,7 @@ def ban_get_reason(m):
         bot.send_message(m.chat.id, f"تأكيد حظر <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_ban:"))
-def ban_confirm(c):
+    def ban_confirm(c):
         st = _ban_pending.get(c.from_user.id)
         if not st:
             try:
@@ -697,9 +699,13 @@ def ban_confirm(c):
         action = c.data.split(":",1)[1]
         if action == "cancel":
             _ban_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         try:
@@ -720,16 +726,18 @@ def ban_confirm(c):
         except Exception:
             pass
 
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            pass
         except Exception: pass
 
     @bot.message_handler(func=lambda m: m.text == "✅ فكّ الحظر" and allowed(m.from_user.id, "user:unban"))
-def unban_start(m):
+    def unban_start(m):
         _unban_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/cancel لإلغاء", reply_markup=_admin_back_cancel_kb())
     
     @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-def unban_get_id(m):
+    def unban_get_id(m):
         try:
             uid = parse_user_id(m.text)
         except Exception:
@@ -746,18 +754,24 @@ def unban_get_id(m):
         bot.send_message(m.chat.id, f"تأكيد فكّ الحظر عن <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_unban:"))
-def unban_confirm(c):
+    def unban_confirm(c):
         st = _unban_pending.get(c.from_user.id)
         if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية.")
+            try:
+                bot.answer_callback_query(c.id, "لا توجد عملية.")
+                pass
             except Exception: pass
             return
         action = c.data.split(":",1)[1]
         if action == "cancel":
             _unban_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         try:
@@ -772,17 +786,19 @@ def unban_confirm(c):
             bot.answer_callback_query(c.id, "تم.")
         except Exception:
             pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            pass
         except Exception: pass
 
 
     @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and allowed(m.from_user.id, "user:message_by_id"))
-def msg_by_id_start(m):
+    def msg_by_id_start(m):
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/cancel لإلغاء", reply_markup=_admin_back_cancel_kb())
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-def msg_by_id_get_id(m):
+    def msg_by_id_get_id(m):
         # 1) قراءة الآيدي والتحقق
         try:
             uid = parse_user_id(m.text)
@@ -815,7 +831,7 @@ def msg_by_id_get_id(m):
         )
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_text")
-def msg_by_id_get_text(m):
+    def msg_by_id_get_text(m):
         st = _msg_by_id_pending.get(m.from_user.id) or {}
         uid = st.get("user_id")
         if not uid:
@@ -831,7 +847,7 @@ def msg_by_id_get_text(m):
         bot.send_message(m.chat.id, f"تأكيد إرسال الرسالة للعميل <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_msgid:"))
-def msg_by_id_confirm(c):
+    def msg_by_id_confirm(c):
         st = _msg_by_id_pending.get(c.from_user.id)
         if not st:
             try:
@@ -844,9 +860,13 @@ def msg_by_id_confirm(c):
         action = parts[1]
         if action == "cancel":
             _msg_by_id_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي."); 
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.");
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if action == "send":
@@ -867,12 +887,14 @@ def msg_by_id_confirm(c):
                 bot.answer_callback_query(c.id, "تم.")
             except Exception:
                 pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
 
 
     @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and allowed(m.from_user.id, "feature:toggle"))
-def features_home(m):
+    def features_home(m):
         try:
             bot.send_message(m.chat.id, "اختر طريقة العرض:", reply_markup=_features_home_markup())
         except Exception as e:
@@ -881,7 +903,7 @@ def features_home(m):
 
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_home:"))
-def _features_home_cb(c):
+    def _features_home_cb(c):
         try:
             mode = c.data.split(":",1)[1]
             if mode == "groups":
@@ -897,7 +919,7 @@ def _features_home_cb(c):
             logging.exception("[ADMIN] feat home cb failed: %s", e)
 
     @bot.callback_query_handler(func=lambda c: c.data == "adm_feat_sync")
-def _features_sync_cb(c):
+    def _features_sync_cb(c):
         try:
             created = ensure_seed() or 0
         except Exception as e:
@@ -913,13 +935,15 @@ def _features_sync_cb(c):
             pass
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_g:"))
-def _features_group_cb(c):
+    def _features_group_cb(c):
         try:
             _, slug, page = c.data.split(":", 2)
             grouped = list_features_grouped() or {}
             group = next((n for n in grouped.keys() if _slug(n) == slug), None)
             if not group:
-                try: bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                try:
+                    bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                    pass
                 except Exception: pass
                 return
             kb = _features_group_items_markup(group, int(page))
@@ -928,12 +952,14 @@ def _features_group_cb(c):
             logging.exception("[ADMIN] feature group cb failed: %s", e)
             
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_tg:") and _is_admin_cb(c))
-def adm_feature_toggle_in_group(call: types.CallbackQuery):
+    def adm_feature_toggle_in_group(call: types.CallbackQuery):
         try:
             _, key, to, gslug, page_s = call.data.split(":", 4)
             set_feature_active(key, bool(int(to)))
         except Exception:
-            try: bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+            try:
+                bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+                pass
             except Exception: pass
             return
         try:
@@ -946,11 +972,13 @@ def adm_feature_toggle_in_group(call: types.CallbackQuery):
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=kb)
             bot.answer_callback_query(call.id, "✅ تم التحديث.")
         except Exception:
-            try: bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
+            try:
+                bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
+                pass
             except Exception: pass
         
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
-def _features_group_toggle_all(c):
+    def _features_group_toggle_all(c):
         try:
             _, slug, to, page = c.data.split(":", 3)
             to = int(to)
@@ -958,7 +986,9 @@ def _features_group_toggle_all(c):
             # رجّع الاسم الحقيقي من الـslug
             group = next((n for n in grouped.keys() if _slug(n) == slug), None)
             if not group:
-                try: bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                try:
+                    bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                    pass
                 except Exception: pass
                 return
             for it in grouped.get(group, []) or []:
@@ -989,7 +1019,7 @@ def _features_group_toggle_all(c):
 
     # إلغاء لأي وضع إدخال للأدمن (/cancel)
     @bot.message_handler(commands=['cancel'])
-def _admin_cancel_any(msg: types.Message):
+    def _admin_cancel_any(msg: types.Message):
         _clear_admin_states(msg.from_user.id)
         bot.reply_to(msg, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
         try:
@@ -1000,13 +1030,13 @@ def _admin_cancel_any(msg: types.Message):
 
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and _is_admin_msg(msg))
-def handle_done(msg):
+    def handle_done(msg):
         req_id = int(re.match(r'/done_(\d+)', msg.text).group(1))
         delete_pending_request(req_id)
         bot.reply_to(msg, f"✅ تم إنهاء الطلب {req_id}")
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/cancel_(\d+)', msg.text) and _is_admin_msg(msg))
-def handle_cancel(msg):
+    def handle_cancel(msg):
         req_id = int(re.match(r'/cancel_(\d+)', msg.text).group(1))
         delete_pending_request(req_id)
         bot.reply_to(msg, f"🚫 تم إلغاء الطلب {req_id}")
@@ -1015,7 +1045,7 @@ def handle_cancel(msg):
     #  ✉️ رسالة/🖼️ صورة للعميل (HTML + ترويسة بسيطة)
     # ────────────────────────────────────────────────
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_message_")) and _is_admin_cb(c))
-def cb_queue_message(c: types.CallbackQuery):
+    def cb_queue_message(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:message'):
             return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
         request_id = int(c.data.split("_")[3])
@@ -1027,7 +1057,7 @@ def cb_queue_message(c: types.CallbackQuery):
         bot.send_message(c.from_user.id, f"📝 اكتب رسالتك بصيغة HTML.\n{CANCEL_HINT_ADMIN}")
 
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and _is_admin_cb(c))
-def cb_queue_photo(c: types.CallbackQuery):
+    def cb_queue_photo(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:photo'):
             return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
         request_id = int(c.data.split("_")[3])
@@ -1061,7 +1091,7 @@ def cb_queue_photo(c: types.CallbackQuery):
         bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
 
     @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and (call.from_user.id in ADMINS or call.from_user.id == ADMIN_MAIN_ID))
-def handle_queue_action(call):
+    def handle_queue_action(call):
         parts      = call.data.split("_")
         action     = parts[2]
         request_id = int(parts[3])
@@ -1612,7 +1642,7 @@ def handle_queue_action(call):
 
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
-def __admin_cmd(m):
+    def __admin_cmd(m):
         _clear_admin_states(m.from_user.id)
         if not _is_admin_msg(m):
             return bot.reply_to(m, "صلاحية الأدمن فقط.")
@@ -1627,7 +1657,7 @@ def __admin_cmd(m):
         return admin_menu(m)
 
     @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and _is_admin_msg(m))
-def _admin_back_text(m):
+    def _admin_back_text(m):
         try:
             _clear_admin_states(m.from_user.id)
             return admin_menu(m)
@@ -1635,7 +1665,7 @@ def _admin_back_text(m):
             bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
 
     @bot.callback_query_handler(func=lambda c: c.data == "admin:home")
-def _admin_home_cb(c):
+    def _admin_home_cb(c):
         try:
             bot.answer_callback_query(c.id)
         except Exception:
@@ -1653,7 +1683,7 @@ def _admin_home_cb(c):
     # 📬 ترحيب — نحن شغالين (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def bc_welcome(m: types.Message):
+    def bc_welcome(m: types.Message):
         _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
@@ -1674,21 +1704,27 @@ def bc_welcome(m: types.Message):
         )
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bw_flow(c: types.CallbackQuery):
+    def _bw_flow(c: types.CallbackQuery):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "welcome":
             return
         if c.data == "bw_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bw_dest_clients","bw_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
         if c.data == "bw_confirm":
@@ -1712,9 +1748,13 @@ def _bw_flow(c: types.CallbackQuery):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
@@ -1722,14 +1762,14 @@ def _bw_flow(c: types.CallbackQuery):
     # 📢 عرض اليوم (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_deal_of_day(m):
+    def broadcast_deal_of_day(m):
         _broadcast_pending[m.from_user.id] = {"mode": "deal_wait"}
         bot.reply_to(m, "🛍️ أرسل *نص العرض* الآن.\nمثال:\n"
                         "• خصم 20% على باقات كذا\n• توصيل فوري\n• ينتهي اليوم ⏳",
                      parse_mode="Markdown")
 
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "deal_wait", content_types=["text"])
-def _deal_collect(m):
+    def _deal_collect(m):
         body = (m.text or "").strip()
         if not body:
             return bot.reply_to(m, "❌ النص فارغ.")
@@ -1751,21 +1791,27 @@ def _deal_collect(m):
         bot.reply_to(m, preview, parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bd_flow(c):
+    def _bd_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "deal_confirm":
             return
         if c.data == "bd_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bd_dest_clients","bd_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
 
@@ -1794,9 +1840,13 @@ def _bd_flow(c):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ العرض أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
@@ -1805,7 +1855,7 @@ def _bd_flow(c):
     # 📊 استفتاء سريع (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_poll(m):
+    def broadcast_poll(m):
         _broadcast_pending[m.from_user.id] = {"mode": "poll_wait"}
         bot.reply_to(m, "🗳️ أرسل الاستفتاء بصيغة:\n"
                         "*السؤال*\n"
@@ -1813,7 +1863,7 @@ def broadcast_poll(m):
                      parse_mode="Markdown")
 
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "poll_wait", content_types=["text"])
-def _poll_collect(m):
+    def _poll_collect(m):
         lines = [l.strip() for l in (m.text or "").splitlines() if l.strip()]
         if len(lines) < 3:
             return bot.reply_to(m, "❌ الصيغة غير صحيحة. المطلوب: سؤال + خيارين على الأقل.")
@@ -1849,21 +1899,27 @@ def _poll_collect(m):
         bot.reply_to(m, preview, parse_mode="Markdown", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bp_flow(c):
+    def _bp_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "poll_confirm":
             return
         if c.data == "bp_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bp_dest_clients","bp_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
 
@@ -1888,9 +1944,13 @@ def _bp_flow(c):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الاستفتاء أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
@@ -1899,12 +1959,12 @@ def _bp_flow(c):
     # 📝 رسالة من عندي (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📝 رسالة من عندي" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_free(m):
+    def broadcast_free(m):
         _broadcast_pending[m.from_user.id] = {"mode": "free_wait"}
         bot.reply_to(m, "📝 أرسل النص الآن.")
 
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "free_wait", content_types=["text"])
-def _free_collect(m):
+    def _free_collect(m):
         text = (m.text or "").strip()
         if not text:
             return bot.reply_to(m, "❌ النص فارغ.")
@@ -1921,21 +1981,27 @@ def _free_collect(m):
         bot.reply_to(m, f"{BAND}\n{text}\n{BAND}", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bf_dest_clients","bf_dest_channel","bf_confirm","bf_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bf_flow(c):
+    def _bf_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "free_confirm":
             return
         if c.data == "bf_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bf_dest_clients","bf_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
         if c.data == "bf_confirm":
@@ -1957,14 +2023,18 @@ def _bf_flow(c):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
     
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and _is_admin_msg(m))
-def admin_products_menu(m):
+    def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.row("🚫 إيقاف منتج", "✅ تشغيل منتج")
         kb.row("🔄 مزامنة المنتجات (DB)")
@@ -1973,7 +2043,7 @@ def admin_products_menu(m):
  
     # ⏳ عرض طابور الانتظار للأدمن
     @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and _is_admin_msg(m))
-def admin_queue_list(m: types.Message):
+    def admin_queue_list(m: types.Message):
         # حمّل أول 30 طلب أقدم فالأحدث
         try:
             res = (
@@ -2030,12 +2100,12 @@ def admin_queue_list(m: types.Message):
 
     # ✅ بدّل إدخال الـID بمتصفح ملفات/منتجات إنلاين
     @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and _is_admin_msg(m))
-def admin_products_browser(m):
+    def admin_products_browser(m):
         bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
 
     # 🔄 مزامنة كل المنتجات المعرفة في PRODUCTS إلى جدول products
     @bot.message_handler(func=lambda m: m.text == "🔄 مزامنة المنتجات (DB)" and _is_admin_msg(m))
-def seed_products(m):
+    def seed_products(m):
         try:
             items = []
             for group, arr in PRODUCTS.items():
@@ -2048,7 +2118,7 @@ def seed_products(m):
             bot.reply_to(m, "❌ فشلت المزامنة. تفقد السجلات.")
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_g:") and _is_admin_cb(c))
-def adm_group_open(call: types.CallbackQuery):
+    def adm_group_open(call: types.CallbackQuery):
         slug = call.data.split(":", 1)[1]
         group_name = next((g for g in PRODUCTS.keys() if _slug(g) == slug), None)
         if not group_name:
@@ -2062,7 +2132,7 @@ def adm_group_open(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data == "adm_prod_back" and _is_admin_cb(c))
-def adm_back(call: types.CallbackQuery):
+    def adm_back(call: types.CallbackQuery):
         try:
             bot.edit_message_text("اختر الملف لعرض منتجاته:", call.message.chat.id, call.message.message_id,
                                   reply_markup=_admin_products_groups_markup())
@@ -2071,7 +2141,7 @@ def adm_back(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_i:") and _is_admin_cb(c))
-def adm_product_open(call: types.CallbackQuery):
+    def adm_product_open(call: types.CallbackQuery):
         pid = int(call.data.split(":", 1)[1])
         state = "شغّال 🟢" if get_product_active(pid) else "موقوف 🔴"
         txt = f"المنتج #{pid}\nالحالة الحالية: {state}\nيمكنك تبديل الحالة:"
@@ -2083,7 +2153,7 @@ def adm_product_open(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and _is_admin_cb(c))
-def adm_product_toggle(call: types.CallbackQuery):
+    def adm_product_toggle(call: types.CallbackQuery):
         # كان سابقًا: _, pid, to = call.data.split(":")
         try:
             _, pid, to = call.data.split(":", 2)  # آمن حتى لو زاد المحتوى مستقبلًا
@@ -2106,7 +2176,7 @@ def adm_product_toggle(call: types.CallbackQuery):
     # ===== لوحة المزايا (Feature Flags) =====
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and _is_admin_cb(c))
-def adm_feature_toggle(call: types.CallbackQuery):
+    def adm_feature_toggle(call: types.CallbackQuery):
         try:
             prefix = "adm_feat_t:"
             tail = call.data[len(prefix):] if call.data.startswith(prefix) else call.data
@@ -2146,7 +2216,7 @@ def adm_feature_toggle(call: types.CallbackQuery):
         bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and _is_admin_cb(c))
-def adm_feature_page(call: types.CallbackQuery):
+    def adm_feature_page(call: types.CallbackQuery):
         try:
             page = int(call.data.split(":", 1)[1])
         except Exception:
@@ -2170,7 +2240,7 @@ def adm_feature_page(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
-def quick_reports(m):
+    def quick_reports(m):
         dep, pur, _ = totals_deposits_and_purchases_syp()
         lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
         # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
@@ -2185,18 +2255,18 @@ def quick_reports(m):
         bot.send_message(m.chat.id, "\n".join(lines))
 
     @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
-def assistants_daily_report(m):
+    def assistants_daily_report(m):
         txt = summarize_assistants(days=7)
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
     @bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
-def all_admins_report(m):
+    def all_admins_report(m):
         txt = summarize_all_admins(days=7)
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
     # ==== بث للجميع ====
     @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_menu(m):
+    def broadcast_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.row("📬 ترحيب — نحن شغالين", "📢 عرض اليوم")
         kb.row("📊 استفتاء سريع", "📝 رسالة من عندي")
@@ -2245,14 +2315,14 @@ def _collect_all_user_ids() -> set[int]:
     
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and _is_admin_msg(m))
-def admins_roles(m):
+    def admins_roles(m):
         # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
         ids_str = ", ".join(str(x) for x in ADMINS)
         bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
 
     @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and _is_admin_msg(m))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام","إعدادات النظام","اعدادات النظام","الاعدادات"]))
-def system_menu_alias(m):
+    def system_menu_alias(m):
         return system_menu(m)
     def system_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
@@ -2272,7 +2342,7 @@ def system_menu_alias(m):
         bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
         
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
-def system_actions(c):
+    def system_actions(c):
         try:
             act = c.data.split(":",1)[1]
             if act == "maint_on":
@@ -2321,7 +2391,7 @@ def system_actions(c):
 
     @bot.message_handler(func=lambda m: m.text == "🎟️ أكواد خصم" and _is_admin(m.from_user.id))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and _is_admin(m.from_user.id)) and _match_admin_alias(m.text, ["خصم","كود خصم","أكواد خصم","أكواد الخصم","نسب خصم"]))
-def discount_menu_alias(m):
+    def discount_menu_alias(m):
         return discount_menu(m)
 
     def discount_menu(m):
@@ -2370,7 +2440,7 @@ def discount_menu_alias(m):
 
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
-def discounts_actions(c):
+    def discounts_actions(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         parts = (c.data or "").split(":")
@@ -2453,14 +2523,16 @@ def discounts_actions(c):
             return bot.send_message(c.message.chat.id, text)
 
     @bot.callback_query_handler(func=lambda c: c.data == "disc:cancel")
-def disc_cancel_cb(c):
+    def disc_cancel_cb(c):
         _disc_new_user_state.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        try:
+            bot.answer_callback_query(c.id, "❎ أُلغي.")
+            pass
         except Exception: pass
         return discount_menu(c.message)
 
     @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
-def disc_new_user_get_id(m):
+    def disc_new_user_get_id(m):
         txt = (m.text or "").strip()
         if txt == "/cancel":
             _disc_new_user_state.pop(m.from_user.id, None)
@@ -2471,7 +2543,9 @@ def disc_new_user_get_id(m):
         uid = None
         try:
             try:
-            uid = parse_user_id(m.text)
+                uid = parse_user_id(m.text)
+            except Exception:
+                pass
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.", reply_markup=_admin_back_cancel_kb())
         except Exception:
@@ -2480,7 +2554,9 @@ def disc_new_user_get_id(m):
             import re
             nums = re.findall(r"\d+", m.text or "")
             if nums:
-                try: uid = int("".join(nums))
+                try:
+                    uid = int("".join(nums))
+                    pass
                 except Exception: uid = None
         if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة أو /cancel.")
@@ -2499,7 +2575,7 @@ def disc_new_user_get_id(m):
         return bot.send_message(m.chat.id, "اختر نسبة الخصم:", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
-def disc_new_user_choose_pct(c):
+    def disc_new_user_choose_pct(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
@@ -2521,7 +2597,7 @@ def disc_new_user_choose_pct(c):
     # --- Discounts: choose user duration ---
     # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
-def disc_new_user_choose_duration(c):
+    def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
@@ -2600,13 +2676,13 @@ def disc_new_user_choose_duration(c):
 
     @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
-def manage_user_menu(m):
+    def manage_user_menu(m):
         _manage_user_state[m.from_user.id] = {"step": "ask_id"}
         rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
         rk.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "أرسل آيدي العميل (أرقام):\n/cancel لإلغاء", reply_markup=rk)
     @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
-def manage_user_get_id(m):
+    def manage_user_get_id(m):
         txt = (m.text or "").strip()
         if txt in ("/admin", "/cancel", "⬅️ رجوع"):
             _clear_admin_states(m.from_user.id)
@@ -2654,7 +2730,7 @@ def manage_user_get_id(m):
         bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
-def manage_user_actions(c):
+    def manage_user_actions(c):
         try:
             _, act, uid = c.data.split(":", 2)
             uid = int(uid)
@@ -2801,7 +2877,7 @@ def manage_user_actions(c):
             pass
             
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
-def _refund_amount(m):
+    def _refund_amount(m):
         st = _refund_state.get(m.from_user.id)
         if not st:
             return
@@ -2841,7 +2917,7 @@ def _refund_amount(m):
 
     
     @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-def unban_get_id(m):
+    def unban_get_id(m):
         try:
             uid = parse_user_id(m.text)
         except Exception:
@@ -2858,18 +2934,24 @@ def unban_get_id(m):
         bot.send_message(m.chat.id, f"تأكيد فكّ الحظر عن <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_unban:"))
-def unban_confirm(c):
+    def unban_confirm(c):
         st = _unban_pending.get(c.from_user.id)
         if not st:
-            try: bot.answer_callback_query(c.id, "لا توجد عملية.")
+            try:
+                bot.answer_callback_query(c.id, "لا توجد عملية.")
+                pass
             except Exception: pass
             return
         action = c.data.split(":",1)[1]
         if action == "cancel":
             _unban_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         try:
@@ -2884,17 +2966,19 @@ def unban_confirm(c):
             bot.answer_callback_query(c.id, "تم.")
         except Exception:
             pass
-        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            pass
         except Exception: pass
 
 
     @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and allowed(m.from_user.id, "user:message_by_id"))
-def msg_by_id_start(m):
+    def msg_by_id_start(m):
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل الرقمي.\nمثال: 123456789\n\n/cancel لإلغاء", reply_markup=_admin_back_cancel_kb())
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_id")
-def msg_by_id_get_id(m):
+    def msg_by_id_get_id(m):
         # 1) قراءة الآيدي والتحقق
         try:
             uid = parse_user_id(m.text)
@@ -2927,7 +3011,7 @@ def msg_by_id_get_id(m):
         )
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_text")
-def msg_by_id_get_text(m):
+    def msg_by_id_get_text(m):
         st = _msg_by_id_pending.get(m.from_user.id) or {}
         uid = st.get("user_id")
         if not uid:
@@ -2943,7 +3027,7 @@ def msg_by_id_get_text(m):
         bot.send_message(m.chat.id, f"تأكيد إرسال الرسالة للعميل <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_msgid:"))
-def msg_by_id_confirm(c):
+    def msg_by_id_confirm(c):
         st = _msg_by_id_pending.get(c.from_user.id)
         if not st:
             try:
@@ -2956,9 +3040,13 @@ def msg_by_id_confirm(c):
         action = parts[1]
         if action == "cancel":
             _msg_by_id_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي."); 
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.");
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if action == "send":
@@ -2979,12 +3067,14 @@ def msg_by_id_confirm(c):
                 bot.answer_callback_query(c.id, "تم.")
             except Exception:
                 pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
 
 
     @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and allowed(m.from_user.id, "feature:toggle"))
-def features_home(m):
+    def features_home(m):
         try:
             bot.send_message(m.chat.id, "اختر طريقة العرض:", reply_markup=_features_home_markup())
         except Exception as e:
@@ -2993,7 +3083,7 @@ def features_home(m):
 
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_home:"))
-def _features_home_cb(c):
+    def _features_home_cb(c):
         try:
             mode = c.data.split(":",1)[1]
             if mode == "groups":
@@ -3009,7 +3099,7 @@ def _features_home_cb(c):
             logging.exception("[ADMIN] feat home cb failed: %s", e)
 
     @bot.callback_query_handler(func=lambda c: c.data == "adm_feat_sync")
-def _features_sync_cb(c):
+    def _features_sync_cb(c):
         try:
             created = ensure_seed() or 0
         except Exception as e:
@@ -3025,13 +3115,15 @@ def _features_sync_cb(c):
             pass
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_g:"))
-def _features_group_cb(c):
+    def _features_group_cb(c):
         try:
             _, slug, page = c.data.split(":", 2)
             grouped = list_features_grouped() or {}
             group = next((n for n in grouped.keys() if _slug(n) == slug), None)
             if not group:
-                try: bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                try:
+                    bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                    pass
                 except Exception: pass
                 return
             kb = _features_group_items_markup(group, int(page))
@@ -3040,12 +3132,14 @@ def _features_group_cb(c):
             logging.exception("[ADMIN] feature group cb failed: %s", e)
             
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_tg:") and _is_admin_cb(c))
-def adm_feature_toggle_in_group(call: types.CallbackQuery):
+    def adm_feature_toggle_in_group(call: types.CallbackQuery):
         try:
             _, key, to, gslug, page_s = call.data.split(":", 4)
             set_feature_active(key, bool(int(to)))
         except Exception:
-            try: bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+            try:
+                bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
+                pass
             except Exception: pass
             return
         try:
@@ -3058,11 +3152,13 @@ def adm_feature_toggle_in_group(call: types.CallbackQuery):
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=kb)
             bot.answer_callback_query(call.id, "✅ تم التحديث.")
         except Exception:
-            try: bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
+            try:
+                bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
+                pass
             except Exception: pass
         
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
-def _features_group_toggle_all(c):
+    def _features_group_toggle_all(c):
         try:
             _, slug, to, page = c.data.split(":", 3)
             to = int(to)
@@ -3070,7 +3166,9 @@ def _features_group_toggle_all(c):
             # رجّع الاسم الحقيقي من الـslug
             group = next((n for n in grouped.keys() if _slug(n) == slug), None)
             if not group:
-                try: bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                try:
+                    bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
+                    pass
                 except Exception: pass
                 return
             for it in grouped.get(group, []) or []:
@@ -3101,7 +3199,7 @@ def _features_group_toggle_all(c):
 
     # إلغاء لأي وضع إدخال للأدمن (/cancel)
     @bot.message_handler(commands=['cancel'])
-def _admin_cancel_any(msg: types.Message):
+    def _admin_cancel_any(msg: types.Message):
         _clear_admin_states(msg.from_user.id)
         bot.reply_to(msg, "✅ تم الإلغاء ورجعناك للقائمة الرئيسية.")
         try:
@@ -3112,13 +3210,13 @@ def _admin_cancel_any(msg: types.Message):
 
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/done_(\d+)', msg.text) and _is_admin_msg(msg))
-def handle_done(msg):
+    def handle_done(msg):
         req_id = int(re.match(r'/done_(\d+)', msg.text).group(1))
         delete_pending_request(req_id)
         bot.reply_to(msg, f"✅ تم إنهاء الطلب {req_id}")
 
     @bot.message_handler(func=lambda msg: msg.text and re.match(r'/cancel_(\d+)', msg.text) and _is_admin_msg(msg))
-def handle_cancel(msg):
+    def handle_cancel(msg):
         req_id = int(re.match(r'/cancel_(\d+)', msg.text).group(1))
         delete_pending_request(req_id)
         bot.reply_to(msg, f"🚫 تم إلغاء الطلب {req_id}")
@@ -3127,7 +3225,7 @@ def handle_cancel(msg):
     #  ✉️ رسالة/🖼️ صورة للعميل (HTML + ترويسة بسيطة)
     # ────────────────────────────────────────────────
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_message_")) and _is_admin_cb(c))
-def cb_queue_message(c: types.CallbackQuery):
+    def cb_queue_message(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:message'):
             return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
         request_id = int(c.data.split("_")[3])
@@ -3139,7 +3237,7 @@ def cb_queue_message(c: types.CallbackQuery):
         bot.send_message(c.from_user.id, f"📝 اكتب رسالتك بصيغة HTML.\n{CANCEL_HINT_ADMIN}")
 
     @bot.callback_query_handler(func=lambda c: (c.data.startswith("admin_queue_photo_")) and _is_admin_cb(c))
-def cb_queue_photo(c: types.CallbackQuery):
+    def cb_queue_photo(c: types.CallbackQuery):
         if not allowed(c.from_user.id, 'queue:photo'):
             return bot.answer_callback_query(c.id, '❌ ليس لديك صلاحية.')
         request_id = int(c.data.split("_")[3])
@@ -3173,7 +3271,7 @@ def cb_queue_photo(c: types.CallbackQuery):
         bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
 
     @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and (call.from_user.id in ADMINS or call.from_user.id == ADMIN_MAIN_ID))
-def handle_queue_action(call):
+    def handle_queue_action(call):
         parts      = call.data.split("_")
         action     = parts[2]
         request_id = int(parts[3])
@@ -3724,7 +3822,7 @@ def handle_queue_action(call):
 
     # ===== قائمة الأدمن =====
     @bot.message_handler(commands=['admin'])
-def __admin_cmd(m):
+    def __admin_cmd(m):
         _clear_admin_states(m.from_user.id)
         if not _is_admin_msg(m):
             return bot.reply_to(m, "صلاحية الأدمن فقط.")
@@ -3739,7 +3837,7 @@ def __admin_cmd(m):
         return admin_menu(m)
 
     @bot.message_handler(func=lambda m: m.text == "⬅️ رجوع" and _is_admin_msg(m))
-def _admin_back_text(m):
+    def _admin_back_text(m):
         try:
             _clear_admin_states(m.from_user.id)
             return admin_menu(m)
@@ -3747,7 +3845,7 @@ def _admin_back_text(m):
             bot.send_message(m.chat.id, "رجعناك لقائمة الأدمن.")
 
     @bot.callback_query_handler(func=lambda c: c.data == "admin:home")
-def _admin_home_cb(c):
+    def _admin_home_cb(c):
         try:
             bot.answer_callback_query(c.id)
         except Exception:
@@ -3765,7 +3863,7 @@ def _admin_home_cb(c):
     # 📬 ترحيب — نحن شغالين (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📬 ترحيب — نحن شغالين" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def bc_welcome(m: types.Message):
+    def bc_welcome(m: types.Message):
         _broadcast_pending[m.from_user.id] = {"mode": "welcome", "dest": "clients"}
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
@@ -3786,21 +3884,27 @@ def bc_welcome(m: types.Message):
         )
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bw_dest_clients","bw_dest_channel","bw_confirm","bw_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bw_flow(c: types.CallbackQuery):
+    def _bw_flow(c: types.CallbackQuery):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "welcome":
             return
         if c.data == "bw_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bw_dest_clients","bw_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
         if c.data == "bw_confirm":
@@ -3824,9 +3928,13 @@ def _bw_flow(c: types.CallbackQuery):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
@@ -3834,14 +3942,14 @@ def _bw_flow(c: types.CallbackQuery):
     # 📢 عرض اليوم (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📢 عرض اليوم" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_deal_of_day(m):
+    def broadcast_deal_of_day(m):
         _broadcast_pending[m.from_user.id] = {"mode": "deal_wait"}
         bot.reply_to(m, "🛍️ أرسل *نص العرض* الآن.\nمثال:\n"
                         "• خصم 20% على باقات كذا\n• توصيل فوري\n• ينتهي اليوم ⏳",
                      parse_mode="Markdown")
 
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "deal_wait", content_types=["text"])
-def _deal_collect(m):
+    def _deal_collect(m):
         body = (m.text or "").strip()
         if not body:
             return bot.reply_to(m, "❌ النص فارغ.")
@@ -3863,21 +3971,27 @@ def _deal_collect(m):
         bot.reply_to(m, preview, parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bd_dest_clients","bd_dest_channel","bd_confirm","bd_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bd_flow(c):
+    def _bd_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "deal_confirm":
             return
         if c.data == "bd_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bd_dest_clients","bd_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
 
@@ -3906,9 +4020,13 @@ def _bd_flow(c):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ العرض أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
@@ -3917,7 +4035,7 @@ def _bd_flow(c):
     # 📊 استفتاء سريع (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📊 استفتاء سريع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_poll(m):
+    def broadcast_poll(m):
         _broadcast_pending[m.from_user.id] = {"mode": "poll_wait"}
         bot.reply_to(m, "🗳️ أرسل الاستفتاء بصيغة:\n"
                         "*السؤال*\n"
@@ -3925,7 +4043,7 @@ def broadcast_poll(m):
                      parse_mode="Markdown")
 
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "poll_wait", content_types=["text"])
-def _poll_collect(m):
+    def _poll_collect(m):
         lines = [l.strip() for l in (m.text or "").splitlines() if l.strip()]
         if len(lines) < 3:
             return bot.reply_to(m, "❌ الصيغة غير صحيحة. المطلوب: سؤال + خيارين على الأقل.")
@@ -3961,21 +4079,27 @@ def _poll_collect(m):
         bot.reply_to(m, preview, parse_mode="Markdown", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bp_dest_clients","bp_dest_channel","bp_confirm","bp_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bp_flow(c):
+    def _bp_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "poll_confirm":
             return
         if c.data == "bp_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bp_dest_clients","bp_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
 
@@ -4000,9 +4124,13 @@ def _bp_flow(c):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الاستفتاء أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
 
@@ -4011,12 +4139,12 @@ def _bp_flow(c):
     # 📝 رسالة من عندي (مباشر)
     # =========================
     @bot.message_handler(func=lambda m: m.text == "📝 رسالة من عندي" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_free(m):
+    def broadcast_free(m):
         _broadcast_pending[m.from_user.id] = {"mode": "free_wait"}
         bot.reply_to(m, "📝 أرسل النص الآن.")
 
     @bot.message_handler(func=lambda m: _broadcast_pending.get(m.from_user.id, {}).get("mode") == "free_wait", content_types=["text"])
-def _free_collect(m):
+    def _free_collect(m):
         text = (m.text or "").strip()
         if not text:
             return bot.reply_to(m, "❌ النص فارغ.")
@@ -4033,21 +4161,27 @@ def _free_collect(m):
         bot.reply_to(m, f"{BAND}\n{text}\n{BAND}", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data in ("bf_dest_clients","bf_dest_channel","bf_confirm","bf_cancel") and (c.from_user.id in ADMINS or c.from_user.id == ADMIN_MAIN_ID))
-def _bf_flow(c):
+    def _bf_flow(c):
         st = _broadcast_pending.get(c.from_user.id)
         if not st or st.get("mode") != "free_confirm":
             return
         if c.data == "bf_cancel":
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+            try:
+                bot.answer_callback_query(c.id, "❎ أُلغي.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             return
         if c.data in ("bf_dest_clients","bf_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
-            try: bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+            try:
+                bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
+                pass
             except Exception: pass
             return
         if c.data == "bf_confirm":
@@ -4069,14 +4203,18 @@ def _bf_flow(c):
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
-            try: bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+            try:
+                bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
+                pass
             except Exception: pass
-            try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+            try:
+                bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+                pass
             except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
     
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and _is_admin_msg(m))
-def admin_products_menu(m):
+    def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.row("🚫 إيقاف منتج", "✅ تشغيل منتج")
         kb.row("🔄 مزامنة المنتجات (DB)")
@@ -4085,7 +4223,7 @@ def admin_products_menu(m):
  
     # ⏳ عرض طابور الانتظار للأدمن
     @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and _is_admin_msg(m))
-def admin_queue_list(m: types.Message):
+    def admin_queue_list(m: types.Message):
         # حمّل أول 30 طلب أقدم فالأحدث
         try:
             res = (
@@ -4142,12 +4280,12 @@ def admin_queue_list(m: types.Message):
 
     # ✅ بدّل إدخال الـID بمتصفح ملفات/منتجات إنلاين
     @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and _is_admin_msg(m))
-def admin_products_browser(m):
+    def admin_products_browser(m):
         bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
 
     # 🔄 مزامنة كل المنتجات المعرفة في PRODUCTS إلى جدول products
     @bot.message_handler(func=lambda m: m.text == "🔄 مزامنة المنتجات (DB)" and _is_admin_msg(m))
-def seed_products(m):
+    def seed_products(m):
         try:
             items = []
             for group, arr in PRODUCTS.items():
@@ -4160,7 +4298,7 @@ def seed_products(m):
             bot.reply_to(m, "❌ فشلت المزامنة. تفقد السجلات.")
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_g:") and _is_admin_cb(c))
-def adm_group_open(call: types.CallbackQuery):
+    def adm_group_open(call: types.CallbackQuery):
         slug = call.data.split(":", 1)[1]
         group_name = next((g for g in PRODUCTS.keys() if _slug(g) == slug), None)
         if not group_name:
@@ -4174,7 +4312,7 @@ def adm_group_open(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data == "adm_prod_back" and _is_admin_cb(c))
-def adm_back(call: types.CallbackQuery):
+    def adm_back(call: types.CallbackQuery):
         try:
             bot.edit_message_text("اختر الملف لعرض منتجاته:", call.message.chat.id, call.message.message_id,
                                   reply_markup=_admin_products_groups_markup())
@@ -4183,7 +4321,7 @@ def adm_back(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_i:") and _is_admin_cb(c))
-def adm_product_open(call: types.CallbackQuery):
+    def adm_product_open(call: types.CallbackQuery):
         pid = int(call.data.split(":", 1)[1])
         state = "شغّال 🟢" if get_product_active(pid) else "موقوف 🔴"
         txt = f"المنتج #{pid}\nالحالة الحالية: {state}\nيمكنك تبديل الحالة:"
@@ -4195,7 +4333,7 @@ def adm_product_open(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and _is_admin_cb(c))
-def adm_product_toggle(call: types.CallbackQuery):
+    def adm_product_toggle(call: types.CallbackQuery):
         # كان سابقًا: _, pid, to = call.data.split(":")
         try:
             _, pid, to = call.data.split(":", 2)  # آمن حتى لو زاد المحتوى مستقبلًا
@@ -4218,7 +4356,7 @@ def adm_product_toggle(call: types.CallbackQuery):
     # ===== لوحة المزايا (Feature Flags) =====
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and _is_admin_cb(c))
-def adm_feature_toggle(call: types.CallbackQuery):
+    def adm_feature_toggle(call: types.CallbackQuery):
         try:
             prefix = "adm_feat_t:"
             tail = call.data[len(prefix):] if call.data.startswith(prefix) else call.data
@@ -4258,7 +4396,7 @@ def adm_feature_toggle(call: types.CallbackQuery):
         bot.answer_callback_query(call.id, "✅ تم التحديث.")
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and _is_admin_cb(c))
-def adm_feature_page(call: types.CallbackQuery):
+    def adm_feature_page(call: types.CallbackQuery):
         try:
             page = int(call.data.split(":", 1)[1])
         except Exception:
@@ -4282,7 +4420,7 @@ def adm_feature_page(call: types.CallbackQuery):
         bot.answer_callback_query(call.id)
 
     @bot.message_handler(func=lambda m: m.text == "📊 تقارير سريعة" and m.from_user.id in ADMINS)
-def quick_reports(m):
+    def quick_reports(m):
         dep, pur, _ = totals_deposits_and_purchases_syp()
         lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
         # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
@@ -4297,18 +4435,18 @@ def quick_reports(m):
         bot.send_message(m.chat.id, "\n".join(lines))
 
     @bot.message_handler(func=lambda m: m.text == "📈 تقرير المساعدين" and m.from_user.id == ADMIN_MAIN_ID)
-def assistants_daily_report(m):
+    def assistants_daily_report(m):
         txt = summarize_assistants(days=7)
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
     @bot.message_handler(func=lambda m: m.text == "📈 تقرير الإداريين (الكل)" and m.from_user.id == ADMIN_MAIN_ID)
-def all_admins_report(m):
+    def all_admins_report(m):
         txt = summarize_all_admins(days=7)
         bot.send_message(m.chat.id, txt, parse_mode="HTML")
 
     # ==== بث للجميع ====
     @bot.message_handler(func=lambda m: m.text == "📣 رسالة للجميع" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-def broadcast_menu(m):
+    def broadcast_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.row("📬 ترحيب — نحن شغالين", "📢 عرض اليوم")
         kb.row("📊 استفتاء سريع", "📝 رسالة من عندي")
@@ -4357,14 +4495,14 @@ def _collect_all_user_ids() -> set[int]:
     
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and _is_admin_msg(m))
-def admins_roles(m):
+    def admins_roles(m):
         # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
         ids_str = ", ".join(str(x) for x in ADMINS)
         bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
 
     @bot.message_handler(func=lambda m: m.text == "⚙️ النظام" and _is_admin_msg(m))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام","إعدادات النظام","اعدادات النظام","الاعدادات"]))
-def system_menu_alias(m):
+    def system_menu_alias(m):
         return system_menu(m)
     def system_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
@@ -4384,7 +4522,7 @@ def system_menu_alias(m):
         bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
         
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
-def system_actions(c):
+    def system_actions(c):
         try:
             act = c.data.split(":",1)[1]
             if act == "maint_on":
@@ -4433,7 +4571,7 @@ def system_actions(c):
 
     @bot.message_handler(func=lambda m: m.text == "🎟️ أكواد خصم" and _is_admin(m.from_user.id))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and _is_admin(m.from_user.id)) and _match_admin_alias(m.text, ["خصم","كود خصم","أكواد خصم","أكواد الخصم","نسب خصم"]))
-def discount_menu_alias(m):
+    def discount_menu_alias(m):
         return discount_menu(m)
 
     def discount_menu(m):
@@ -4482,7 +4620,7 @@ def discount_menu_alias(m):
 
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
-def discounts_actions(c):
+    def discounts_actions(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         parts = (c.data or "").split(":")
@@ -4565,14 +4703,16 @@ def discounts_actions(c):
             return bot.send_message(c.message.chat.id, text)
 
     @bot.callback_query_handler(func=lambda c: c.data == "disc:cancel")
-def disc_cancel_cb(c):
+    def disc_cancel_cb(c):
         _disc_new_user_state.pop(c.from_user.id, None)
-        try: bot.answer_callback_query(c.id, "❎ أُلغي.")
+        try:
+            bot.answer_callback_query(c.id, "❎ أُلغي.")
+            pass
         except Exception: pass
         return discount_menu(c.message)
 
     @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
-def disc_new_user_get_id(m):
+    def disc_new_user_get_id(m):
         txt = (m.text or "").strip()
         if txt == "/cancel":
             _disc_new_user_state.pop(m.from_user.id, None)
@@ -4583,7 +4723,9 @@ def disc_new_user_get_id(m):
         uid = None
         try:
             try:
-            uid = parse_user_id(m.text)
+                uid = parse_user_id(m.text)
+            except Exception:
+                pass
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.", reply_markup=_admin_back_cancel_kb())
         except Exception:
@@ -4592,7 +4734,9 @@ def disc_new_user_get_id(m):
             import re
             nums = re.findall(r"\d+", m.text or "")
             if nums:
-                try: uid = int("".join(nums))
+                try:
+                    uid = int("".join(nums))
+                    pass
                 except Exception: uid = None
         if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة أو /cancel.")
@@ -4611,7 +4755,7 @@ def disc_new_user_get_id(m):
         return bot.send_message(m.chat.id, "اختر نسبة الخصم:", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
-def disc_new_user_choose_pct(c):
+    def disc_new_user_choose_pct(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
@@ -4633,7 +4777,7 @@ def disc_new_user_choose_pct(c):
     # --- Discounts: choose user duration ---
     # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
-def disc_new_user_choose_duration(c):
+    def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
@@ -4712,13 +4856,13 @@ def disc_new_user_choose_duration(c):
 
     @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
-def manage_user_menu(m):
+    def manage_user_menu(m):
         _manage_user_state[m.from_user.id] = {"step": "ask_id"}
         rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
         rk.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "أرسل آيدي العميل (أرقام):\n/cancel لإلغاء", reply_markup=rk)
     @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
-def manage_user_get_id(m):
+    def manage_user_get_id(m):
         txt = (m.text or "").strip()
         if txt in ("/admin", "/cancel", "⬅️ رجوع"):
             _clear_admin_states(m.from_user.id)
@@ -4766,7 +4910,7 @@ def manage_user_get_id(m):
         bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
-def manage_user_actions(c):
+    def manage_user_actions(c):
         try:
             _, act, uid = c.data.split(":", 2)
             uid = int(uid)
@@ -4913,7 +5057,7 @@ def manage_user_actions(c):
             pass
             
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
-def _refund_amount(m):
+    def _refund_amount(m):
         st = _refund_state.get(m.from_user.id)
         if not st:
             return
