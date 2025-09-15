@@ -616,6 +616,12 @@ def handle_player_id(message, bot):
 
     # خصم تلقائي (إن وجد)  ← نفس مستوى الإزاحة السابق
     price_before  = int(price_syp)
+    # إعادة التحقق من خصم الإحالات قبل التطبيق (منع الغش)
+    try:
+        revalidate_user_discount(bot, user_id)
+    except Exception:
+        pass
+
     price_syp, applied_disc = apply_discount(user_id, price_syp)
     # خزّن السعرين في حالة الطلب لرسالة الأدمن
     order["price_before"] = price_before
