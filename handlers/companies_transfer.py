@@ -181,11 +181,18 @@ def register_companies_transfer(bot, history):
         if _service_unavailable_guard(bot, msg.chat.id):
             return
         name = _user_name(bot, user_id)
-        register_user_if_not_exist(user_id)
+        # ✅ تمرير الاسم للـ register_user_if_not_exist إن كان يطلبه
+        try:
+            register_user_if_not_exist(user_id, msg.from_user.full_name)
+        except TypeError:
+            # توافق مع توقيع قديم لا يستقبل الاسم
+            register_user_if_not_exist(user_id)
         user_states[user_id] = {"step": None}
-        if not isinstance(history.get(user_id), list):
-            history[user_id] = []
-        history[user_id].append("companies_menu")
+        # ✅ history قد يكون None — نحمي الاستدعاء
+        if history is not None:
+            if not isinstance(history.get(user_id), list):
+                history[user_id] = []
+            history[user_id].append("companies_menu")
 
         logging.info(f"[COMPANY][{user_id}] فتح قائمة تحويل الشركات")
         bot.send_message(
@@ -226,9 +233,11 @@ def register_companies_transfer(bot, history):
         }
         company = company_map[call.data]
         user_states[user_id] = {"step": "show_commission", "company": company}
-        if not isinstance(history.get(user_id), list):
-            history[user_id] = []
-        history[user_id].append("companies_menu")
+        # ✅ history قد يكون None — نحمي الاستدعاء
+        if history is not None:
+            if not isinstance(history.get(user_id), list):
+                history[user_id] = []
+            history[user_id].append("companies_menu")
         logging.info(f"[COMPANY][{user_id}] اختار شركة: {company}")
 
         text = with_cancel_hint(
