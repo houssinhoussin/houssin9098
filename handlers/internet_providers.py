@@ -561,6 +561,10 @@ def register(bot):
                 "total": total,
                 "reserved": total,
                 "hold_id": hold_id,   # ✅ مفتاح النجاح في الأدمن
+                "price_before": (st.get("discount", {}) or {}).get("before", price),
+                # (اختياري) ميتاداتا كاملة عن الخصم:
+                "discount": (st.get("discount") or None),
+
             }
         )
         process_queue(bot)
