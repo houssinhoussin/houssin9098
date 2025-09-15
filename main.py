@@ -7,7 +7,7 @@ from telebot import types
 import threading
 import http.server
 import socketserver
-
+from handlers import referrals  # <-- جديد
 from services.scheduled_tasks import post_ads_task
 from services.error_log_setup import install_global_error_logging
 from services.state_adapter import UserStateDictLike
@@ -123,6 +123,7 @@ from handlers import cancel as cancel_handler
 # تسجيل جميع الهاندلرز (تمرير user_state أو history حسب الحاجة)
 # ---------------------------------------------------------
 start.register(bot, history)
+referrals.register(bot, history)
 wallet.register(bot, history)
 support.register(bot, history)
 admin.register(bot, history)
