@@ -30,6 +30,17 @@ from services.system_service import is_maintenance, maintenance_message
 from services.feature_flags import block_if_disabled, is_feature_enabled
 from services.feature_flags import slugify
 
+# ===== (جديد) خصومات للوحدات والفواتير فقط — استثناء الكازية تمامًا =====
+try:
+    from services.discount_service import apply_discount
+    from services.referral_service import revalidate_user_discount
+except Exception:
+    # أمان: لو لم تتوفر الخدمات، نعرّف بدائل محايدة بلا خصم
+    def apply_discount(user_id: int, amount: int):
+        return int(amount), None
+    def revalidate_user_discount(bot, user_id: int):
+        return None
+
 # ========== إعدادات عامة ==========
 BAND = "━━━━━━━━━━━━━━━━"
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
@@ -823,8 +834,17 @@ def register_bill_and_units(bot, history):
         state = user_states.get(user_id, {})
         unit = state.get("unit") or {}
         number = state.get("number")
-        price = int(unit.get("price") or 0)
         unit_name = unit.get("name") or "وحدات سيرياتيل"
+
+        # السعر قبل الخصم
+        price_before = int(unit.get("price") or 0)
+
+        # ✅ تطبيق خصم للوحدات (سيرياتيل) — الكازية مستثناة بالكامل
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+        price, applied_disc = apply_discount(user_id, price_before)
 
         # 🔒 فحص الكمية نفسها قبل التنفيذ
         if require_feature_or_alert(bot, call.message.chat.id, key_units("Syriatel", unit_name), f"وحدات سيرياتيل — {unit_name}"):
@@ -840,7 +860,7 @@ def register_bill_and_units(bot, history):
                 reply_markup=kb
             )
 
-        # إنشاء الحجز
+        # إنشاء الحجز على السعر بعد الخصم
         hold_id = None
         try:
             resp = create_hold(user_id, price, f"حجز وحدات سيرياتيل - {unit_name}")
@@ -853,6 +873,15 @@ def register_bill_and_units(bot, history):
 
         # رسالة للإدمن
         bal_now = get_balance(user_id)
+        if applied_disc:
+            price_block = (
+                f"💰 السعر قبل الخصم: {price_before:,} ل.س\n"
+                f"٪ الخصم: {int(applied_disc.get('percent') or 0)}٪\n"
+                f"💵 السعر بعد الخصم: {price:,} ل.س\n"
+            )
+        else:
+            price_block = f"💵 السعر: {price:,} ل.س\n"
+
         admin_msg = (
             f"🧾 طلب وحدات سيرياتيل\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
@@ -860,7 +889,7 @@ def register_bill_and_units(bot, history):
             f"آيدي: <code>{user_id}</code>\n"
             f"📱 الرقم/الكود: <code>{number}</code>\n"
             f"🔖 الكمية: {unit_name}\n"
-            f"💵 السعر: {price:,} ل.س\n"
+            f"{price_block}"
             f"💼 رصيد المستخدم الآن: {bal_now:,} ل.س\n"
             f"(type=syr_unit)"
         )
@@ -873,8 +902,16 @@ def register_bill_and_units(bot, history):
                 "type": "syr_unit",
                 "number": number,
                 "unit_name": unit_name,
-                "price": price,
-                "reserved": price,
+                "price": int(price),                     # بعد الخصم
+                "price_before": int(price_before),       # قبل الخصم
+                "discount": (
+                    {"id": (applied_disc or {}).get("id"),
+                     "percent": (applied_disc or {}).get("percent"),
+                     "before": int(price_before),
+                     "after": int(price)}
+                    if applied_disc else None
+                ),
+                "reserved": int(price),
                 "hold_id": hold_id,
             }
         )
@@ -950,8 +987,17 @@ def register_bill_and_units(bot, history):
         state = user_states.get(user_id, {})
         unit = state.get("unit") or {}
         number = state.get("number")
-        price = int(unit.get("price") or 0)
         unit_name = unit.get("name") or "وحدات MTN"
+
+        # السعر قبل الخصم
+        price_before = int(unit.get("price") or 0)
+
+        # ✅ تطبيق خصم للوحدات (MTN) — الكازية مستثناة بالكامل
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+        price, applied_disc = apply_discount(user_id, price_before)
 
         # 🔒 فحص الكمية نفسها قبل التنفيذ
         if require_feature_or_alert(bot, call.message.chat.id, key_units("MTN", unit_name), f"وحدات MTN — {unit_name}"):
@@ -978,6 +1024,15 @@ def register_bill_and_units(bot, history):
             return bot.send_message(call.message.chat.id, f"⚠️ يا {name}، حصل عطل بسيط في إنشاء الحجز. جرّب تاني بعد دقيقة.\n\n{CANCEL_HINT}")
 
         bal_now = get_balance(user_id)
+        if applied_disc:
+            price_block = (
+                f"💰 السعر قبل الخصم: {price_before:,} ل.س\n"
+                f"٪ الخصم: {int(applied_disc.get('percent') or 0)}٪\n"
+                f"💵 السعر بعد الخصم: {price:,} ل.س\n"
+            )
+        else:
+            price_block = f"💵 السعر: {price:,} ل.س\n"
+
         admin_msg = (
             f"🧾 طلب وحدات MTN\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
@@ -985,7 +1040,7 @@ def register_bill_and_units(bot, history):
             f"آيدي: <code>{user_id}</code>\n"
             f"📱 الرقم/الكود: <code>{number}</code>\n"
             f"🔖 الكمية: {unit_name}\n"
-            f"💵 السعر: {price:,} ل.س\n"
+            f"{price_block}"
             f"💼 رصيد المستخدم الآن: {bal_now:,} ل.س\n"
             f"(type=mtn_unit)"
         )
@@ -998,8 +1053,16 @@ def register_bill_and_units(bot, history):
                 "type": "mtn_unit",
                 "number": number,
                 "unit_name": unit_name,
-                "price": price,
-                "reserved": price,
+                "price": int(price),                     # بعد الخصم
+                "price_before": int(price_before),       # قبل الخصم
+                "discount": (
+                    {"id": (applied_disc or {}).get("id"),
+                     "percent": (applied_disc or {}).get("percent"),
+                     "before": int(price_before),
+                     "after": int(price)}
+                    if applied_disc else None
+                ),
+                "reserved": int(price),
                 "hold_id": hold_id,
             }
         )
@@ -1055,8 +1118,47 @@ def register_bill_and_units(bot, history):
             return bot.send_message(msg.chat.id, "⚠️ ادخل مبلغ صحيح بالأرقام.\n\n" + CANCEL_HINT)
         user_states[user_id]["amount"] = amount
         user_states[user_id]["step"] = "syr_bill_amount_confirm"
+
+        # ✅ تطبيق خصم على مبلغ الفاتورة (قبل حساب الأجور) — الكازية خارج المعادلة
+        amount_before = int(amount)
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+        amount_after, applied_disc = apply_discount(user_id, amount_before)
+
+        fee = amount_after * 7 // 100  # أجور بعد الخصم (أنصف للعميل)
+        amount_with_fee = amount_after + fee
+
+        user_states[user_id]["amount_after"] = amount_after
+        user_states[user_id]["fee"] = fee
+        user_states[user_id]["amount_with_fee"] = amount_with_fee
+        user_states[user_id]["discount"] = (
+            {"before": int(amount_before), "after": int(amount_after),
+             "percent": (applied_disc or {}).get("percent"), "id": (applied_disc or {}).get("id")}
+            if applied_disc else None
+        )
+
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✏️ تعديل", "edit_syr_bill_amount"), ("✔️ تأكيد", "confirm_syr_bill_amount"))
-        bot.send_message(msg.chat.id, with_cancel_hint(banner("🧮 تأكيد المبلغ", [f"المبلغ: {_fmt_syp(amount)}"])), reply_markup=kb)
+        if applied_disc:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ قبل الخصم: {_fmt_syp(amount_before)}",
+                f"٪ الخصم: {int((applied_disc or {}).get('percent') or 0)}٪",
+                f"المبلغ بعد الخصم: {_fmt_syp(amount_after)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
+        else:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ: {_fmt_syp(amount_before)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
+        bot.send_message(msg.chat.id, with_cancel_hint(banner("تفاصيل الفاتورة (سيرياتيل)", lines)), reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_syr_bill_amount")
     def edit_syr_bill_amount(call):
@@ -1067,20 +1169,31 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "confirm_syr_bill_amount")
     def confirm_syr_bill_amount(call):
         user_id = call.from_user.id
-        amount = user_states[user_id]["amount"]
-        # ✅ بدون float: 10% = amount * 10 // 100
-        fee = amount * 7 // 100
-        amount_with_fee = amount + fee
+        amount_after = int(user_states[user_id].get("amount_after") or user_states[user_id]["amount"])
+        fee = int(user_states[user_id].get("fee") or (amount_after * 7 // 100))
+        amount_with_fee = int(user_states[user_id].get("amount_with_fee") or (amount_after + fee))
         user_states[user_id]["amount_with_fee"] = amount_with_fee
         user_states[user_id]["step"] = "syr_bill_final_confirm"
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✔️ تأكيد", "final_confirm_syr_bill"))
-        lines = [
-            f"الرقم: {user_states[user_id]['number']}",
-            f"المبلغ: {_fmt_syp(amount)}",
-            f"أجور الخدمة: {_fmt_syp(fee)}",
-            f"الإجمالي: {_fmt_syp(amount_with_fee)}",
-            "نكمّل؟ 😉"
-        ]
+        disc = user_states[user_id].get("discount")
+        if disc:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ قبل الخصم: {_fmt_syp(int(disc['before']))}",
+                f"٪ الخصم: {int(disc.get('percent') or 0)}٪",
+                f"المبلغ بعد الخصم: {_fmt_syp(amount_after)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
+        else:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ: {_fmt_syp(amount_after)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
         bot.send_message(call.message.chat.id, with_cancel_hint(banner("تفاصيل الفاتورة (سيرياتيل)", lines)), reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "final_confirm_syr_bill")
@@ -1097,8 +1210,10 @@ def register_bill_and_units(bot, history):
 
         state = user_states.get(user_id, {})
         number = state.get("number")
-        amount = int(state.get("amount") or 0)
-        total  = int(state.get("amount_with_fee") or amount)
+        amount_before = int(state.get("amount") or 0)
+        amount_after = int(state.get("amount_after") or amount_before)
+        fee = int(state.get("fee") or (amount_after * 7 // 100))
+        total  = int(state.get("amount_with_fee") or (amount_after + fee))
 
         available = get_available_balance(user_id)
         if available < total:
@@ -1121,14 +1236,25 @@ def register_bill_and_units(bot, history):
             return bot.send_message(call.message.chat.id, f"⚠️ يا {name}، حصل عطل بسيط في إنشاء الحجز. جرّب تاني بعد دقيقة.\n\n{CANCEL_HINT}")
 
         bal_now = get_balance(user_id)
+
+        disc = state.get("discount")
+        if disc:
+            price_block = (
+                f"💵 المبلغ قبل الخصم: {int(amount_before):,} ل.س\n"
+                f"٪ الخصم: {int(disc.get('percent') or 0)}٪\n"
+                f"💵 المبلغ بعد الخصم: {int(amount_after):,} ل.س\n"
+            )
+        else:
+            price_block = f"💵 المبلغ: {int(amount_after):,} ل.س\n"
+
         admin_msg = (
             f"🧾 دفع فاتورة سيرياتيل\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
             f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
             f"آيدي: <code>{user_id}</code>\n"
             f"📱 الرقم: <code>{number}</code>\n"
-            f"💵 المبلغ: {amount:,} ل.س\n"
-            f"🧾 الإجمالي مع العمولة: {total:,} ل.س\n"
+            f"{price_block}"
+            f"🧾 الإجمالي مع العمولة: {int(total):,} ل.س\n"
             f"💼 رصيد المستخدم الآن: {bal_now:,} ل.س\n"
             f"(type=syr_bill)"
         )
@@ -1140,9 +1266,13 @@ def register_bill_and_units(bot, history):
             payload={
                 "type": "syr_bill",
                 "number": number,
-                "amount": amount,
-                "total": total,
-                "reserved": total,
+                "amount": int(amount_after),           # بعد الخصم
+                "price": int(amount_after),            # نفس الشيء لأغراض الإدمن
+                "price_before": int(amount_before),    # لتسجيل استخدام الخصم
+                "fee": int(fee),
+                "total": int(total),
+                "reserved": int(total),
+                "discount": disc,
                 "hold_id": hold_id,
             }
         )
@@ -1198,8 +1328,47 @@ def register_bill_and_units(bot, history):
             return bot.send_message(msg.chat.id, "⚠️ ادخل مبلغ صحيح بالأرقام.\n\n" + CANCEL_HINT)
         user_states[user_id]["amount"] = amount
         user_states[user_id]["step"] = "mtn_bill_amount_confirm"
+
+        # ✅ تطبيق خصم على مبلغ الفاتورة (قبل أجور الخدمة)
+        amount_before = int(amount)
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+        amount_after, applied_disc = apply_discount(user_id, amount_before)
+
+        fee = amount_after * 7 // 100  # أجور بعد الخصم
+        amount_with_fee = amount_after + fee
+
+        user_states[user_id]["amount_after"] = amount_after
+        user_states[user_id]["fee"] = fee
+        user_states[user_id]["amount_with_fee"] = amount_with_fee
+        user_states[user_id]["discount"] = (
+            {"before": int(amount_before), "after": int(amount_after),
+             "percent": (applied_disc or {}).get("percent"), "id": (applied_disc or {}).get("id")}
+            if applied_disc else None
+        )
+
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✏️ تعديل", "edit_mtn_bill_amount"), ("✔️ تأكيد", "confirm_mtn_bill_amount"))
-        bot.send_message(msg.chat.id, with_cancel_hint(banner("🧮 تأكيد المبلغ", [f"المبلغ: {_fmt_syp(amount)}"])), reply_markup=kb)
+        if applied_disc:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ قبل الخصم: {_fmt_syp(amount_before)}",
+                f"٪ الخصم: {int((applied_disc or {}).get('percent') or 0)}٪",
+                f"المبلغ بعد الخصم: {_fmt_syp(amount_after)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
+        else:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ: {_fmt_syp(amount_before)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
+        bot.send_message(msg.chat.id, with_cancel_hint(banner("تفاصيل الفاتورة (MTN)", lines)), reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_mtn_bill_amount")
     def edit_mtn_bill_amount(call):
@@ -1210,19 +1379,31 @@ def register_bill_and_units(bot, history):
     @bot.callback_query_handler(func=lambda call: call.data == "confirm_mtn_bill_amount")
     def confirm_mtn_bill_amount(call):
         user_id = call.from_user.id
-        amount = user_states[user_id]["amount"]
-        fee = amount * 7 // 100  # ✅ بدون float
-        amount_with_fee = amount + fee
+        amount_after = int(user_states[user_id].get("amount_after") or user_states[user_id]["amount"])
+        fee = int(user_states[user_id].get("fee") or (amount_after * 7 // 100))
+        amount_with_fee = int(user_states[user_id].get("amount_with_fee") or (amount_after + fee))
         user_states[user_id]["amount_with_fee"] = amount_with_fee
         user_states[user_id]["step"] = "mtn_bill_final_confirm"
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✔️ تأكيد", "final_confirm_mtn_bill"))
-        lines = [
-            f"الرقم: {user_states[user_id]['number']}",
-            f"المبلغ: {_fmt_syp(amount)}",
-            f"أجور الخدمة: {_fmt_syp(fee)}",
-            f"الإجمالي: {_fmt_syp(amount_with_fee)}",
-            "نكمّل؟ 😉"
-        ]
+        disc = user_states[user_id].get("discount")
+        if disc:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ قبل الخصم: {_fmt_syp(int(disc['before']))}",
+                f"٪ الخصم: {int(disc.get('percent') or 0)}٪",
+                f"المبلغ بعد الخصم: {_fmt_syp(amount_after)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
+        else:
+            lines = [
+                f"الرقم: {user_states[user_id]['number']}",
+                f"المبلغ: {_fmt_syp(amount_after)}",
+                f"أجور الخدمة: {_fmt_syp(fee)}",
+                f"الإجمالي: {_fmt_syp(amount_with_fee)}",
+                "نكمّل؟ 😉"
+            ]
         bot.send_message(call.message.chat.id, with_cancel_hint(banner("تفاصيل الفاتورة (MTN)", lines)), reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "final_confirm_mtn_bill")
@@ -1239,8 +1420,10 @@ def register_bill_and_units(bot, history):
 
         state = user_states.get(user_id, {})
         number = state.get("number")
-        amount = int(state.get("amount") or 0)
-        total  = int(state.get("amount_with_fee") or amount)
+        amount_before = int(state.get("amount") or 0)
+        amount_after = int(state.get("amount_after") or amount_before)
+        fee = int(state.get("fee") or (amount_after * 7 // 100))
+        total  = int(state.get("amount_with_fee") or (amount_after + fee))
 
         available = get_available_balance(user_id)
         if available < total:
@@ -1263,14 +1446,25 @@ def register_bill_and_units(bot, history):
             return bot.send_message(call.message.chat.id, f"⚠️ يا {name}، حصل عطل بسيط في إنشاء الحجز. جرّب تاني بعد دقيقة.\n\n{CANCEL_HINT}")
 
         bal_now = get_balance(user_id)
+
+        disc = state.get("discount")
+        if disc:
+            price_block = (
+                f"💵 المبلغ قبل الخصم: {int(amount_before):,} ل.س\n"
+                f"٪ الخصم: {int(disc.get('percent') or 0)}٪\n"
+                f"💵 المبلغ بعد الخصم: {int(amount_after):,} ل.س\n"
+            )
+        else:
+            price_block = f"💵 المبلغ: {int(amount_after):,} ل.س\n"
+
         admin_msg = (
             f"🧾 دفع فاتورة MTN\n"
             f"👤 الاسم: <code>{call.from_user.full_name}</code>\n"
             f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
             f"آيدي: <code>{user_id}</code>\n"
             f"📱 الرقم: <code>{number}</code>\n"
-            f"💵 المبلغ: {amount:,} ل.س\n"
-            f"🧾 الإجمالي مع العمولة: {total:,} ل.س\n"
+            f"{price_block}"
+            f"🧾 الإجمالي مع العمولة: {int(total):,} ل.س\n"
             f"💼 رصيد المستخدم الآن: {bal_now:,} ل.س\n"
             f"(type=mtn_bill)"
         )
@@ -1282,9 +1476,13 @@ def register_bill_and_units(bot, history):
             payload={
                 "type": "mtn_bill",
                 "number": number,
-                "amount": amount,
-                "total": total,
-                "reserved": total,
+                "amount": int(amount_after),           # بعد الخصم
+                "price": int(amount_after),
+                "price_before": int(amount_before),    # لتسجيل استخدام الخصم
+                "fee": int(fee),
+                "total": int(total),
+                "reserved": int(total),
+                "discount": disc,
                 "hold_id": hold_id,
             }
         )
