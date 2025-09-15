@@ -272,3 +272,27 @@ def expire_due_goals() -> None:
             get_table(GOALS_TBL).update({"status":"expired"}).lte("expires_at", _now().isoformat()).in_("status", ["open","satisfied"]).execute()
         except Exception:
             pass
+            # أضف الكتلة التالية مباشرة بعد اكتمال الشرط:
+from utils.time import now as _now
+from services.discount_service import create_discount
+
+REFERRAL_DISCOUNT_PERCENT = 1  # غيّر الرقم حسب نسبة خصم الإحالة لديك
+
+# 1) أنشئ خصم المستخدم لمدة 14 ساعة من الآن
+created = create_discount(
+    scope="user",
+    percent=REFERRAL_DISCOUNT_PERCENT,
+    user_id=int(referrer_id),
+    active=True,
+    hours=14,
+    source="referral",
+    meta={"reason": "referral", "goal_id": str(goal["id"])}
+)
+
+# 2) اربط الخصم بالهدف للمراجعة، لكن لا تلمس خصم الأدمن
+if created and created.get("id"):
+    get_table("referral_goals").update({
+        "status": "satisfied",
+        "granted_discount_id": created["id"]
+    }).eq("id", goal["id"]).execute()
+
