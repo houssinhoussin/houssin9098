@@ -3,10 +3,12 @@
 # • /cancel للإلغاء في أي وقت
 # • confirm_guard عند التأكيد (يحذف الكيبورد فقط + Debounce)
 # • رسائل محسّنة وإيموجي وبانر
-# • حجز المبلغ عبر create_hold مع وصف واضح
+# • حجز المبلغ عبر create_hold مع وصف واضح (بتغليف مرن)
 # • فحص الصيانة + إمكانية إيقاف الخدمة عبر Feature Flag (ads)
 
 from telebot import types
+from telebot.types import InputMediaPhoto
+import html
 
 from services.wallet_service import (
     get_balance,
@@ -14,9 +16,11 @@ from services.wallet_service import (
     create_hold,
     register_user_if_not_exist,
 )
+
+# قد لا تتوفر طوابير المعالجة في بعض البيئات
 try:
     from services.queue_service import add_pending_request, process_queue
-except Exception:
+except Exception:  # pragma: no cover
     def add_pending_request(*args, **kwargs):
         return None
     def process_queue(*args, **kwargs):
@@ -26,8 +30,6 @@ from handlers.keyboards import main_menu
 
 # === Publisher used by services/scheduled_tasks.post_ads_task ===
 from config import CHANNEL_USERNAME
-from telebot.types import InputMediaPhoto
-import html
 
 def _prep_channel_id():
     cid = CHANNEL_USERNAME or ""
@@ -97,8 +99,8 @@ from services.feature_flags import block_if_disabled  # requires flag key: "ads"
 # حارس التأكيد الموحّد (يحذف الكيبورد + يمنع الدبل-كليك)
 try:
     from services.ui_guards import confirm_guard
-except Exception:
-    from ui_guards import confirm_guard
+except Exception:  # pragma: no cover
+    from ui_guards import confirm_guard  # Fallback إن كان المسار مختلفًا
 
 # ----------------------------------
 # خيارات الإعلان
@@ -137,6 +139,53 @@ def _fmt_syp(n: int) -> str:
     except Exception:
         return f"{n} ل.س"
 
+# ====== حارس موحّد للصيانة/الإيقاف ======
+def _ads_guard_msg(bot, chat_id) -> bool:
+    """
+    يعيد True إذا ينبغي إيقاف المسار (صيانة/ميزة معلّقة)،
+    ويرسل الرسالة المناسبة للمستخدم.
+    """
+    if is_maintenance():
+        bot.send_message(chat_id, maintenance_message())
+        return True
+    if block_if_disabled(bot, chat_id, "ads", "خدمة الإعلانات"):
+        return True
+    return False
+
+# ====== تغليف مرن لإنشاء الحجز ======
+def _create_hold_robust(user_id: int, amount: int, desc: str):
+    """
+    يحاول إنشاء حجز ويعيد hold_id فقط مهما كان شكل الإرجاع:
+    - رقم/سلسلة مباشرة
+    - كائن له .data
+    - dict فيه id/hold_id
+    - list/tuple يحتوي عنصرًا أول فيه id
+    """
+    try:
+        resp = create_hold(user_id, amount, desc)
+        # مباشرة
+        if isinstance(resp, (int, str)):
+            return resp
+        # كائن مع خاصية data
+        data_attr = getattr(resp, "data", None)
+        if data_attr is not None:
+            if isinstance(data_attr, dict):
+                return data_attr.get("id") or data_attr.get("hold_id") or None
+            if isinstance(data_attr, (list, tuple)) and data_attr:
+                first = data_attr[0]
+                return first.get("id") if isinstance(first, dict) else first
+            return data_attr
+        # dict مباشرة
+        if isinstance(resp, dict):
+            return resp.get("id") or resp.get("hold_id")
+        # list/tuple مباشرة
+        if isinstance(resp, (list, tuple)) and resp:
+            first = resp[0]
+            return first.get("id") if isinstance(first, dict) else first
+    except Exception as e:
+        print(f"[ads] create_hold failed: {e}")
+    return None
+
 # ====================================================================
 # التسجيل
 # ====================================================================
@@ -168,9 +217,7 @@ def register(bot, _history):
             pass
 
         # صيانة/إيقاف خدمة؟
-        if is_maintenance():
-            return bot.send_message(msg.chat.id, maintenance_message())
-        if block_if_disabled(bot, msg.chat.id, "ads", "خدمة الإعلانات"):
+        if _ads_guard_msg(bot, msg.chat.id):
             return
 
         # تسجيل المستخدم (لإنشاء الحساب إن لم يوجد)
@@ -204,17 +251,19 @@ def register(bot, _history):
 
     @bot.callback_query_handler(func=lambda call: call.data == "ads_start")
     def proceed_to_ads(call):
+        # يمنع الدبل-كليك ويمسح الكيبورد
+        if confirm_guard(bot, call, "ads"):
+            return
         # صيانة/إيقاف خدمة؟
-        if is_maintenance():
-            bot.answer_callback_query(call.id)
-            return bot.send_message(call.message.chat.id, maintenance_message())
-        if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
+        if _ads_guard_msg(bot, call.message.chat.id):
             return bot.answer_callback_query(call.id)
         bot.answer_callback_query(call.id)
         send_ads_menu(call.message.chat.id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "ads_back")
     def ads_back(call):
+        if confirm_guard(bot, call, "ads"):
+            return
         bot.answer_callback_query(call.id)
         bot.send_message(
             call.message.chat.id,
@@ -227,11 +276,10 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ads_") and call.data[4:].isdigit())
     def select_ad_type(call):
-        # صيانة/إيقاف خدمة؟
-        if is_maintenance():
-            bot.answer_callback_query(call.id)
-            return bot.send_message(call.message.chat.id, maintenance_message())
-        if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
+        # يمنع الدبل-كليك + فحص الصيانة/الإيقاف
+        if confirm_guard(bot, call, "ads"):
+            return
+        if _ads_guard_msg(bot, call.message.chat.id):
             return bot.answer_callback_query(call.id)
 
         bot.answer_callback_query(call.id)
@@ -256,8 +304,16 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     # 3) استقبال وسيلة التواصل
     # ----------------------------------------------------------------
-    @bot.message_handler(content_types=["text"], func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "contact")
+    @bot.message_handler(
+        content_types=["text"],
+        func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "contact"
+    )
     def receive_contact(msg):
+        # لو تعطّلت الخدمة أثناء المسار
+        if _ads_guard_msg(bot, msg.chat.id):
+            user_ads_state.pop(msg.from_user.id, None)
+            return
+
         user_id = msg.from_user.id
         user_ads_state[user_id]["contact"] = (msg.text or "").strip()
         user_ads_state[user_id]["step"] = "confirm_contact"
@@ -278,20 +334,36 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data in {"ads_contact_confirm", "ads_cancel"})
     def confirm_contact(call):
+        if confirm_guard(bot, call, "ads"):
+            return
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         if call.data == "ads_contact_confirm":
+            # منع الاستكمال إن كانت الخدمة متوقفة الآن
+            if _ads_guard_msg(bot, call.message.chat.id):
+                return
             user_ads_state[user_id]["step"] = "ad_text"
             bot.send_message(call.message.chat.id, with_cancel_hint("📝 ابعت نص إعلانك (هيظهر في القناة):"))
         else:
             user_ads_state.pop(user_id, None)
-            bot.send_message(call.message.chat.id, "❌ اتلغت عملية الإعلان. نورتنا 🙏", reply_markup=types.ReplyKeyboardRemove())
+            bot.send_message(
+                call.message.chat.id,
+                "❌ اتلغت عملية الإعلان. نورتنا 🙏",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
 
     # ----------------------------------------------------------------
     # 5) استقبال نص الإعلان
     # ----------------------------------------------------------------
-    @bot.message_handler(content_types=["text"], func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "ad_text")
+    @bot.message_handler(
+        content_types=["text"],
+        func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "ad_text"
+    )
     def receive_ad_text(msg):
+        if _ads_guard_msg(bot, msg.chat.id):
+            user_ads_state.pop(msg.from_user.id, None)
+            return
+
         user_id = msg.from_user.id
         user_ads_state[user_id]["ad_text"] = (msg.text or "").strip()
         user_ads_state[user_id]["step"] = "wait_image_option"
@@ -309,18 +381,33 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data in {"ads_one_image", "ads_two_images"})
     def choose_images(call):
+        if confirm_guard(bot, call, "ads"):
+            return
+        if _ads_guard_msg(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
+
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         expect = 1 if call.data == "ads_one_image" else 2
         state = user_ads_state.setdefault(user_id, {})
         state.update({"expect_images": expect, "images": [], "step": "wait_images"})
-        bot.send_message(call.message.chat.id, with_cancel_hint("📸 ابعت الصورة دلوقتي." if expect == 1 else "📸 ابعت الصورتين وراء بعض."))
+        bot.send_message(
+            call.message.chat.id,
+            with_cancel_hint("📸 ابعت الصورة دلوقتي." if expect == 1 else "📸 ابعت الصورتين وراء بعض.")
+        )
 
     # ----------------------------------------------------------------
     # 7) استقبال الصور
     # ----------------------------------------------------------------
-    @bot.message_handler(content_types=["photo", "document"], func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "wait_images")
+    @bot.message_handler(
+        content_types=["photo", "document"],
+        func=lambda msg: user_ads_state.get(msg.from_user.id, {}).get("step") == "wait_images"
+    )
     def receive_images(msg):
+        if _ads_guard_msg(bot, msg.chat.id):
+            user_ads_state.pop(msg.from_user.id, None)
+            return
+
         user_id = msg.from_user.id
         state = user_ads_state.get(user_id)
         if not state:
@@ -352,6 +439,11 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data == "ads_skip_images")
     def skip_images(call):
+        if confirm_guard(bot, call, "ads"):
+            return
+        if _ads_guard_msg(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
+
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         state = user_ads_state.get(user_id, {})
@@ -400,6 +492,11 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data == "ads_edit")
     def edit_ad(call):
+        if confirm_guard(bot, call, "ads"):
+            return
+        if _ads_guard_msg(bot, call.message.chat.id):
+            return bot.answer_callback_query(call.id)
+
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         user_ads_state[user_id]["step"] = "ad_text"
@@ -410,10 +507,17 @@ def register(bot, _history):
     # ----------------------------------------------------------------
     @bot.callback_query_handler(func=lambda call: call.data == "ads_cancel")
     def cancel_ad(call):
+        # نسمح دائمًا بالإلغاء لكن نمنع الدبل-كليك
+        if confirm_guard(bot, call, "ads"):
+            return
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         user_ads_state.pop(user_id, None)
-        bot.send_message(call.message.chat.id, "❌ اتلغت عملية الإعلان. نورتنا 🙏", reply_markup=types.ReplyKeyboardRemove())
+        bot.send_message(
+            call.message.chat.id,
+            "❌ اتلغت عملية الإعلان. نورتنا 🙏",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
 
     # ----------------------------------------------------------------
     # 12) تأكيد الإعلان (إرساله للطابور مع حجز المبلغ)
@@ -427,10 +531,7 @@ def register(bot, _history):
             return
 
         # صيانة/إيقاف خدمة؟
-        if is_maintenance():
-            bot.send_message(call.message.chat.id, maintenance_message())
-            return
-        if block_if_disabled(bot, call.message.chat.id, "ads", "خدمة الإعلانات"):
+        if _ads_guard_msg(bot, call.message.chat.id):
             return
 
         data = user_ads_state.get(user_id)
@@ -461,69 +562,11 @@ def register(bot, _history):
             )
             return
 
-        # 🧾 إنشاء حجز للمبلغ (ذرّيًا عبر RPC)
-        hold_id = create_hold(user_id, price, f"ads x{times}")
+        # 🧾 إنشاء حجز للمبلغ (مرن الشكل)
+        hold_desc = f"ads x{times}"
+        hold_id = _create_hold_robust(user_id, price, hold_desc)
         if not hold_id:
             bot.send_message(call.message.chat.id, "❌ تعذر حجز المبلغ. حاول لاحقًا.")
-            return
-
-        # 📨 إضافة الطلب لطابور الإدارة
-        payload = {
-            "type": "ads",
-            "times": times,
-            "price": price,
-            "contact": data.get("contact"),
-            "ad_text": data.get("ad_text"),
-            "images": data.get("images") or [],
-            "user_id": user_id,
-            "reserved": price,
-            "hold_id": hold_id,
-            "hold_desc": f"ads x{times}",
-        }
-        add_pending_request(user_id, "ads", payload, f"طلب إعلان ×{times} بسعر {_fmt_syp(price)}")
-        process_queue(bot)
-
-        # ✔️ إنهاء الواجهة وإعلام المستخدم
-        safe_finalize(
-            bot,
-            call.message,
-            new_text="✅ تم إرسال طلب إعلانك للمراجعة. سنبلغك حال الموافقة.",
-            parse_mode=None,
-        )
-        user_ads_state[user_id] = {"step": "submitted"}
-
-
-        # ——— حجز المبلغ عبر RPC ———
-        hold_id = None
-        try:
-            hold_desc = f"حجز إعلان مدفوع × {times}"
-            hold_resp = create_hold(user_id, price, hold_desc)
-            if getattr(hold_resp, "error", None):
-                bot.send_message(
-                    call.message.chat.id,
-                    with_cancel_hint(f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية."),
-                )
-                return
-            # استخراج hold_id بمرونة (dict/list/primitive)
-            data_attr = getattr(hold_resp, "data", None)
-            if isinstance(data_attr, dict):
-                hold_id = data_attr.get("id") or data_attr.get("hold_id") or data_attr
-            elif isinstance(data_attr, (list, tuple)) and data_attr:
-                first = data_attr[0]
-                hold_id = first.get("id") if isinstance(first, dict) else first
-            else:
-                hold_id = data_attr
-            if not hold_id:
-                bot.send_message(
-                    call.message.chat.id,
-                    with_cancel_hint(f"❌ يا {name}، فشل إنشاء الحجز. جرّب بعد دقيقة."),
-                )
-                return
-        except Exception:
-            bot.send_message(
-                call.message.chat.id,
-                with_cancel_hint(f"❌ يا {name}، حصلت مشكلة أثناء الحجز. جرّب بعد شوية."),
-            )
             return
 
         # ===== رسالة الأدمن بالقالب الموحّد =====
@@ -555,16 +598,16 @@ def register(bot, _history):
             "hold_desc": hold_desc, # وصف للتتبع
         }
 
+        # 📨 إضافة الطلب لطابور الإدارة ومعالجة فورية إن أمكن
         add_pending_request(
             user_id=user_id,
             username=call.from_user.username,
             request_text=admin_msg,
             payload=payload,
         )
-
-        # معالجة فورية لو في أدمن متصل
         process_queue(bot)
 
+        # ✔️ إعلام المستخدم وإغلاق الحالة
         bot.send_message(
             user_id,
             banner(
