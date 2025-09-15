@@ -395,7 +395,7 @@ def register_bill_and_units(bot, history):
                                                  prefix="mtnkz", back_data="ubm:back")
         txt = with_cancel_hint(banner("🎯 اختر المبلغ (جملة كازية MTN)", [f"صفحة {page+1}/{pages}"]))
         if message_id is not None:
-            bot.edit_message_text(txt, chat_id, message_id, reply_markup=kb)
+            bot.edit_message_text(txt، chat_id, message_id, reply_markup=kb)
         else:
             bot.send_message(chat_id, txt, reply_markup=kb)
 
@@ -457,7 +457,7 @@ def register_bill_and_units(bot, history):
                 with_cancel_hint("📱 ابعت الرقم/الكود اللي بيبدأ بـ 094 أو 095 أو 096:"),
                 chat_id, call.message.message_id, reply_markup=kb
             )
-            return bot.answer_callback_query(call.id, text=_unit_label(unit))
+            return bot.answer_callback_query(call.id، text=_unit_label(unit))
 
         bot.answer_callback_query(call.id)
 
@@ -486,7 +486,7 @@ def register_bill_and_units(bot, history):
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
             bot.edit_message_text(
                 with_cancel_hint("⌨️ ادخل كود كازية سيرياتيل:"),
-                chat_id, call.message.message_id, reply_markup=kb
+                chat_id، call.message.message_id, reply_markup=kb
             )
             return bot.answer_callback_query(call.id, text=_kz_label(it))
 
@@ -538,7 +538,7 @@ def register_bill_and_units(bot, history):
             f"الكود:   {code}",
             "نكمّل الطلب؟ 😉"
         ]
-        bot.send_message(msg.chat.id, with_cancel_hint(banner("🧾 تأكيد عملية (جملة كازية سيرياتيل)", lines)), reply_markup=kb)
+        bot.send_message(msg.chat.id، with_cancel_hint(banner("🧾 تأكيد عملية (جملة كازية سيرياتيل)", lines)), reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "syr_kz_final_confirm")
     def syr_kz_final_confirm(call):
@@ -666,7 +666,7 @@ def register_bill_and_units(bot, history):
         amount = int(it.get("amount") or 0)
         price  = int(it.get("price")  or 0)
 
-        if require_feature_or_alert(bot, call.message.chat.id, key_kazia("MTN", amount),
+        if require_feature_or_alert(bot, call.message.chat.id، key_kazia("MTN", amount),
                                     f"كازية MTN — {amount:,} ل.س"):
             return
 
@@ -841,7 +841,7 @@ def register_bill_and_units(bot, history):
 
         # ✅ تطبيق خصم للوحدات (سيرياتيل) — الكازية مستثناة بالكامل
         try:
-            revalidate_user_discount(bot, user_id)
+            revalidate_user_discount(bot، user_id)
         except Exception:
             pass
         price, applied_disc = apply_discount(user_id, price_before)
@@ -980,7 +980,7 @@ def register_bill_and_units(bot, history):
         name = _user_name(call)
 
         if is_maintenance():
-            return bot.send_message(call.message.chat.id, maintenance_message())
+            return bot.send_message(call.message.chat.id، maintenance_message())
         if block_if_disabled(bot, call.message.chat.id, "mtn_unit", "وحدات MTN"):
             return
 
@@ -1016,7 +1016,7 @@ def register_bill_and_units(bot, history):
         hold_id = None
         try:
             resp = create_hold(user_id, price, f"حجز وحدات MTN - {unit_name}")
-            hold_id = (None if getattr(resp, "error", None) else getattr(resp, "data", None))
+            hold_id = (None if getattr(resp، "error", None) else getattr(resp, "data", None))
         except Exception as e:
             logging.exception("create_hold failed: %s", e)
 
@@ -1092,7 +1092,7 @@ def register_bill_and_units(bot, history):
         user_states[user_id]["number"] = number
         user_states[user_id]["step"] = "syr_bill_number_confirm"
         kb = make_inline_buttons(("❌ إلغاء", "cancel_all"), ("✏️ تعديل", "edit_syr_bill_number"), ("✔️ تأكيد", "confirm_syr_bill_number"))
-        bot.send_message(msg.chat.id, with_cancel_hint(banner("🧷 تأكيد الرقم", [number])), reply_markup=kb)
+        bot.send_message(msg.chat.id، with_cancel_hint(banner("🧷 تأكيد الرقم", [number])), reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_syr_bill_number")
     def edit_syr_bill_number(call):
@@ -1336,7 +1336,7 @@ def register_bill_and_units(bot, history):
             revalidate_user_discount(bot, user_id)
         except Exception:
             pass
-        amount_after, applied_disc = apply_discount(user_id, amount_before)
+        amount_after، applied_disc = apply_discount(user_id, amount_before)
 
         fee = amount_after * 7 // 100  # أجور بعد الخصم
         amount_with_fee = amount_after + fee
