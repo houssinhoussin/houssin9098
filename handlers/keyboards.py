@@ -1,35 +1,17 @@
 from telebot import types
 import logging
 
-# ✅ استدعاء حالة الميزة بأمان (يدعم اسمين شائعين)
-try:
-    from services.feature_flags import is_feature_active as _feat_on
-except Exception:
-    try:
-        from services.feature_flags import is_active as _feat_on
-    except Exception:
-        def _feat_on(key: str) -> bool:
-            return True  # في حال غياب النظام، لا نعطّل شيء
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
 
-    # الصف 1: المنتجات + زر الحزازير (دائمًا ظاهر، يتغير نصه فقط)
-    row1 = ["🛒 المنتجات"]
-    try:
-        riddles_on = _feat_on("menu:riddles")
-    except Exception:
-        riddles_on = True  # احتياط في حال تعطّل نظام المزايا
-
-    riddles_label = "🎯 الحزازير (ربحي)" if riddles_on else "🎯 الحزازير (موقوف 🔒)"
-    row1.append(riddles_label)
-    markup.row(*row1)
+    # الصف 1: المنتجات فقط
+    markup.row("🛒 المنتجات")
 
     # باقي الصفوف كما كانت
     markup.row("💳 شحن محفظتي", "💰 محفظتي")
     markup.row("📢 إعلاناتك", "🌐 صفحتنا")
     markup.row("🛠️ الدعم الفني", "🔄 ابدأ من جديد")
     return markup
-
 
 def products_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
