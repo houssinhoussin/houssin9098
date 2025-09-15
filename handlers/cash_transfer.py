@@ -120,10 +120,10 @@ CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 
 def banner(title: str, lines: list[str]) -> str:
     body = "\n".join(lines)
-    return f"{BAND}\n{title}\n{body}\n{BAND}"
+    return f"{BAND}\\n{title}\\n{body}\\n{BAND}"
 
 def with_cancel_hint(text: str) -> str:
-    return f"{text}\n\n{CANCEL_HINT}"
+    return f"{text}\\n\\n{CANCEL_HINT}"
 
 def _name_of(user):
     # محاولة لطيفة لاستخراج اسم العميل
@@ -136,7 +136,7 @@ def _fmt(n):
         return f"{n} ل.س"
 
 def _service_unavailable_guard(bot, chat_id) -> bool:
-    """يرجع True إذا كانت الخدمة غير متاحة (صيانة أو متوقفة عبر Feature Flag)."""
+    \"\"\"يرجع True إذا كانت الخدمة غير متاحة (صيانة أو متوقفة عبر Feature Flag).\"\"\"
     if is_maintenance():
         bot.send_message(chat_id, maintenance_message())
         return True
@@ -282,8 +282,8 @@ def register(bot, history):
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type}")
         name = _name_of(call.from_user)
         text = with_cancel_hint(
-            f"⚠️ يا {name}، تنويه مهم:\n"
-            f"• العمولة لكل 50,000 ليرة = {COMMISSION_PER_100000:,} ل.س.\n\n"
+            f"⚠️ يا {name}، تنويه مهم:\\n"
+            f"• العمولة لكل 100,000 ليرة = {COMMISSION_PER_100000:,} ل.س.\\n\\n"
             "لو تمام، دوس موافق وكمل اكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
@@ -321,8 +321,8 @@ def register(bot, history):
         logging.info(f"[CASH][{user_id}] اختار نوع تحويل: {cash_type} (من رسالة)")
         name = _name_of(msg.from_user)
         text = with_cancel_hint(
-            f"⚠️ يا {name}، تنويه مهم:\n"
-            f"• العمولة لكل 100,000 ليرة = {COMMISSION_PER_100000:,} ل.س.\n\n"
+            f"⚠️ يا {name}، تنويه مهم:\\n"
+            f"• العمولة لكل 100,000 ليرة = {COMMISSION_PER_100000:,} ل.س.\\n\\n"
             "لو تمام، دوس موافق وكمل اكتب الرقم اللي هتحوّل له."
         )
         kb = make_inline_buttons(
@@ -371,7 +371,7 @@ def register(bot, history):
             ("❌ إلغاء", "commission_cancel")
         )
         _screen(bot, user_id, msg.chat.id,
-                with_cancel_hint(f"🔢 الرقم المدخل: {number}\n\nتمام كده؟"),
+                with_cancel_hint(f"🔢 الرقم المدخل: {number}\\n\\nتمام كده؟"),
                 reply_markup=kb, delete_user_msg_id=msg.message_id)
 
     @bot.callback_query_handler(func=lambda call: call.data == "edit_number")
@@ -467,7 +467,7 @@ def register(bot, history):
 
         available = get_available_balance(user_id)
         if available is None:
-            return _screen_from_call(bot, call, "❌ حصل خطأ في جلب الرصيد. جرّب تاني.\n\n" + CANCEL_HINT)
+            return _screen_from_call(bot, call, "❌ حصل خطأ في جلب الرصيد. جرّب تاني.\\n\\n" + CANCEL_HINT)
 
         if available < total:
             shortage = total - available
@@ -475,7 +475,7 @@ def register(bot, history):
             return _screen_from_call(
                 bot, call,
                 with_cancel_hint(
-                    f"❌ يا {name}، متاحك الحالي {_fmt(available)} والمطلوب {_fmt(total)}.\n"
+                    f"❌ يا {name}، متاحك الحالي {_fmt(available)} والمطلوب {_fmt(total)}.\\n"
                     f"نقصك {_fmt(shortage)} — كمّل شحن ونمشي الطلب سِكة سريعة 😉"
                 ),
                 reply_markup=kb
@@ -486,11 +486,11 @@ def register(bot, history):
             r = create_hold(user_id, total, hold_desc)
         except Exception as e:
             logging.exception(f"[CASH][{user_id}] create_hold exception: {e}")
-            return _screen_from_call(bot, call, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
+            return _screen_from_call(bot, call, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\\n\\n" + CANCEL_HINT)
 
         if getattr(r, "error", None) or not getattr(r, "data", None):
             logging.error(f"[CASH][{user_id}] create_hold failed: {getattr(r, 'error', r)}")
-            return _screen_from_call(bot, call, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\n\n" + CANCEL_HINT)
+            return _screen_from_call(bot, call, "❌ معذرة، ماقدرنا نعمل حجز دلوقتي. جرّب بعد شوية.\\n\\n" + CANCEL_HINT)
 
         data_resp = getattr(r, "data", None)
         if isinstance(data_resp, dict):
@@ -507,16 +507,16 @@ def register(bot, history):
             balance_after = None
 
         admin_msg = (
-            f"💰 رصيد المستخدم الآن: {_fmt(balance_after) if balance_after is not None else '—'}\n"
-            f"🆕 طلب جديد — تحويل كاش\n"
-            f"👤 الاسم: <code>{_name_of(call.from_user)}</code>\n"
-            f"يوزر: <code>@{call.from_user.username or ''}</code>\n"
-            f"آيدي: <code>{user_id}</code>\n"
-            f"🔖 النوع: {cash_type}\n"
-            f"📲 رقم المستفيد: <code>{number}</code>\n"
-            f"💸 المبلغ: {_fmt(amount)}\n"
-            f"🧾 العمولة: {_fmt(commission)}\n"
-            f"✅ الإجمالي: {_fmt(total)}\n"
+            f"💰 رصيد المستخدم الآن: {_fmt(balance_after) if balance_after is not None else '—'}\\n"
+            f"🆕 طلب جديد — تحويل كاش\\n"
+            f"👤 الاسم: <code>{_name_of(call.from_user)}</code>\\n"
+            f"يوزر: <code>@{call.from_user.username or ''}</code>\\n"
+            f"آيدي: <code>{user_id}</code>\\n"
+            f"🔖 النوع: {cash_type}\\n"
+            f"📲 رقم المستفيد: <code>{number}</code>\\n"
+            f"💸 المبلغ: {_fmt(amount)}\\n"
+            f"🧾 العمولة: {_fmt(commission)}\\n"
+            f"✅ الإجمالي: {_fmt(total)}\\n"
             f"🔒 HOLD: <code>{hold_id}</code>"
         )
 
@@ -549,7 +549,7 @@ def register(bot, history):
                 f"• الإجمالي: {_fmt(total)}",
                 f"• معرف الحجز (HOLD): {hold_id}",
             ]
-        ) + "\n\nاحتفظ بهذه الرسالة كمرجع. في حال حدوث أي مشكلة: «انظر، أنت أرسلت نفس هذه التفاصيل»."
+        ) + "\\n\\nاحتفظ بهذه الرسالة كمرجع. في حال حدوث أي مشكلة: «انظر، أنت أرسلت نفس هذه التفاصيل»."
         try:
             bot.send_message(call.message.chat.id, receipt_text)
         except Exception:
