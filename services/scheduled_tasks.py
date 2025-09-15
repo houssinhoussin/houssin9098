@@ -164,3 +164,22 @@ def post_ads_task(bot=None, every_seconds: int = 60):
 
     # أول تشغيل بعد 10 ثواني لإتاحة تهيئة البوت
     threading.Timer(10, _tick).start()
+    # أضف هاتين الدالتين كما هما:
+from datetime import datetime, timezone, timedelta
+from database.db import get_table
+
+def expire_old_discounts():
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # عطّل الخصومات التي انتهى وقتها
+    get_table("discounts").update({"active": False}) \
+        .lte("ends_at", now_iso).eq("active", True).execute()
+
+def purge_old_discounts(days: int = 2):
+    # حذف سجلات الخصومات المنتهية منذ فترة (اختياري)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    get_table("discounts").delete().lt("ends_at", cutoff).eq("active", False).execute()
+
+# أضف تحت مهام التنظيف الأخرى:
+expire_old_referral_goals()  # موجودة عندك مسبقًا
+expire_old_discounts()
+purge_old_discounts(2)       # اختياري
