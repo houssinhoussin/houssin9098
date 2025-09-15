@@ -100,8 +100,7 @@ from handlers import (start,
     university_fees,
     internet_providers,
     bill_and_units,
-    links as links_handler,
-    quiz,
+    links as links_handler,   
 )
 from handlers.keyboards import (
     main_menu,
@@ -140,9 +139,6 @@ media_services.register(bot, history)
 wholesale.register(bot, history)
 university_fees.register_university_fees(bot, history)
 internet_providers.register(bot)
-# ✅ ربط هاندلر الحزازير
-quiz.wire_handlers(bot)
-
 
 # ✅ تسجيل هاندلر /cancel بعد تعريف bot و history
 cancel_handler.register(bot, history)
