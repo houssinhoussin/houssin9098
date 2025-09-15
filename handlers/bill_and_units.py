@@ -395,7 +395,7 @@ def register_bill_and_units(bot, history):
                                                  prefix="mtnkz", back_data="ubm:back")
         txt = with_cancel_hint(banner("🎯 اختر المبلغ (جملة كازية MTN)", [f"صفحة {page+1}/{pages}"]))
         if message_id is not None:
-            bot.edit_message_text(txt، chat_id, message_id, reply_markup=kb)
+            bot.edit_message_text(txt, chat_id, message_id, reply_markup=kb)
         else:
             bot.send_message(chat_id, txt, reply_markup=kb)
 
