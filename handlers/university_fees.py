@@ -13,6 +13,8 @@ from services.wallet_service import (
 )
 from config import ADMIN_MAIN_ID
 from services.wallet_service import register_user_if_not_exist
+from services.discount_service import apply_discount
+from services.referral_service import revalidate_user_discount
 from handlers import keyboards
 try:
     from services.queue_service import add_pending_request, process_queue, delete_pending_request
@@ -184,6 +186,26 @@ def register_university_fees(bot, history):
             )
 
         user_uni_state[user_id]["amount"] = int(amount)
+        amount_before = int(amount)
+
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+
+        amount_after, applied_disc = apply_discount(user_id, amount_before)
+        # 👇 إن أردت أن العمولة تُحسب على المبلغ بعد الخصم:
+        commission = calculate_uni_commission(amount_after)
+        total = amount_after + commission
+
+        # خزّن للعرض/الـpayload
+        user_uni_state[user_id]["discount"] = (
+            {"before": amount_before, "after": amount_after, "percent": (applied_disc or {}).get("percent"), "id": (applied_disc or {}).get("id")}
+            if applied_disc else None
+        )
+        user_uni_state[user_id]["amount"] = amount_after
+        user_uni_state[user_id]["commission"] = commission
+        user_uni_state[user_id]["total"] = total
 
         commission = calculate_uni_commission(amount)
         total = amount + commission
@@ -198,7 +220,12 @@ def register_university_fees(bot, history):
                 f"🏫 الجامعة: {user_uni_state[user_id]['university']}",
                 f"🆔 الرقم الوطني: {user_uni_state[user_id]['national_id']}",
                 f"🎓 الرقم الجامعي: {user_uni_state[user_id]['university_id']}",
-                f"💰 المبلغ: {_fmt(amount)}",
+                *( [f"💰 المبلغ: {_fmt(amount_after)}"] if not user_uni_state[user_id].get("discount") else [
+                    f"💰 المبلغ قبل الخصم: {_fmt(amount_before)}",
+                    f"٪ الخصم: {int(user_uni_state[user_id]['discount']['percent'] or 0)}٪",
+                    f"💰 المبلغ بعد الخصم: {_fmt(amount_after)}",
+                ] ),
+
                 f"🧾 العمولة: {_fmt(commission)}",
                 f"✅ الإجمالي: {_fmt(total)}",
                 "",
@@ -339,6 +366,9 @@ def register_university_fees(bot, history):
                 "total": total,
                 "reserved": total,
                 "hold_id": hold_id,   # ✅ مفتاح مهم للأدمن
+                "price_before": int(user_uni_state[user_id].get("discount", {}).get("before") or user_uni_state[user_id]["amount"]),
+                "price":        int(user_uni_state[user_id]["amount"]),  # بعد الخصم
+                "discount":     user_uni_state[user_id].get("discount"),
             }
         )
         user_uni_state[user_id]["step"] = "waiting_admin"
