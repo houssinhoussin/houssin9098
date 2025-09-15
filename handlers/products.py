@@ -107,6 +107,10 @@ _MIXED_SUB_LABELS = {
     "pota": "تطبيق Pota Live",
     "waaw": "تطبيق Waaw Chat",
     "kiyo": "تطبيق Kiyo Live",
+    "imo": "تطبيق imo",
+    "xena": "تطبيق Xena Live",
+    "zakan": "تطبيق زاكن",
+    "yallago": "تطبيق YallaGO",
 }
 
 def _visible_category_label(order: dict, product: Product) -> str:
@@ -148,6 +152,14 @@ def _visible_category_label(order: dict, product: Product) -> str:
                 key = "siba"
 
 
+            elif "app:imo" in d:
+                key = "imo"
+            elif "app:xena" in d:
+                key = "xena"
+            elif "app:zakan" in d:
+                key = "zakan"
+            elif "app:yallago" in d:
+                key = "yallago"
         return _MIXED_SUB_LABELS.get(key, "ألعاب/تطبيقات")
 
     # غير MixedApps
@@ -317,6 +329,35 @@ PRODUCTS = {
         Product(75, "6000 شحن",     "ألعاب/تطبيقات", 2.20,  "app:kiyo|Kiyo Live 6000"),
         Product(76, "12000 شحن",    "ألعاب/تطبيقات", 4.38,  "app:kiyo|Kiyo Live 12000"),
         Product(77, "24000 شحن",    "ألعاب/تطبيقات", 8.71,  "app:kiyo|Kiyo Live 24000"),
+
+# === imo ===
+Product(78, "100 الماسة",  "ألعاب/تطبيقات", 1.91,  "app:imo|imo 100 Diamonds"),
+Product(79, "200 ألماسة",  "ألعاب/تطبيقات", 9.95,  "app:imo|imo 200 Diamonds"),
+Product(80, "500 الماسة",  "ألعاب/تطبيقات", 9.43,  "app:imo|imo 500 Diamonds"),
+Product(81, "1000 الماسة", "ألعاب/تطبيقات", 18.89, "app:imo|imo 1000 Diamonds"),
+
+# === Xena Live ===
+Product(82, "شحن 8000",   "ألعاب/تطبيقات", 0.91, "app:xena|Xena Live 8000"),
+Product(83, "شحن 16000",  "ألعاب/تطبيقات", 1.77, "app:xena|Xena Live 16000"),
+Product(84, "شحن 32000",  "ألعاب/تطبيقات", 3.48, "app:xena|Xena Live 32000"),
+Product(85, "شحن 64000",  "ألعاب/تطبيقات", 6.95, "app:xena|Xena Live 64000"),
+
+# === Zakan (أسعار سوري ثابتة) ===
+Product(86, "تعبئة 10000 ل.س",   "ألعاب/تطبيقات", 10600,  "app:zakan|Zakan SYP 10000"),
+Product(87, "تعبئة 20000 ل.س",   "ألعاب/تطبيقات", 21200,  "app:zakan|Zakan SYP 20000"),
+Product(88, "تعبئة 50000 ل.س",   "ألعاب/تطبيقات", 53000,  "app:zakan|Zakan SYP 50000"),
+Product(89, "تعبئة 100000 ل.س",  "ألعاب/تطبيقات", 106000, "app:zakan|Zakan SYP 100000"),
+Product(90, "تعبئة 200000 ل.س",  "ألعاب/تطبيقات", 212000, "app:zakan|Zakan SYP 200000"),
+Product(91, "تعبئة 500000 ل.س",  "ألعاب/تطبيقات", 530000, "app:zakan|Zakan SYP 500000"),
+
+# === YallaGO (أسعار سوري ثابتة) ===
+Product(92, "تعبئة 10000 ل.س",   "ألعاب/تطبيقات", 10600,  "app:yallago|YallaGO SYP 10000"),
+Product(93, "تعبئة 20000 ل.س",   "ألعاب/تطبيقات", 21200,  "app:yallago|YallaGO SYP 20000"),
+Product(94, "تعبئة 50000 ل.س",   "ألعاب/تطبيقات", 53000,  "app:yallago|YallaGO SYP 50000"),
+Product(95, "تعبئة 100000 ل.س",  "ألعاب/تطبيقات", 106000, "app:yallago|YallaGO SYP 100000"),
+Product(96, "تعبئة 200000 ل.س",  "ألعاب/تطبيقات", 212000, "app:yallago|YallaGO SYP 200000"),
+Product(97, "تعبئة 500000 ل.س",  "ألعاب/تطبيقات", 530000, "app:yallago|YallaGO SYP 500000"),
+
     ],
 }
 
@@ -332,6 +373,10 @@ MIXEDAPPS_SUBCATS = [
     {"label": "تطبيق Pota Live",     "key": "pota"},
     {"label": "تطبيق Waaw Chat",     "key": "waaw"},
     {"label": "تطبيق Kiyo Live",     "key": "kiyo"},
+    {"label": "تطبيق imo",       "key": "imo"},
+    {"label": "تطبيق Xena Live", "key": "xena"},
+    {"label": "تطبيق زاكن",      "key": "zakan"},
+    {"label": "تطبيق YallaGO",   "key": "yallago"},
 ]
 
 
@@ -380,7 +425,18 @@ def convert_price_usd_to_syp(usd):
 
 def _button_label(p: Product) -> str:
     try:
-        return f"{(p.name or '').strip()} بسعر ${float(p.price):.2f}"
+        # تحقق إن كان المنتج من زاکن/يلا غو (سعر ل.س ثابت)
+        blob = ""
+        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+            v = getattr(p, attr, None)
+            if isinstance(v, str) and v:
+                blob += " " + v.lower()
+        blob += " " + (p.name or "").lower()
+
+        if "app:zakan" in blob or "app:yallago" in blob:
+            return f"{(p.name or '').strip()} بسعر {_fmt_syp(int(round(float(p.price))))}"
+        else:
+            return f"{(p.name or '').strip()} بسعر ${float(p.price):.2f}"
     except Exception:
         return f"{p.name}"
 
@@ -543,6 +599,19 @@ def handle_player_id(message, bot):
 
     order["player_id"] = player_id
     price_syp = convert_price_usd_to_syp(product.price)
+    # استثناء زاکن / YallaGO: السعر مخزّن ل.س ولا يحتاج تحويل
+    try:
+        subset = order.get("subset")
+        prod_text = ""
+        for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+            v = getattr(product, attr, None)
+            if isinstance(v, str) and v:
+                prod_text = v.lower()
+                break
+        if subset in ("zakan","yallago") or "app:zakan" in prod_text or "app:yallago" in prod_text:
+            price_syp = int(round(float(product.price)))
+    except Exception:
+        pass
 
     # خصم تلقائي (إن وجد)  ← نفس مستوى الإزاحة السابق
     price_before  = int(price_syp)
@@ -583,6 +652,10 @@ def handle_player_id(message, bot):
             id_label = "إيميل Supercell ID"
         elif subset == "siba" or "app:siba" in prod_text or "siba" in (product.name or "").lower():
             id_label = "آيدي اللاعب"
+        elif subset == "zakan" or "app:zakan" in prod_text or "zakan" in (product.name or "").lower():
+            id_label = "رقم موبايل الكابتن"
+        elif subset == "yallago" or "app:yallago" in prod_text or "yalla" in (product.name or "").lower():
+            id_label = "رقم سفير يلا غو"
     except Exception:
         pass
 
@@ -772,6 +845,10 @@ def setup_inline_handlers(bot, admin_ids):
             # Clash Royale
             elif subset == "clashroyale" or "app:clashroyale" in prod_text or "clashroyale" in (selected.name or "").lower():
                 prompt = f"💡 يا {name}، ابعت إيميل Supercell ID المرتبط بلعبة Clash Royale لو سمحت:"
+            elif subset == "zakan" or "app:zakan" in prod_text or "zakan" in (selected.name or "").lower():
+                prompt = f"💡 يا {name}، ابعت رقم موبايل الكابتن لو سمحت:"
+            elif subset == "yallago" or "app:yallago" in prod_text or "yalla" in (selected.name or "").lower():
+                prompt = f"💡 يا {name}، ابعت رقم سفير يلا غو لو سمحت:"
             # Siba يبقى الافتراضي
         except Exception:
             pass
@@ -988,6 +1065,19 @@ def setup_inline_handlers(bot, admin_ids):
         product   = order["product"]
         player_id = order["player_id"]
         price_syp = convert_price_usd_to_syp(product.price)
+        # استثناء زاکن / YallaGO: السعر مخزّن ل.س ولا يحتاج تحويل
+        try:
+            subset = (order or {}).get("subset")
+            prod_text = ""
+            for attr in ("description", "desc", "label", "button", "button_label", "extra"):
+                v = getattr(product, attr, None)
+                if isinstance(v, str) and v:
+                    prod_text = v.lower()
+                    break
+            if subset in ("zakan","yallago") or "app:zakan" in prod_text or "app:yallago" in prod_text:
+                price_syp = int(round(float(product.price)))
+        except Exception:
+            pass
 
         # ✅ استخدم الخصم المحسوب سابقًا إن وُجد لضمان تطابق السعر مع شاشة التأكيد
         disc = order.get("discount") if isinstance(order, dict) else None
