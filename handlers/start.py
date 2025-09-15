@@ -91,6 +91,29 @@ def register(bot, user_history):
         _user_start_limit[user_id] = now
 
         _reset_user_flows(user_id)
+        
+        # --- التقاط رابط الإحالة /start ref-<referrer_id>-<token> ---
+        try:
+            parts = (message.text or "").split(maxsplit=1)
+            if len(parts) == 2 and parts[1].startswith("ref-"):
+                _, ref_uid, token = parts[1].split("-", 2)
+                ref_uid = int(ref_uid)
+                from services.referral_service import attach_referred_start
+                attach_referred_start(ref_uid, token, message.from_user.id)
+
+                # أرسل لوحة الاشتراك + زر "تحققت" (يُعالجه هاندلر referrals)
+                kb = types.InlineKeyboardMarkup(row_width=1)
+                if FORCE_SUB_CHANNEL_USERNAME:
+                    kb.add(types.InlineKeyboardButton(
+                        "🔔 اشترك الآن في القناة",
+                        url=f"https://t.me/{FORCE_SUB_CHANNEL_USERNAME[1:]}"
+                    ))
+                kb.add(types.InlineKeyboardButton("✅ تحققت", callback_data="ref:checked"))
+                bot.send_message(message.chat.id, "اشترك في القناة ثم اضغط «تحققت».", reply_markup=kb)
+                # لو حاب توقف مسار /start الاعتيادي هنا:
+                # return
+        except Exception as e:
+            logging.error(f"[start.py] referral payload parse: {e}")
 
         # تحقق الاشتراك فقط هنا
         if FORCE_SUB_CHANNEL_USERNAME:
