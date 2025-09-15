@@ -45,31 +45,55 @@ def list_discounts(limit: int = 100) -> List[Dict[str, Any]]:
         logging.exception("[discounts] list failed: %s", e)
         return []
 
+# استبدل التعريف القديم كله بهذا التعريف
+from datetime import timedelta
+from database.db import get_table
+from utils.time import now as _now  # نفس الدالة التي يستخدمها المشروع لجلب الوقت UTC
+
+DISCOUNTS_TABLE = "discounts"
+
 def create_discount(scope: str,
                     percent: int,
-                    user_id: Optional[int] = None,
+                    user_id: int | None = None,
                     active: bool = True,
-                    days: Optional[int] = None) -> Any:
+                    days: int | None = None,
+                    hours: int | None = None,
+                    source: str | None = None,
+                    meta: dict | None = None):
     """
-    days=None => بدون مدة. days>0 => ends_at = الآن + days
+    ينشئ خصمًا جديدًا. إن زوّدت hours أو days سيتم ضبط ends_at تلقائيًا.
+    لا نلمس خصم الأدمن؛ فقط نضيف دعم الوقت.
     """
     scope = scope or "global"
     percent = max(0, min(int(percent or 0), 100))
+
     row = {
         "scope": scope,
         "percent": percent,
         "active": bool(active),
-        "starts_at": _now().isoformat(),
+        "starts_at": _now().isoformat()
     }
-    if scope == "user":
-        row["user_id"] = int(user_id) if user_id else None
-    if days and int(days) > 0:
-        row["ends_at"] = (_now() + timedelta(days=int(days))).isoformat()
-    try:
-        return get_table(DISCOUNTS_TABLE).insert(row).execute()
-    except Exception as e:
-        logging.exception("[discounts] create failed: %s", e)
-        raise
+    if scope == "user" and user_id:
+        row["user_id"] = int(user_id)
+
+    # مدة الانتهاء: الساعات تسبق الأيام
+    delta = None
+    if hours and int(hours) > 0:
+        delta = timedelta(hours=int(hours))
+    elif days and int(days) > 0:
+        delta = timedelta(days=int(days))
+    if delta:
+        row["ends_at"] = (_now() + delta).isoformat()
+
+    if source:
+        row["source"] = source
+    if meta:
+        row["meta"] = meta
+
+    res = get_table(DISCOUNTS_TABLE).insert(row).execute()
+    # أرجع صف الخصم الذي أُنشئ (أو المعرّف على الأقل)
+    return res.data[0] if hasattr(res, "data") and res.data else None
+
 
 def end_discount_now(did: str) -> bool:
     """
@@ -113,6 +137,13 @@ def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logging.exception("[discounts] get_active_for_user failed: %s", e)
         return None
+        
+    # أضف تحت بناء الاستعلام مباشرةً:
+    now_iso = _now().isoformat()
+    # خصومات مفعّلة زمنيًا: ends_at NULL أو أكبر من الآن
+    q = q.or_(f"ends_at.is.null,ends_at.gt.{now_iso}")
+    # واحترم starts_at <= الآن
+    q = q.lte("starts_at", now_iso)
 
     now = _now()
     best = None
