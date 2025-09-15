@@ -19,6 +19,8 @@ from services.wallet_service import (
     get_available_balance,   # ✅ المتاح = balance - held
     create_hold,             # ✅ إنشاء الحجز الذرّي
 )
+from services.discount_service import apply_discount
+from services.referral_service import revalidate_user_discount
 
 # طابور/رسائل للأدمن (اختياري)
 try:
@@ -449,9 +451,37 @@ def register(bot):
         if not st or st.get("step") != "confirm":
             return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)
 
-        price = st["price"]
-        comm  = _commission(price)
+        # احتفظ بالسعر قبل الخصم
+        price_before = int(st["price"])
+
+        # إعادة التحقق من خصم الاشتراك/الإحالات (يومياً غالبًا)
+        try:
+            revalidate_user_discount(bot, uid)
+        except Exception:
+            pass
+
+        # تطبيق أعلى خصم متاح للمستخدم
+        price_after, applied_disc = apply_discount(uid, price_before)
+
+        # 👇 إن أردت أن العمولة تُحسب على السعر بعد الخصم (أنصف للعميل):
+        price = price_after
+        comm  = _commission(price_after)
+
+        # (بديل إن أردت عدم خصم العمولة): استخدم comm = _commission(price_before)
+
         total = price + comm
+
+        # خزّن معلومات الخصم في حالة المستخدم لاستخدامها في الرسائل والـpayload
+        if applied_disc:
+            st["discount"] = {
+                "id":      applied_disc.get("id"),
+                "percent": applied_disc.get("percent"),
+                "before":  price_before,
+                "after":   price,
+            }
+        else:
+            st["discount"] = None
+
 
         # ✅ نعتمد على الرصيد المتاح فقط (balance − held)
         available = get_available_balance(uid)
