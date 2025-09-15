@@ -1266,9 +1266,10 @@ def register_bill_and_units(bot, history):
             payload={
                 "type": "syr_bill",
                 "number": number,
-                "amount": int(amount_after),           # بعد الخصم
-                "price": int(amount_after),            # نفس الشيء لأغراض الإدمن
+                "amount": int(amount_before),          # المبلغ الأصلي المستحق للجهة
+                "price": int(amount_after),            # ما سيدفعه العميل بعد الخصم
                 "price_before": int(amount_before),    # لتسجيل استخدام الخصم
+
                 "fee": int(fee),
                 "total": int(total),
                 "reserved": int(total),
@@ -1476,7 +1477,7 @@ def register_bill_and_units(bot, history):
             payload={
                 "type": "mtn_bill",
                 "number": number,
-                "amount": int(amount_after),           # بعد الخصم
+                "amount": int(amount_before),          # المبلغ الأصلي المستحق للجهة
                 "price": int(amount_after),
                 "price_before": int(amount_before),    # لتسجيل استخدام الخصم
                 "fee": int(fee),
