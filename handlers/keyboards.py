@@ -5,7 +5,7 @@ def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
 
     # الصف 1: المنتجات فقط
-    markup.row("🛒 المنتجات")
+    markup.row("🛒 المنتجات", "➕ إضافة خصم")
 
     # باقي الصفوف كما كانت
     markup.row("💳 شحن محفظتي", "💰 محفظتي")
