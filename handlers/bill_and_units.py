@@ -914,10 +914,22 @@ def register_bill_and_units(bot, history):
             }
         )
         process_queue(bot)
+        disc = (user_states.get(user_id, {}) or {}).get('discount')
+        msg_lines = [
+            "هننجّزها بسرعة ✌️ وهيوصلك إشعار أول ما نكمّل.",
+        ]
+        if disc:
+            msg_lines = [
+                f"💵 السعر قبل الخصم: {int(disc.get('before') or 0):,} ل.س",
+                f"٪ الخصم: {int(disc.get('percent') or 0)}٪",
+                f"💵 السعر بعد الخصم: {int(disc.get('after') or 0):,} ل.س",
+            ] + msg_lines
+
         bot.send_message(
             call.message.chat.id,
-            banner(f"✅ تمام يا {name}! طلبك في السكة 🚀", ["هننجّزها بسرعة ✌️ وهيوصلك إشعار أول ما نكمّل."])
+            banner(f"✅ تمام يا {name}! طلبك في السكة 🚀", msg_lines)
         )
+
         user_states[user_id]["step"] = "wait_admin_syr_unit"
 
     ########## وحدات MTN (Reply) ##########
