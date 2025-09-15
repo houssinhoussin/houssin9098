@@ -5,7 +5,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from zoneinfo import ZoneInfo
-
+from services.referral_service import expire_due_goals
 from services.ads_service import (
     get_active_ads,
     refresh_daily_quota,
@@ -115,6 +115,11 @@ def post_ads_task(bot=None, every_seconds: int = 60):
             expire_old_ads()
         except Exception as e:
             print(f"[ads_task] expire_old_ads error: {e}")
+        # تعليم أهداف الإحالات المنتهية (خصم اليوم)
+        try:
+            expire_due_goals()
+        except Exception as e:
+            print(f"[ads_task] expire_due_goals error: {e}")
 
         # 2 + 3) النشر فقط إذا لم تكن صيانة وكانت ميزة الإعلانات مفعّلة
         try:
