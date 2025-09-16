@@ -19,7 +19,7 @@ from services.wallet_service import (
     get_available_balance,   # ✅ المتاح = balance - held
     create_hold,             # ✅ إنشاء الحجز الذرّي
 )
-from services.discount_service import apply_discount
+from services.discount_service import apply_discount_stacked as apply_discount
 from services.referral_service import revalidate_user_discount
 
 # طابور/رسائل للأدمن (اختياري)
