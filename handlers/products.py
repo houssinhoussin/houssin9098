@@ -5,7 +5,7 @@ import math
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
-from services.discount_service import apply_discount
+from services.discount_service import apply_discount_stacked
 from services.referral_service import revalidate_user_discount
 from services.wallet_service import (
     register_user_if_not_exist,
@@ -622,7 +622,7 @@ def handle_player_id(message, bot):
     except Exception:
         pass
 
-    price_syp, applied_disc = apply_discount(user_id, price_syp)
+    price_syp, applied_disc = apply_discount_stacked(user_id, price_syp)
     # خزّن السعرين في حالة الطلب لرسالة الأدمن
     order["price_before"] = price_before
     order["price_after"] = price_syp
@@ -682,6 +682,12 @@ def handle_player_id(message, bot):
                     *( [f"• السعر: {_fmt_syp(price_syp)}"] if not applied_disc else [
                         f"• السعر قبل الخصم: {_fmt_syp(price_before)}",
                         f"• الخصم: {int(applied_disc.get('percent', 0))}٪",
+                        *( ["• تفصيل الخصم: " + " + ".join(
+                              ["إدمن " + str(p.get("percent")) + "٪" if p.get("source") == "admin"
+                               else "إحالة " + str(p.get("percent")) + "٪"
+                               for p in (applied_disc.get("breakdown") or [])]
+                            )] if applied_disc and applied_disc.get("breakdown") else [] ),
+
                         f"• السعر بعد الخصم: {_fmt_syp(price_syp)}",
                     ] ),
 
@@ -1086,19 +1092,31 @@ def setup_inline_handlers(bot, admin_ids):
         except Exception:
             pass
 
-        # ✅ استخدم الخصم المحسوب سابقًا إن وُجد لضمان تطابق السعر مع شاشة التأكيد
-        disc = order.get("discount") if isinstance(order, dict) else None
-        if disc and isinstance(disc, dict):
-            try:
-                price_before = int(disc.get("before", price_syp))
-            except Exception:
-                price_before = int(price_syp)
-            try:
-                price_syp = int(disc.get("after", price_syp))
-            except Exception:
-                price_syp = int(price_syp)
-        else:
-            price_before = int(price_syp)
+        # 👇 إعادة التحقق + جمع خصمين (إدمن + إحالة) وقت التأكيد
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+
+        # لو كانت الصفحة السابقة خزّنت price_before نستخدمه لتطابق السعر
+        price_before = int(order.get("price_before", price_syp))
+
+        # خصم مجمّع: أعلى إدمن + أعلى إحالة (سقف 100%)
+        price_syp, applied_disc = apply_discount_stacked(user_id, price_before)
+
+        # خزّن القيم لضمان تطابق الرسائل (للإدمن وللعميل)
+        order["price_before"] = price_before
+        order["price_after"]  = price_syp
+        order["discount"] = (
+            {
+                "percent": applied_disc.get("percent"),
+                "before":  price_before,
+                "after":   price_syp,
+                # breakdown موجودة داخليًا لو احتجتها لاحقًا
+            }
+            if applied_disc else None
+        )
+
 
         # المنتج ما زال فعّال؟ (Alert برسالة احترافية)
         if not get_product_active(product.product_id):
