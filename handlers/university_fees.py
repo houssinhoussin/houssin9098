@@ -13,7 +13,8 @@ from services.wallet_service import (
 )
 from config import ADMIN_MAIN_ID
 from services.wallet_service import register_user_if_not_exist
-from services.discount_service import apply_discount
+from services.discount_service import apply_discount_stacked as apply_discount
+
 from services.referral_service import revalidate_user_discount
 from handlers import keyboards
 try:
