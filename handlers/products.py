@@ -5,7 +5,8 @@ import math
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
-from services.discount_service import apply_discount_stacked
+from services.discount_service import apply_discount_stacked as apply_discount
+
 from services.referral_service import revalidate_user_discount
 from services.wallet_service import (
     register_user_if_not_exist,
