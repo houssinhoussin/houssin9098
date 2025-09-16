@@ -14,7 +14,6 @@ from services.wallet_service import (
 from config import ADMIN_MAIN_ID
 from services.wallet_service import register_user_if_not_exist
 from services.discount_service import apply_discount_stacked as apply_discount
-
 from services.referral_service import revalidate_user_discount
 from handlers import keyboards
 try:
@@ -186,20 +185,23 @@ def register_university_fees(bot, history):
                 _card("⚠️ مبلغ غير صالح", [f"يا {name}، اكتب رقم صحيح من غير فواصل أو رموز.", "", CANCEL_HINT])
             )
 
-        user_uni_state[user_id]["amount"] = int(amount)
+        user_uni_state[user_id]["amount_before"] = int(amount)  # ✅ خزّن الأصل قبل الخصم
         amount_before = int(amount)
 
+        # 1) إعادة التحقق من خصم الإحالات
         try:
             revalidate_user_discount(bot, user_id)
         except Exception:
             pass
 
+        # 2) تطبيق الخصم (مجمّع: إدمن + إحالة)
         amount_after, applied_disc = apply_discount(user_id, amount_before)
-        # 👇 إن أردت أن العمولة تُحسب على المبلغ بعد الخصم:
+
+        # 3) العمولة والإجمالي على المبلغ بعد الخصم
         commission = calculate_uni_commission(amount_after)
         total = amount_after + commission
 
-        # خزّن للعرض/الـpayload
+        # 4) التخزين للعرض والـ payload
         user_uni_state[user_id]["discount"] = (
             {"before": amount_before, "after": amount_after, "percent": (applied_disc or {}).get("percent"), "id": (applied_disc or {}).get("id")}
             if applied_disc else None
@@ -207,13 +209,9 @@ def register_university_fees(bot, history):
         user_uni_state[user_id]["amount"] = amount_after
         user_uni_state[user_id]["commission"] = commission
         user_uni_state[user_id]["total"] = total
-
-        commission = calculate_uni_commission(amount)
-        total = amount + commission
-
-        user_uni_state[user_id]["commission"] = commission
-        user_uni_state[user_id]["total"] = total
         user_uni_state[user_id]["step"] = "confirm_details"
+
+        # (نقطة خطأ كانت عندك): لا تعِد حساب العمولة/الإجمالي على المبلغ قبل الخصم — حُذفت السطور التي كانت تطغى عليها.
 
         text = _card(
             "🧾 تأكيد البيانات",
@@ -226,7 +224,6 @@ def register_university_fees(bot, history):
                     f"٪ الخصم: {int(user_uni_state[user_id]['discount']['percent'] or 0)}٪",
                     f"💰 المبلغ بعد الخصم: {_fmt(amount_after)}",
                 ] ),
-
                 f"🧾 العمولة: {_fmt(commission)}",
                 f"✅ الإجمالي: {_fmt(total)}",
                 "",
@@ -297,8 +294,28 @@ def register_university_fees(bot, history):
 
         user_id = call.from_user.id
         name = _name(bot, user_id)
-        state = user_uni_state.get(user_id, {})
-        total = int(state.get("total") or 0)
+        state = user_uni_state.get(user_id, {}) or {}
+
+        # 👇 (مثل المنتجات) أعِد التحقق + أعِد تطبيق الخصم وقت التأكيد
+        try:
+            revalidate_user_discount(bot, user_id)
+        except Exception:
+            pass
+
+        amount_before = int(state.get("amount_before") or state.get("amount") or 0)
+        amount_after, applied_disc = apply_discount(user_id, amount_before)
+        commission = calculate_uni_commission(amount_after)
+        total = amount_after + commission
+
+        # حدّث الحالة بالقيم النهائية المستخدمة في الحجز
+        state["discount"] = (
+            {"before": amount_before, "after": amount_after, "percent": (applied_disc or {}).get("percent"), "id": (applied_disc or {}).get("id")}
+            if applied_disc else None
+        )
+        state["amount"] = amount_after
+        state["commission"] = commission
+        state["total"] = total
+        user_uni_state[user_id] = state
 
         # فحص الرصيد المتاح (balance - held)
         balance_av = get_available_balance(user_id)
@@ -315,7 +332,7 @@ def register_university_fees(bot, history):
             )
             return
 
-        # ✅ حجز بدل الخصم الفوري — ذري
+        # ✅ حجز المبلغ فعليًا (HOLD) — على الإجمالي بعد الخصم + العمولة
         hold_id = None
         try:
             reason = f"حجز رسوم جامعية — {state.get('university','')}"
@@ -362,14 +379,14 @@ def register_university_fees(bot, history):
                 "university": state.get('university'),
                 "national_id": state.get('national_id'),
                 "university_id": state.get('university_id'),
-                "amount": int(state.get('amount') or 0),
+                "amount": int(state.get('amount') or 0),         # بعد الخصم
                 "commission": int(state.get('commission') or 0),
                 "total": total,
                 "reserved": total,
                 "hold_id": hold_id,   # ✅ مفتاح مهم للأدمن
-                "price_before": int(user_uni_state[user_id].get("discount", {}).get("before") or user_uni_state[user_id]["amount"]),
-                "price":        int(user_uni_state[user_id]["amount"]),  # بعد الخصم
-                "discount":     user_uni_state[user_id].get("discount"),
+                "price_before": int(state.get("amount_before") or state.get("amount") or 0),
+                "price":        int(state.get("amount") or 0),   # بعد الخصم
+                "discount":     state.get("discount"),
             }
         )
         user_uni_state[user_id]["step"] = "waiting_admin"
