@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -9,9 +9,9 @@ from database.db import get_table
 from services.discount_service import create_discount, set_discount_active
 from config import FORCE_SUB_CHANNEL_ID, CHANNEL_USERNAME, BOT_USERNAME
 
-# محاولة استخدام ساعة المشروع، وإلا فـ fallback
+# محاولة استخدام ساعة المشروع (UTC-aware)، وإلا فـ fallback
 try:
-    from utils.time import now as _now
+    from utils.time import now as _now  # يرجع datetime بــ timezone.utc
 except Exception:
     def _now() -> datetime:
         return datetime.now(timezone.utc)
@@ -22,7 +22,7 @@ DISCOUNTS_TBL = "discounts"
 
 ONE_DAY = timedelta(hours=24)
 REFERRAL_DISCOUNT_PERCENT = 1       # نسبة خصم الإحالة
-REFERRAL_DISCOUNT_HOURS   = 14      # مدة خصم الإحالة بعد الاكتمال
+REFERRAL_DISCOUNT_HOURS   = 14      # مدة خصم الإحالة بعد الاكتمال (ساعات)
 
 
 def _ok_member_status(s: str) -> bool:
@@ -68,7 +68,7 @@ def get_or_create_today_goal(referrer_id: int,
     if rows:
         g = rows[0]
         try:
-            ends = datetime.fromisoformat(str(g.get("expires_at")).replace("Z","+00:00"))
+            ends = datetime.fromisoformat(str(g.get("expires_at")).replace("Z", "+00:00"))
         except Exception:
             ends = None
         if ends and ends > now:
@@ -91,16 +91,28 @@ def get_or_create_today_goal(referrer_id: int,
 
 def goal_progress(goal_id: str) -> Tuple[int, int, bool]:
     """يعيد (verified_count, required_count, is_satisfied)."""
-    res = get_table("referral_progress").select("*").eq("goal_id", goal_id).limit(1).execute()
+    res = (
+        get_table("referral_progress")
+        .select("*")
+        .eq("goal_id", goal_id)
+        .limit(1)
+        .execute()
+    )
     rows = getattr(res, "data", []) or []
     if not rows:
         # fallback في حال عدم وجود الـ view
         gq = get_table(GOALS_TBL).select("*").eq("id", goal_id).limit(1).execute()
         g = (getattr(gq, "data", []) or [{}])[0]
-        rq = get_table(JOINS_TBL).select("id, verified_at, still_member").eq("goal_id", goal_id).execute()
+        rq = (
+            get_table(JOINS_TBL)
+            .select("id, verified_at, still_member")
+            .eq("goal_id", goal_id)
+            .execute()
+        )
         cnt = sum(1 for r in (getattr(rq, "data", []) or []) if r.get("verified_at") and r.get("still_member"))
         req = int(g.get("required_count") or 2)
         return cnt, req, cnt >= req
+
     r = rows[0]
     cnt = int(r.get("verified_count") or 0)
     req = int(r.get("required_count") or 2)
