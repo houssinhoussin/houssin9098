@@ -138,6 +138,27 @@ def _time_window_filter(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             ok.append(r)
     return ok
 
+def _list_active_for_user(user_id: int):
+    """
+    ترجّع كل الخصومات الفعّالة زمنيًا لهذا المستخدم (global + user) بدون تجميع.
+    """
+    try:
+        res = get_table(DISCOUNTS_TABLE).select("*").eq("active", True).execute()
+        rows = getattr(res, "data", []) or []
+    except Exception:
+        rows = []
+
+    # فلترة زمنية: starts_at <= الآن و (ends_at is null أو > الآن)
+    rows = _time_window_filter(rows)
+
+    out = []
+    for r in rows:
+        sc = (r.get("scope") or "global").lower()
+        if sc == "global":
+            out.append(r)
+        elif sc == "user" and int(r.get("user_id") or 0) == int(user_id):
+            out.append(r)
+    return out
 
 def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     """
@@ -188,6 +209,40 @@ def apply_discount(user_id: int, amount_syp: int) -> Tuple[int, Optional[Dict[st
     except Exception as e:
         logging.exception("[discounts] apply failed: %s", e)
         return int(amount_syp), None
+        
+def apply_discount_stacked(user_id: int, amount_syp: int):
+    """
+    يجمع خصم الإدمن + خصم الإحالة:
+      - إدمن = أي خصم مصدره NULL أو 'admin' (global/user) ← نأخذ أعلى نسبة منها
+      - إحالة = أي خصم مصدره 'referral' ← نأخذ أعلى نسبة منها
+      - الإجمالي = إدمن + إحالة (مع سقف 100%)
+    يرجّع (السعر بعد الخصم, {"percent": الإجمالي, "breakdown":[...]})
+    """
+    rows = _list_active_for_user(user_id)
+
+    # أعلى خصم إدمن (نعتبر NULL = admin)
+    admin_pct = 0
+    for r in rows:
+        src = (r.get("source") or "admin").lower()
+        if src != "referral":
+            admin_pct = max(admin_pct, int(r.get("percent") or 0))
+
+    # أعلى خصم إحالة
+    referral_pct = 0
+    for r in rows:
+        if (r.get("source") or "").lower() == "referral":
+            referral_pct = max(referral_pct, int(r.get("percent") or 0))
+
+    total_pct = min(100, admin_pct + referral_pct)  # سقف 100%
+    after = int(round(amount_syp * (100 - total_pct) / 100.0))
+
+    breakdown = []
+    if admin_pct:
+        breakdown.append({"source": "admin", "percent": admin_pct})
+    if referral_pct:
+        breakdown.append({"source": "referral", "percent": referral_pct})
+
+    return after, {"percent": total_pct, "breakdown": breakdown, "id": None}
 
 
 def record_discount_use(discount_id: str, user_id: int, amount_before: int, amount_after: int, purchase_id: Optional[int] = None) -> None:
