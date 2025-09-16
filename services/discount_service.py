@@ -1,15 +1,21 @@
-# services/discount_service.py
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
+
 from database.db import get_table
+
+# محاولة استخدام ساعة المشروع، وإلا فـ fallback
+try:
+    from utils.time import now as _now  # يُفترض أنها تُرجع UTC-aware datetime
+except Exception:
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
 
 DISCOUNTS_TABLE = "discounts"
 USES_TABLE      = "discount_uses"
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 def _parse_dt(val) -> Optional[datetime]:
     if not val:
@@ -24,16 +30,19 @@ def _parse_dt(val) -> Optional[datetime]:
         return None
     return None
 
+
 def list_discounts(limit: int = 100) -> List[Dict[str, Any]]:
     """
-    ترجع الخصومات مع حقل computed: r["effective_active"] = active and not expired
+    ترجع آخر الخصومات مع حقل computed: effective_active = active and not expired (حتى الآن).
     """
     try:
-        res = (get_table(DISCOUNTS_TABLE)
-                .select("*")
-                .order("created_at", desc=True)
-                .limit(limit)
-                .execute())
+        res = (
+            get_table(DISCOUNTS_TABLE)
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
         rows = getattr(res, "data", []) or []
         now = _now()
         for r in rows:
@@ -45,12 +54,6 @@ def list_discounts(limit: int = 100) -> List[Dict[str, Any]]:
         logging.exception("[discounts] list failed: %s", e)
         return []
 
-# استبدل التعريف القديم كله بهذا التعريف
-from datetime import timedelta
-from database.db import get_table
-from utils.time import now as _now  # نفس الدالة التي يستخدمها المشروع لجلب الوقت UTC
-
-DISCOUNTS_TABLE = "discounts"
 
 def create_discount(scope: str,
                     percent: int,
@@ -62,16 +65,16 @@ def create_discount(scope: str,
                     meta: dict | None = None):
     """
     ينشئ خصمًا جديدًا. إن زوّدت hours أو days سيتم ضبط ends_at تلقائيًا.
-    لا نلمس خصم الأدمن؛ فقط نضيف دعم الوقت.
+    لا نلمس خصم الإدمن؛ فقط نضيف دعم الوقت والعلامات الاختيارية.
     """
-    scope = scope or "global"
+    scope = (scope or "global").lower()
     percent = max(0, min(int(percent or 0), 100))
 
-    row = {
+    row: Dict[str, Any] = {
         "scope": scope,
         "percent": percent,
         "active": bool(active),
-        "starts_at": _now().isoformat()
+        "starts_at": _now().isoformat(),
     }
     if scope == "user" and user_id:
         row["user_id"] = int(user_id)
@@ -91,14 +94,11 @@ def create_discount(scope: str,
         row["meta"] = meta
 
     res = get_table(DISCOUNTS_TABLE).insert(row).execute()
-    # أرجع صف الخصم الذي أُنشئ (أو المعرّف على الأقل)
     return res.data[0] if hasattr(res, "data") and res.data else None
 
 
 def end_discount_now(did: str) -> bool:
-    """
-    إنهاء فوري: يعطّل ويضبط ends_at = الآن
-    """
+    """إنهاء فوري: يعطّل ويضبط ends_at = الآن."""
     try:
         get_table(DISCOUNTS_TABLE).update(
             {"active": False, "ends_at": _now().isoformat()}
@@ -108,6 +108,7 @@ def end_discount_now(did: str) -> bool:
         logging.exception("[discounts] end now failed: %s", e)
         return False
 
+
 def delete_discount(did: str) -> bool:
     try:
         get_table(DISCOUNTS_TABLE).delete().eq("id", did).execute()
@@ -115,6 +116,7 @@ def delete_discount(did: str) -> bool:
     except Exception as e:
         logging.exception("[discounts] delete failed: %s", e)
         return False
+
 
 def set_discount_active(did: str, active: bool) -> bool:
     try:
@@ -124,41 +126,53 @@ def set_discount_active(did: str, active: bool) -> bool:
         logging.exception("[discounts] toggle failed: %s", e)
         return False
 
+
+def _time_window_filter(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """فلترة الوقت: starts_at <= الآن و (ends_at is null أو > الآن)."""
+    now = _now()
+    ok: List[Dict[str, Any]] = []
+    for r in rows:
+        st = _parse_dt(r.get("starts_at")) or now
+        en = _parse_dt(r.get("ends_at"))
+        if st <= now and (en is None or en > now):
+            ok.append(r)
+    return ok
+
+
 def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     """
     يرجع أعلى خصم فعّال وغير منتهٍ للمستخدم (خاص أو عام).
+    - لا يراكِم خصمين؛ نختار الأعلى فقط.
     """
     try:
-        res = (get_table(DISCOUNTS_TABLE)
-               .select("*")
-               .eq("active", True)
-               .execute())
-        rows = getattr(res, "data", []) or []
+        res = (
+            get_table(DISCOUNTS_TABLE)
+            .select("*")
+            .eq("active", True)
+            .execute()
+        )
+        rows: List[Dict[str, Any]] = getattr(res, "data", []) or []
     except Exception as e:
         logging.exception("[discounts] get_active_for_user failed: %s", e)
         return None
-        
-    # أضف تحت بناء الاستعلام مباشرةً:
-    now_iso = _now().isoformat()
-    # خصومات مفعّلة زمنيًا: ends_at NULL أو أكبر من الآن
-    q = q.or_(f"ends_at.is.null,ends_at.gt.{now_iso}")
-    # واحترم starts_at <= الآن
-    q = q.lte("starts_at", now_iso)
 
-    now = _now()
-    best = None
+    rows = _time_window_filter(rows)
+
+    best: Optional[Dict[str, Any]] = None
     for r in rows:
-        # استبعد المنتهي زمنيًا
-        ends = _parse_dt(r.get("ends_at"))
-        if ends is not None and ends <= now:
-            continue
         sc = (r.get("scope") or "global").lower()
-        ok = (sc == "global") or (sc == "user" and int(r.get("user_id") or 0) == int(user_id))
+        if sc == "global":
+            ok = True
+        elif sc == "user":
+            ok = int(r.get("user_id") or 0) == int(user_id)
+        else:
+            ok = False
         if not ok:
             continue
         if (best is None) or (int(r.get("percent") or 0) > int(best.get("percent") or 0)):
             best = r
     return best
+
 
 def apply_discount(user_id: int, amount_syp: int) -> Tuple[int, Optional[Dict[str, Any]]]:
     """
@@ -175,6 +189,7 @@ def apply_discount(user_id: int, amount_syp: int) -> Tuple[int, Optional[Dict[st
         logging.exception("[discounts] apply failed: %s", e)
         return int(amount_syp), None
 
+
 def record_discount_use(discount_id: str, user_id: int, amount_before: int, amount_after: int, purchase_id: Optional[int] = None) -> None:
     try:
         get_table(USES_TABLE).insert({
@@ -187,16 +202,22 @@ def record_discount_use(discount_id: str, user_id: int, amount_before: int, amou
     except Exception as e:
         logging.exception("[discounts] record use failed: %s", e)
 
+
 def discount_stats(days: int = 30) -> List[str]:
     """
-    يرجع نصوص جاهزة للإظهار (تجميعي بسيط).
+    يرجع نصوصًا تلخيصية بسيطة للاستخدام.
     """
     try:
-        res = get_table(USES_TABLE).select("discount_id, user_id, amount_before, amount_after, created_at").limit(500).execute()
+        res = get_table(USES_TABLE).select(
+            "discount_id, user_id, amount_before, amount_after, created_at"
+        ).limit(500).execute()
         rows = getattr(res, "data", []) or []
     except Exception:
         rows = []
     if not rows:
         return ["لا يوجد استخدامات."]
-    total_saved = sum((int(r.get("amount_before") or 0) - int(r.get("amount_after") or 0)) for r in rows)
+    total_saved = sum(
+        (int(r.get("amount_before") or 0) - int(r.get("amount_after") or 0))
+        for r in rows
+    )
     return [f"عدد الاستخدامات: {len(rows)}", f"إجمالي التخفيض: {total_saved:,} ل.س"]
