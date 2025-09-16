@@ -78,7 +78,7 @@ BAND = "━━━━━━━━━━━━━━━━"
 COMMISSION_PER_10000 = 1400
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
 
-# ✅ قائمة المزودات (حافظنا على القديم، حذفنا "ناس"، أضفنا المطلوب)
+# ✅ قائمة المزودات
 INTERNET_PROVIDERS = [
     "هايبر نت", "أم تي أن", "تكامل", "آية", "أمواج", "دنيا", "ليزر",
     "رن نت", "آينت", "زاد", "لاين نت", "برو نت", "أمنية",
@@ -98,7 +98,6 @@ INTERNET_SPEEDS = [
 
 # 🔑 مفاتيح Feature لكل مزوّد (للمنع بدون إخفاء الزر)
 PROVIDER_KEYS = {
-    # الحاليون
     "هايبر نت": "internet_provider_hypernet",
     "أم تي أن": "internet_provider_mtn",
     "تكامل": "internet_provider_takamol",
@@ -115,8 +114,6 @@ PROVIDER_KEYS = {
     "MTS": "internet_provider_mts",
     "سوا": "internet_provider_sawa",
     "يارا": "internet_provider_yara",
-
-    # الإضافات
     "مزود بطاقات": "internet_provider_cards",
     "الجمعية SCS": "internet_provider_scs",
     "فيو": "internet_provider_view",
@@ -129,7 +126,7 @@ def _prov_flag_key(name: str):
     return PROVIDER_KEYS.get(name)
 
 # حالة المستخدم (نوع الطلب والخطوات)
-user_net_state = {}  # { user_id: { step, provider?, speed?, price?, phone? } }
+user_net_state = {}  # { user_id: { step, provider?, speed?, price?, phone?, price_before?, discount? } }
 
 # =====================================
 #   أدوات مساعدة / تنسيق موحّد
@@ -179,7 +176,6 @@ def _service_unavailable_guard(bot, chat_id) -> bool:
     if is_maintenance():
         bot.send_message(chat_id, maintenance_message())
         return True
-    # تعطيل عام للخدمة
     if block_if_disabled(bot, chat_id, "internet_adsl", "دفع مزودات الإنترنت"):
         return True
     if block_if_disabled(bot, chat_id, "internet", "دفع مزودات الإنترنت"):
@@ -241,7 +237,6 @@ def _insufficient_kb() -> types.InlineKeyboardMarkup | None:
         kb.add(types.InlineKeyboardButton("💳 شحن المحفظة", callback_data=CB_RECHARGE))
         kb.add(types.InlineKeyboardButton("⬅️ رجوع للسرعات", callback_data=CB_BACK_SPEED))
         return kb
-    # بدون قائمة شحن — نرجع None ونكتفي برسالة
     return None
 
 # =====================================
@@ -259,7 +254,6 @@ def register(bot):
     # فتح القائمة الرئيسية (زر ريبلاي)
     @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
     def open_net_menu(msg):
-        # ✅ إنهاء أي رحلة/مسار سابق عالق
         try:
             from handlers.start import _reset_user_flows
             _reset_user_flows(msg.from_user.id)
@@ -405,7 +399,7 @@ def register(bot):
         except Exception:
             pass
 
-    # إدخال رقم الهاتف
+    # إدخال رقم الهاتف — (هنا نعرض قبل/خصم/بعد مثل المنتجات)
     @bot.message_handler(func=lambda m: user_net_state.get(m.from_user.id, {}).get("step") == "enter_phone")
     def handle_phone_entry(msg):
         uid = msg.from_user.id
@@ -418,7 +412,28 @@ def register(bot):
         st["phone"] = phone
         st["step"] = "confirm"
 
-        price = st["price"]
+        # ✅ نفس منطق المنتجات: إعادة التحقق + تطبيق الخصم للعرض الأولي
+        price_before = int(st["price"])
+        try:
+            revalidate_user_discount(bot, uid)
+        except Exception:
+            pass
+        price_after, applied_disc = apply_discount(uid, price_before)
+
+        # خزّن (للاستخدام في التأكيد النهائي/الرسائل)
+        st["price_before"] = price_before
+        if applied_disc:
+            st["discount"] = {
+                "id":      applied_disc.get("id"),
+                "percent": applied_disc.get("percent"),
+                "before":  price_before,
+                "after":   int(price_after),
+            }
+        else:
+            st["discount"] = None
+
+        # نحسب العمولة والإجمالي على السعر بعد الخصم (أنصف للعميل)
+        price = int(price_after)
         comm  = _commission(price)
         total = price + comm
 
@@ -426,11 +441,10 @@ def register(bot):
             f"🌐 المزوّد: {st['provider']}",
             f"⚡ السرعة: {st['speed']}",
             *( [f"💰 السعر: {_fmt_syp(price)}"] if not st.get("discount") else [
-                f"💰 السعر قبل الخصم: {_fmt_syp(int(st['discount']['before']))}",
+                f"💰 السعر قبل الخصم: {_fmt_syp(price_before)}",
                 f"٪ الخصم: {int(st['discount']['percent'] or 0)}٪",
                 f"💰 السعر بعد الخصم: {_fmt_syp(price)}",
             ] ),
-
             f"🧾 العمولة: {_fmt_syp(comm)}",
             f"✅ الإجمالي: {_fmt_syp(total)}",
             "",
@@ -456,27 +470,19 @@ def register(bot):
         if not st or st.get("step") != "confirm":
             return bot.answer_callback_query(call.id, "انتهت صلاحية هذا الطلب.", show_alert=True)
 
-        # احتفظ بالسعر قبل الخصم
-        price_before = int(st["price"])
-
-        # إعادة التحقق من خصم الاشتراك/الإحالات (يومياً غالبًا)
+        # ✅ إعادة التحقق + تطبيق الخصم نهائيًا (قد تتغيّر النسبة)
+        price_before = int(st.get("price_before") or st["price"])
         try:
             revalidate_user_discount(bot, uid)
         except Exception:
             pass
-
-        # تطبيق أعلى خصم متاح للمستخدم
         price_after, applied_disc = apply_discount(uid, price_before)
 
-        # 👇 إن أردت أن العمولة تُحسب على السعر بعد الخصم (أنصف للعميل):
-        price = price_after
-        comm  = _commission(price_after)
-
-        # (بديل إن أردت عدم خصم العمولة): استخدم comm = _commission(price_before)
-
+        price = int(price_after)
+        comm  = _commission(price)
         total = price + comm
 
-        # خزّن معلومات الخصم في حالة المستخدم لاستخدامها في الرسائل والـpayload
+        # خزّن معلومات الخصم النهائية
         if applied_disc:
             st["discount"] = {
                 "id":      applied_disc.get("id"),
@@ -486,7 +492,6 @@ def register(bot):
             }
         else:
             st["discount"] = None
-
 
         # ✅ نعتمد على الرصيد المتاح فقط (balance − held)
         available = get_available_balance(uid)
@@ -540,7 +545,6 @@ def register(bot):
                 f"٪ الخصم: {int(st['discount']['percent'] or 0)}٪",
                 f"💰 السعر بعد الخصم: {price:,} ل.س",
             ] ),
-
             f"🧾 العمولة: {comm:,} ل.س",
             f"✅ الإجمالي (محجوز): {total:,} ل.س",
             f"💼 رصيد المستخدم الآن: {balance_now:,} ل.س",
@@ -556,20 +560,18 @@ def register(bot):
                 "provider": st["provider"],
                 "speed": st["speed"],
                 "phone": st["phone"],
-                "price": price,
+                "price": price,               # بعد الخصم
                 "comm": comm,
                 "total": total,
                 "reserved": total,
-                "hold_id": hold_id,   # ✅ مفتاح النجاح في الأدمن
-                "price_before": (st.get("discount", {}) or {}).get("before", price),
-                # (اختياري) ميتاداتا كاملة عن الخصم:
+                "hold_id": hold_id,           # ✅ مفتاح النجاح في الأدمن
+                "price_before": int(st.get("price_before") or price),  # للرجوع عند الحاجة
                 "discount": (st.get("discount") or None),
-
             }
         )
         process_queue(bot)
 
-        # تأكيد للعميل (موحّد) — رسالة جديدة (مش تعديل نفس الرسالة)
+        # تأكيد للعميل (موحّد)
         ok_txt = _client_card(
             f"✅ تمام يا {nm} — طلبك في السكة 🚀",
             ["بعتنا الطلب للإدارة، التنفيذ عادةً من 1 إلى 4 دقايق (وغالبًا أسرع 😉).",
