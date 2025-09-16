@@ -5,7 +5,21 @@ import math
 from database.db import get_table
 from telebot import types
 from services.system_service import is_maintenance, maintenance_message
-from services.discount_service import apply_discount_stacked as apply_discount
+
+# ✅ استيراد مرن مع fallback
+try:
+    from services.discount_service import apply_discount_stacked as apply_discount
+except Exception:
+    def apply_discount(user_id: int, amount: int):
+        # يرجع المبلغ كما هو بدون خصم إذا تعذّر الاستيراد
+        try:
+            amount = int(amount)
+        except Exception:
+            pass
+        return int(amount), None
+
+# (اختياري) توافق عكسي لو في أماكن لسه تنادي الاسم القديم
+apply_discount_stacked = apply_discount
 
 from services.referral_service import revalidate_user_discount
 from services.wallet_service import (
@@ -152,8 +166,6 @@ def _visible_category_label(order: dict, product: Product) -> str:
                 key = "clashroyale"
             elif "app:siba" in d:
                 key = "siba"
-
-
             elif "app:imo" in d:
                 key = "imo"
             elif "app:xena" in d:
@@ -241,7 +253,7 @@ PRODUCTS = {
         Product(8, "660 شدة", "ألعاب", 8.87, "زر 660 شدة"),
         Product(9, "840 شدة", "ألعاب", 11.32, "زر 840 شدة"),
         Product(10, "1800 شدة", "ألعاب", 22.10, "زر 1800 شدة"),
-         Product(11, "2125 شدة", "ألعاب", 25.65, "زر 2125 شدة"),
+        Product(11, "2125 شدة", "ألعاب", 25.65, "زر 2125 شدة"),
         Product(12, "3850 شدة", "ألعاب", 43.25, "زر 3850 شدة"),
         Product(13, "8100 شدة", "ألعاب", 86.32, "زر 8100 شدة"),
     ],
@@ -332,34 +344,33 @@ PRODUCTS = {
         Product(76, "12000 شحن",    "ألعاب/تطبيقات", 4.38,  "app:kiyo|Kiyo Live 12000"),
         Product(77, "24000 شحن",    "ألعاب/تطبيقات", 8.71,  "app:kiyo|Kiyo Live 24000"),
 
-# === imo ===
-Product(78, "100 الماسة",  "ألعاب/تطبيقات", 1.91,  "app:imo|imo 100 Diamonds"),
-Product(79, "200 ألماسة",  "ألعاب/تطبيقات", 9.95,  "app:imo|imo 200 Diamonds"),
-Product(80, "500 الماسة",  "ألعاب/تطبيقات", 9.43,  "app:imo|imo 500 Diamonds"),
-Product(81, "1000 الماسة", "ألعاب/تطبيقات", 18.89, "app:imo|imo 1000 Diamonds"),
+        # === imo ===
+        Product(78, "100 الماسة",  "ألعاب/تطبيقات", 1.91,  "app:imo|imo 100 Diamonds"),
+        Product(79, "200 ألماسة",  "ألعاب/تطبيقات", 9.95,  "app:imo|imo 200 Diamonds"),
+        Product(80, "500 الماسة",  "ألعاب/تطبيقات", 9.43,  "app:imo|imo 500 Diamonds"),
+        Product(81, "1000 الماسة", "ألعاب/تطبيقات", 18.89, "app:imo|imo 1000 Diamonds"),
 
-# === Xena Live ===
-Product(82, "شحن 8000",   "ألعاب/تطبيقات", 0.91, "app:xena|Xena Live 8000"),
-Product(83, "شحن 16000",  "ألعاب/تطبيقات", 1.77, "app:xena|Xena Live 16000"),
-Product(84, "شحن 32000",  "ألعاب/تطبيقات", 3.48, "app:xena|Xena Live 32000"),
-Product(85, "شحن 64000",  "ألعاب/تطبيقات", 6.95, "app:xena|Xena Live 64000"),
+        # === Xena Live ===
+        Product(82, "شحن 8000",   "ألعاب/تطبيقات", 0.91, "app:xena|Xena Live 8000"),
+        Product(83, "شحن 16000",  "ألعاب/تطبيقات", 1.77, "app:xena|Xena Live 16000"),
+        Product(84, "شحن 32000",  "ألعاب/تطبيقات", 3.48, "app:xena|Xena Live 32000"),
+        Product(85, "شحن 64000",  "ألعاب/تطبيقات", 6.95, "app:xena|Xena Live 64000"),
 
-# === Zakan (أسعار سوري ثابتة) ===
-Product(86, "تعبئة 10000 ل.س",   "ألعاب/تطبيقات", 10600,  "app:zakan|Zakan SYP 10000"),
-Product(87, "تعبئة 20000 ل.س",   "ألعاب/تطبيقات", 21200,  "app:zakan|Zakan SYP 20000"),
-Product(88, "تعبئة 50000 ل.س",   "ألعاب/تطبيقات", 53000,  "app:zakan|Zakan SYP 50000"),
-Product(89, "تعبئة 100000 ل.س",  "ألعاب/تطبيقات", 106000, "app:zakan|Zakan SYP 100000"),
-Product(90, "تعبئة 200000 ل.س",  "ألعاب/تطبيقات", 212000, "app:zakan|Zakan SYP 200000"),
-Product(91, "تعبئة 500000 ل.س",  "ألعاب/تطبيقات", 530000, "app:zakan|Zakan SYP 500000"),
+        # === Zakan (أسعار سوري ثابتة) ===
+        Product(86, "تعبئة 10000 ل.س",   "ألعاب/تطبيقات", 10600,  "app:zakan|Zakan SYP 10000"),
+        Product(87, "تعبئة 20000 ل.س",   "ألعاب/تطبيقات", 21200,  "app:zakan|Zakan SYP 20000"),
+        Product(88, "تعبئة 50000 ل.س",   "ألعاب/تطبيقات", 53000,  "app:zakan|Zakan SYP 50000"),
+        Product(89, "تعبئة 100000 ل.س",  "ألعاب/تطبيقات", 106000, "app:zakan|Zakan SYP 100000"),
+        Product(90, "تعبئة 200000 ل.س",  "ألعاب/تطبيقات", 212000, "app:zakan|Zakan SYP 200000"),
+        Product(91, "تعبئة 500000 ل.س",  "ألعاب/تطبيقات", 530000, "app:zakan|Zakan SYP 500000"),
 
-# === YallaGO (أسعار سوري ثابتة) ===
-Product(92, "تعبئة 10000 ل.س",   "ألعاب/تطبيقات", 10600,  "app:yallago|YallaGO SYP 10000"),
-Product(93, "تعبئة 20000 ل.س",   "ألعاب/تطبيقات", 21200,  "app:yallago|YallaGO SYP 20000"),
-Product(94, "تعبئة 50000 ل.س",   "ألعاب/تطبيقات", 53000,  "app:yallago|YallaGO SYP 50000"),
-Product(95, "تعبئة 100000 ل.س",  "ألعاب/تطبيقات", 106000, "app:yallago|YallaGO SYP 100000"),
-Product(96, "تعبئة 200000 ل.س",  "ألعاب/تطبيقات", 212000, "app:yallago|YallaGO SYP 200000"),
-Product(97, "تعبئة 500000 ل.س",  "ألعاب/تطبيقات", 530000, "app:yallago|YallaGO SYP 500000"),
-
+        # === YallaGO (أسعار سوري ثابتة) ===
+        Product(92, "تعبئة 10000 ل.س",   "ألعاب/تطبيقات", 10600,  "app:yallago|YallaGO SYP 10000"),
+        Product(93, "تعبئة 20000 ل.س",   "ألعاب/تطبيقات", 21200,  "app:yallago|YallaGO SYP 20000"),
+        Product(94, "تعبئة 50000 ل.س",   "ألعاب/تطبيقات", 53000,  "app:yallago|YallaGO SYP 50000"),
+        Product(95, "تعبئة 100000 ل.س",  "ألعاب/تطبيقات", 106000, "app:yallago|YallaGO SYP 100000"),
+        Product(96, "تعبئة 200000 ل.س",  "ألعاب/تطبيقات", 212000, "app:yallago|YallaGO SYP 200000"),
+        Product(97, "تعبئة 500000 ل.س",  "ألعاب/تطبيقات", 530000, "app:yallago|YallaGO SYP 500000"),
     ],
 }
 
@@ -375,12 +386,11 @@ MIXEDAPPS_SUBCATS = [
     {"label": "تطبيق Pota Live",     "key": "pota"},
     {"label": "تطبيق Waaw Chat",     "key": "waaw"},
     {"label": "تطبيق Kiyo Live",     "key": "kiyo"},
-    {"label": "تطبيق imo",       "key": "imo"},
-    {"label": "تطبيق Xena Live", "key": "xena"},
-    {"label": "تطبيق زاكن",      "key": "zakan"},
-    {"label": "تطبيق YallaGO",   "key": "yallago"},
+    {"label": "تطبيق imo",           "key": "imo"},
+    {"label": "تطبيق Xena Live",     "key": "xena"},
+    {"label": "تطبيق زاكن",          "key": "zakan"},
+    {"label": "تطبيق YallaGO",       "key": "yallago"},
 ]
-
 
 def _filter_products_by_key(category: str, key_text: str) -> list[Product]:
     """يرجع باقات التصنيف بحسب وسم التطبيق في أي حقل نصي داخل الكائن (app:cod / app:bigo)."""
@@ -580,7 +590,6 @@ def show_product_options(bot, message, category):
         reply_markup=keyboard
     )
 
-
 # ================= خطوات إدخال آيدي اللاعب =================
 
 def handle_player_id(message, bot):
@@ -623,7 +632,9 @@ def handle_player_id(message, bot):
     except Exception:
         pass
 
-    price_syp, applied_disc = apply_discount_stacked(user_id, price_syp)
+    # ✅ استخدم الاسم الصحيح
+    price_syp, applied_disc = apply_discount(user_id, price_syp)
+
     # خزّن السعرين في حالة الطلب لرسالة الأدمن
     order["price_before"] = price_before
     order["price_after"] = price_syp
@@ -675,11 +686,6 @@ def handle_player_id(message, bot):
                 [
                     f"• المنتج: {product.name}",
                     f"• الفئة: {_visible_category_label(order, product)}",
-                    # قبل الكتلة مباشرة لديك:
-                    # price_before = int(price_syp قبل تطبيق الخصم)
-                    # price_syp, applied_disc = apply_discount(...)
-
-                    # ✨ استبدل سطر السعر الواحد بـ:
                     *( [f"• السعر: {_fmt_syp(price_syp)}"] if not applied_disc else [
                         f"• السعر قبل الخصم: {_fmt_syp(price_before)}",
                         f"• الخصم: {int(applied_disc.get('percent', 0))}٪",
@@ -688,11 +694,8 @@ def handle_player_id(message, bot):
                                else "إحالة " + str(p.get("percent")) + "٪"
                                for p in (applied_disc.get("breakdown") or [])]
                             )] if applied_disc and applied_disc.get("breakdown") else [] ),
-
                         f"• السعر بعد الخصم: {_fmt_syp(price_syp)}",
                     ] ),
-
-
                     f"• {id_label}: {player_id}",
                     "",
                     f"هنبعت الطلب للإدارة، والحجز هيتم فورًا. التنفيذ {ETA_TEXT} بإذن الله.",
@@ -900,7 +903,6 @@ def setup_inline_handlers(bot, admin_ids):
         else:
             txt = _with_cancel(f"📦 منتجات {key_text}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎")
 
-
         try:
             bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=kb)
         except Exception:
@@ -963,7 +965,6 @@ def setup_inline_handlers(bot, admin_ids):
     def _noop(call):
         # لا تفعل شيئًا ولا تُخْفِ الكيبورد
         bot.answer_callback_query(call.id)
-
 
     @bot.callback_query_handler(func=lambda c: c.data == "show_recharge_methods")
     def _show_recharge(call):
@@ -1103,7 +1104,7 @@ def setup_inline_handlers(bot, admin_ids):
         price_before = int(order.get("price_before", price_syp))
 
         # خصم مجمّع: أعلى إدمن + أعلى إحالة (سقف 100%)
-        price_syp, applied_disc = apply_discount_stacked(user_id, price_before)
+        price_syp, applied_disc = apply_discount(user_id, price_before)
 
         # خزّن القيم لضمان تطابق الرسائل (للإدمن وللعميل)
         order["price_before"] = price_before
@@ -1117,7 +1118,6 @@ def setup_inline_handlers(bot, admin_ids):
             }
             if applied_disc else None
         )
-
 
         # المنتج ما زال فعّال؟ (Alert برسالة احترافية)
         if not get_product_active(product.product_id):
@@ -1138,12 +1138,10 @@ def setup_inline_handlers(bot, admin_ids):
                     "❌ رصيدك مش مكفّي",
                     [
                         f"المتاح: {_fmt_syp(available)}",
-                        # السعر قبل/بعد لو فيه خصم محفوظ في order["discount"]
                         *( [
                             f"السعر قبل الخصم: {_fmt_syp(int(order.get('discount',{}).get('before', price_syp)))}",
                             f"السعر بعد الخصم: {_fmt_syp(int(order.get('discount',{}).get('after',  price_syp)))}",
                         ] if order.get("discount") else [ f"السعر: {_fmt_syp(price_syp)}" ] ),
-
                         "🧾 اشحن المحفظة وبعدين جرّب تاني."
                     ]
                 ),
@@ -1214,7 +1212,6 @@ def setup_inline_handlers(bot, admin_ids):
             f"(select_{product.product_id})",
         ])
 
-
         # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
         add_pending_request(
             user_id=user_id,
@@ -1227,7 +1224,6 @@ def setup_inline_handlers(bot, admin_ids):
                 "player_id": player_id,
                 "price_before": _pb,
                 "price": _pa,
-
                 "reserved": price_syp,
                 "hold_id": hold_id
             }
@@ -1246,7 +1242,6 @@ def setup_inline_handlers(bot, admin_ids):
                             f"✅ بعد الخصم: {_fmt_syp(int(order.get('discount',{}).get('after',  price_syp)))}",
                         ] if order.get("discount") else [] ),
                         f"📦 حجزنا {_fmt_syp(price_syp)} لطلب «{product.name}» لآيدي «{player_id}».",
-
                         "تقدر تبعت طلبات تانية — بنسحب من المتاح بس."
                     ]
                 )
