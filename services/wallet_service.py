@@ -316,7 +316,12 @@ def get_product_by_id(product_id: int):
 
 # مساعد انتقائي
 def _select_single(table_name, field, value):
-    response = get_table(table_name).select(field).eq(field, value).limit(1).execute()
+    # تطبيع الاسم الحرفي USERS_TABLE إلى الجدول الفعلي
+    from database.db import DEFAULT_TABLE
+    name = (table_name or DEFAULT_TABLE)
+    if name == "USERS_TABLE":
+        name = DEFAULT_TABLE
+    response = get_table(name).select(field).eq(field, value).limit(1).execute()
     return response.data[0][field] if response.data else None
 
 
