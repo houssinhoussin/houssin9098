@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
 from database.db import get_table, DEFAULT_TABLE
 from config import ADMINS, ADMIN_MAIN_ID
-
+import uuid
 LEDGER_TABLE = "admin_ledger"
 TRANSACTION_TABLE = "transactions"
 
@@ -15,8 +15,8 @@ def _now_iso() -> str:
 # سجلات دائمة لإقرار الإداريين (إيداع/صرف)
 # ────────────────────────────────────────────────────────────
 def log_admin_deposit(admin_id: int, user_id: int, amount: int, note: str = "") -> None:
-    # يسجل إيداع وافق عليه الأدمن (مبلغ موجب)
     get_table(LEDGER_TABLE).insert({
+        "id": str(uuid.uuid4()),            # ← أضف هذا السطر
         "admin_id": int(admin_id),
         "user_id": int(user_id),
         "action": "deposit",
@@ -26,8 +26,8 @@ def log_admin_deposit(admin_id: int, user_id: int, amount: int, note: str = "") 
     }).execute()
 
 def log_admin_spend(admin_id: int, user_id: int, amount: int, note: str = "") -> None:
-    # يسجل صرف من المحفظة وافق عليه الأدمن (مبلغ موجب يمثل المبلغ المصروف)
     get_table(LEDGER_TABLE).insert({
+        "id": str(uuid.uuid4()),            # ← أضف هذا السطر
         "admin_id": int(admin_id),
         "user_id": int(user_id),
         "action": "spend",
