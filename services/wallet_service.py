@@ -20,6 +20,12 @@ from database.db import (
     try_deduct_rpc as _rpc_try_deduct,
 )
 
+# خصومات
+from services.discount_service import (
+    get_active_for_user as _disc_get_active_for_user,
+    record_discount_use as _disc_record_use,
+)
+
 # أسماء الجداول
 USER_TABLE = (SUPABASE_TABLE_NAME or DEFAULT_TABLE or "houssin363")
 if USER_TABLE == "USERS_TABLE":
@@ -50,7 +56,6 @@ def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None
             on_conflict="user_id",
         ).execute()
     except Exception as e:
-        import logging
         logging.error(f"[wallet_service] upsert user failed: {e}")
         return
 
@@ -156,7 +161,7 @@ def transfer_balance(from_user_id: int, to_user_id: int, amount: int, fee: int =
     return True
 
 
-# ================= المشتريات (الأساسي) =================
+# ================= المشتريات =================
 
 def get_purchases(user_id: int, limit: int = 10):
     now = datetime.utcnow()
@@ -180,22 +185,71 @@ def get_purchases(user_id: int, limit: int = 10):
 
 def add_purchase(user_id: int, product_id, product_name: str, price: int, player_id: str):
     """
-    تُبقي نفس السلوك:
-    - إدراج في purchases ثم خصم السعر (لكن الآن الخصم آمن عبر RPC ولا يسمح بالسالب).
-    ملاحظة: يُفضّل لاحقًا نقل الخصم إلى مرحلة الحجز/التصفية في handlers/products.py.
+    إدراج شراء مع تطبيق أفضل خصم فعّال للحظة الشراء (يتجاهل المنتهي آليًا).
+    نسجّل الحقول الاختيارية لو وُجدت أعمدتها، ون fallback للحقول الأساسية إذا لم توجد.
+    ثم نخصم المبلغ النهائي فقط عبر RPC.
     """
     expire_at = datetime.utcnow() + timedelta(hours=15)
-    data = {
+
+    # 1) احسب أفضل خصم فعّال للمستخدم (global/user) – يتجاهل المنتهي
+    base_price = int(price)
+    final_price = base_price
+    disc_id = None
+    disc_percent = 0
+
+    d = _disc_get_active_for_user(user_id)
+    if d:
+        try:
+            disc_percent = int(d.get("percent") or 0)
+            disc_id = d.get("id")
+            cut = (base_price * disc_percent) // 100
+            final_price = max(0, base_price - cut)
+        except Exception:
+            final_price = base_price
+            disc_id = None
+            disc_percent = 0
+
+    # 2) حاول الإدراج مع الحقول الإضافية؛ وإن فشل أعد الإدراج بالحد الأدنى
+    data_full = {
         "user_id": user_id,
-        "product_id": product_id,   # يمكن أن تكون None
+        "product_id": product_id,
         "product_name": product_name,
-        "price": int(price),
+        "price": final_price,                     # السعر بعد الخصم
         "player_id": player_id,
         "created_at": datetime.utcnow().isoformat(),
         "expire_at": expire_at.isoformat(),
+        # اختياري:
+        "original_price": base_price,
+        "discount_percent": disc_percent,
+        "discount_id": disc_id,
+        "discount_applied_at": datetime.utcnow().isoformat() if disc_id else None,
     }
-    get_table(PURCHASES_TABLE).insert(data).execute()
-    deduct_balance(user_id, int(price), f"شراء {product_name}")
+    try:
+        ins = get_table(PURCHASES_TABLE).insert(data_full).execute()
+        purchase_id = (ins.data[0]["id"] if getattr(ins, "data", None) else None)
+    except Exception:
+        # إدراج بالحد الأدنى
+        data_min = {
+            "user_id": user_id,
+            "product_id": product_id,
+            "product_name": product_name,
+            "price": final_price,
+            "player_id": player_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "expire_at": expire_at.isoformat(),
+        }
+        ins = get_table(PURCHASES_TABLE).insert(data_min).execute()
+        purchase_id = (ins.data[0]["id"] if getattr(ins, "data", None) else None)
+
+    # 3) خصم الرصيد بالمبلغ النهائي فقط
+    deduct_balance(user_id, final_price, f"شراء {product_name}")
+
+    # 4) سجّل استخدام الخصم (إن وُجد id)
+    if disc_id:
+        try:
+            _disc_record_use(disc_id, user_id, base_price, final_price, purchase_id)
+        except Exception:
+            pass
 
 
 # ================= السجلات المالية =================
@@ -255,7 +309,7 @@ def _select_single(table_name, field, value):
 
 
 # ================= جداول مشتريات متخصصة (عرض/قراءة) =================
-# (بدون تغييرات)
+# (كما هي)
 
 def get_ads_purchases(user_id: int):
     response = get_table('ads_purchases').select("*").eq("user_id", user_id).execute()
@@ -312,11 +366,9 @@ def user_has_admin_approval(user_id):
 
 
 # ================= إضافات العرض الموحّد =================
-# (تبقى كما هي — لا تغييرات على هذا القسم)
-
+# (كما هي)
 def get_all_purchases_structured(user_id: int, limit: int = 50):
-    # ... (المحتوى كما في نسختك السابقة)
-    from datetime import datetime as _dt  # لتفادي أي التباس بالأسماء
+    from datetime import datetime as _dt
     items = []
 
     try:
@@ -436,110 +488,7 @@ def get_wallet_transfers_only(user_id: int, limit: int = 50):
     return out
 
 
-# ===== تسجيلات إضافية في الجداول المتخصصة (Write-through) =====
-# (تبقى كما هي — بدون تغيير)
-
-def add_game_purchase(user_id: int, product_id, product_name: str, price: int, player_id: str, created_at: str = None):
-    pid = int(product_id) if product_id else None
-    if pid:
-        try:
-            chk = get_table(PRODUCTS_TABLE).select("id").eq("id", pid).limit(1).execute()
-            if not (getattr(chk, "data", None) and chk.data):
-                pid = None
-        except Exception:
-            pid = None
-
-    data = {
-        "user_id": user_id,
-        "product_id": pid,
-        "product_name": product_name,
-        "price": int(price),
-        "player_id": str(player_id or ""),
-        "created_at": (created_at or datetime.utcnow().isoformat()),
-    }
-    get_table("game_purchases").insert(data).execute()
-
-def add_bill_or_units_purchase(user_id: int, bill_name: str, price: int, number: str, created_at: str = None):
-    data = {
-        "user_id": user_id,
-        "bill_name": bill_name,
-        "price": price,
-        "created_at": (created_at or datetime.utcnow().isoformat()),
-        "number": number
-    }
-    try:
-        get_table("bill_and_units_purchases").insert(data).execute()
-    except Exception:
-        pass
-
-def add_internet_purchase(user_id: int, provider_name: str, price: int, phone: str, speed: str = None, created_at: str = None):
-    data = {
-        "user_id": user_id,
-        "provider_name": provider_name,
-        "price": price,
-        "created_at": (created_at or datetime.utcnow().isoformat()),
-        "phone": phone,
-        "speed": speed
-    }
-    try:
-        get_table("internet_providers_purchases").insert(data).execute()
-    except Exception:
-        pass
-
-def add_cash_transfer_purchase(user_id: int, transfer_name: str, price: int, number: str, created_at: str = None):
-    data = {
-        "user_id": user_id,
-        "transfer_name": transfer_name,
-        "price": price,
-        "created_at": (created_at or datetime.utcnow().isoformat()),
-        "number": number
-    }
-    try:
-        get_table("cash_transfer_purchases").insert(data).execute()
-    except Exception:
-        pass
-
-def add_companies_transfer_purchase(user_id: int, company_name: str, price: int, beneficiary_number: str, created_at: str = None):
-    data = {
-        "user_id": user_id,
-        "company_name": company_name,
-        "price": price,
-        "created_at": (created_at or datetime.utcnow().isoformat()),
-        "beneficiary_number": beneficiary_number
-    }
-    try:
-        get_table("companies_transfer_purchases").insert(data).execute()
-    except Exception:
-        pass
-
-def add_university_fees_purchase(user_id: int, university_name: str, price: int, university_id: str, created_at: str = None):
-    data = {
-        "user_id": user_id,
-        "university_name": university_name,
-        "price": price,
-        "created_at": (created_at or datetime.utcnow().isoformat()),
-        "university_id": university_id
-    }
-    try:
-        get_table("university_fees_purchases").insert(data).execute()
-    except Exception:
-        pass
-
-def add_ads_purchase(user_id: int, ad_name: str, price: int, created_at: str = None):
-    data = {
-        "user_id": user_id,
-        "ad_name": ad_name,
-        "price": price,
-        "created_at": (created_at or datetime.utcnow().isoformat())
-    }
-    try:
-        get_table("ads_purchases").insert(data).execute()
-    except Exception:
-        pass
-
-
-# ===== واجهات الحجز (للاستخدام من الهاندلرز) =====
-# (Back-compat: نقبل UUID أو وصف نصّي، ونمرّر دائمًا UUID صالح للـ RPC)
+# ===== واجهات الحجز =====
 
 def create_hold(user_id: int, amount: int, order_or_reason=None, ttl_seconds: int = 900):
     """
