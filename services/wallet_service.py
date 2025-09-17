@@ -1,17 +1,20 @@
-# services/wallet_service.py
+# -*- coding: utf-8 -*-
 """
-(نفس الهيدر التوضيحي السابق)
+خدمة المحفظة والمشتريات مع دعم خصمين (أدمن + إحالة) للأنواع المطلوبة.
+- تُطبَّق الخصومات على: products, bill_and_units_purchases, university_fees_purchases, internet_providers_purchases
+- لا تُطبَّق على: wholesale_purchases
+- استثناء خاص: داخل الفواتير، عناصر "جملة كازية سيرياتيل" و"جملة كازية MTN" بلا خصم.
 """
-# أعلى الملف
+from __future__ import annotations
+
 import logging
 import uuid
-from config import SUPABASE_TABLE_NAME
 from datetime import datetime, timedelta
 
+from config import SUPABASE_TABLE_NAME
 from database.db import (
     get_table,
     DEFAULT_TABLE,
-    # واجهات RPC الذرّية
     get_available_balance as _db_get_available_balance,
     create_hold_rpc as _rpc_create_hold,
     capture_hold_rpc as _rpc_capture_hold,
@@ -22,8 +25,9 @@ from database.db import (
 
 # خصومات
 from services.discount_service import (
-    get_active_for_user as _disc_get_active_for_user,
-    record_discount_use as _disc_record_use,
+    apply_discount_stacked as _disc_apply_stacked,   # خصم أدمن + إحالة (سقف 100%)
+    record_discount_use as _disc_record_use,         # احتياطي لو أردت تسجيل الاستخدام
+    get_active_for_user as _disc_get_active_for_user # للتوافق في أماكن أخرى
 )
 
 # أسماء الجداول
@@ -33,34 +37,60 @@ if USER_TABLE == "USERS_TABLE":
 TRANSACTION_TABLE = "transactions"
 PURCHASES_TABLE   = "purchases"
 PRODUCTS_TABLE    = "products"
-CHANNEL_ADS_TABLE = "channel_ads"
+
+# جداول أخرى للقراءة/العرض
+CHANNEL_ADS_TABLE            = "channel_ads"
+BILL_TABLE                   = "bill_and_units_purchases"
+UNIVERSITY_FEES_TABLE        = "university_fees_purchases"
+INTERNET_PROVIDERS_TABLE     = "internet_providers_purchases"
+WHOLESALE_TABLE              = "wholesale_purchases"
+
+# أنواع يُسمح فيها بالخصم المزدوج
+DISCOUNT_ALLOWED_KINDS = {"product", "bill", "university", "internet"}
+# جداول مستثناة بالكامل
+DISCOUNT_EXCLUDED_TABLES = {WHOLESALE_TABLE}
 
 
-# ================= أدوات مساعدة =================
+# ================= أدوات عامة =================
 
 def _is_uuid_like(x) -> bool:
-    """يتحقق إن كانت القيمة تمثل UUID صالحًا."""
     try:
         uuid.UUID(str(x))
         return True
     except Exception:
         return False
 
+def _norm(s: str | None) -> str:
+    return (s or "").strip().lower()
 
-# ================= عمليات المستخدم =================
+def _contains_any(text: str, tokens) -> bool:
+    t = _norm(text)
+    return any(tok in t for tok in tokens)
 
-def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None:
-    try:
-        get_table(USER_TABLE).upsert(
-            {"user_id": user_id, "name": name},
-            on_conflict="user_id",
-        ).execute()
-    except Exception as e:
-        logging.error(f"[wallet_service] upsert user failed: {e}")
-        return
+def _bill_is_excluded(bill_name: str | None = None,
+                      provider_name: str | None = None,
+                      category: str | None = None) -> bool:
+    """
+    قواعد الاستثناء داخل الفواتير:
+      - وجود أي من مُشغّلي: سيرياتيل/Syriatel أو MTN
+      - مع وجود دلالات "جملة" أو "كازية"
+      => لا يطبّق خصم.
+    """
+    ops = ["سيرياتيل", "syriatel", "mtn", "ام تي ان", "أم تي أن"]
+    bulk = ["جملة", "جمله", "bulk"]
+    fuel = ["كازية", "كازي"]
+
+    blob = " ".join([_norm(bill_name), _norm(provider_name), _norm(category)])
+
+    has_op   = _contains_any(blob, ops)
+    has_bulk = _contains_any(blob, bulk) or _contains_any(blob, fuel)
+
+    return bool(has_op and has_bulk)
+
+
+# ================= رصيد ومحفظة =================
 
 def get_balance(user_id: int) -> int:
-    # نُبقيها كما كانت: تُرجع الرصيد الكامل (بدون طرح المحجوز)
     response = (
         get_table(USER_TABLE)
         .select("balance")
@@ -71,22 +101,11 @@ def get_balance(user_id: int) -> int:
     return response.data[0]["balance"] if response.data else 0
 
 def get_available_balance(user_id: int) -> int:
-    """
-    المتاح للصرف = balance - held
-    (يُستخدم في التحقق قبل التحويل/الخصم)
-    """
     return int(_db_get_available_balance(user_id))
 
 def _update_balance(user_id: int, delta: int) -> bool:
-    """
-    تعديل الرصيد داخليًا:
-      - إن كان delta سالبًا => خصم آمن عبر RPC (try_deduct) يحترم الرصيد المتاح.
-      - إن كان delta موجبًا => نُبقي الزيادة كما كانت (قراءة ثم تحديث) لأنها لا تُسبب سالبًا.
-    ترجع True عند النجاح، False عند الفشل (مثلاً: عدم كفاية الرصيد).
-    """
     if delta is None or int(delta) == 0:
         return True
-
     delta = int(delta)
     if delta < 0:
         resp = _rpc_try_deduct(user_id, -delta)
@@ -94,28 +113,13 @@ def _update_balance(user_id: int, delta: int) -> bool:
             return False
         return bool(resp.data)
     else:
-        # زيادة الرصيد (غير حرِجة من ناحية السالب)
         current = get_balance(user_id)
         new_balance = current + delta
         get_table(USER_TABLE).update({"balance": new_balance}).eq("user_id", user_id).execute()
         return True
 
 def has_sufficient_balance(user_id: int, amount: int) -> bool:
-    # يعتمد على المتاح (balance - held) حتى لا يتجاوز الحجز
     return get_available_balance(user_id) >= int(amount or 0)
-
-def add_balance(user_id: int, amount: int, description: str = "إيداع يدوي") -> None:
-    ok = _update_balance(user_id, int(amount))
-    if ok:
-        record_transaction(user_id, int(amount), description)
-
-def deduct_balance(user_id: int, amount: int, description: str = "خصم تلقائي") -> None:
-    """
-    خصم آمن عبر RPC. في حال فشل الخصم (عدم كفاية المتاح) لا تُسجل عملية.
-    """
-    ok = _update_balance(user_id, -int(amount))
-    if ok:
-        record_transaction(user_id, -int(amount), description)
 
 def record_transaction(user_id: int, amount: int, description: str) -> None:
     data = {
@@ -126,14 +130,18 @@ def record_transaction(user_id: int, amount: int, description: str) -> None:
     }
     get_table(TRANSACTION_TABLE).insert(data).execute()
 
+def add_balance(user_id: int, amount: int, description: str = "شحن محفظة") -> None:
+    if _update_balance(user_id, int(amount)):
+        record_transaction(user_id, int(amount), description)
+
+def deduct_balance(user_id: int, amount: int, description: str = "خصم تلقائي") -> None:
+    if _update_balance(user_id, -int(amount)):
+        record_transaction(user_id, -int(amount), description)
+
+
+# ================= تحويل الرصيد =================
+
 def transfer_balance(from_user_id: int, to_user_id: int, amount: int, fee: int = 0) -> bool:
-    """
-    تحويل رصيد آمن:
-      1) نتحقق من المتاح >= المبلغ + الرسوم.
-      2) ننفّذ تحويل المبلغ نفسه ذرّيًا (خصم من المرسل + إيداع للمستقبل) عبر RPC transfer_amount.
-      3) نخصم الرسوم من المرسل عبر RPC try_deduct (ستنجح طالما تحققنا في (1)).
-      4) نسجّل عمليتين ماليّتين بنفس الصياغة القديمة.
-    """
     amount  = int(amount)
     fee     = int(fee or 0)
     total   = amount + fee
@@ -143,32 +151,172 @@ def transfer_balance(from_user_id: int, to_user_id: int, amount: int, fee: int =
     if not has_sufficient_balance(from_user_id, total):
         return False
 
-    # (2) تحويل المبلغ إلى المستقبل
     t = _rpc_transfer_amount(from_user_id, to_user_id, amount)
     if getattr(t, "error", None) or not bool(t.data):
         return False
 
-    # (3) خصم الرسوم من المرسل (إن وجدت)
     if fee > 0:
         f = _rpc_try_deduct(from_user_id, fee)
         if getattr(f, "error", None) or not bool(f.data):
-            # غير متوقع بعد التحقق المسبق، لكن نُعيد False للحذر
             return False
 
-    # (4) التسجيلات المحاسبية بنفس الأسلوب السابق
     record_transaction(from_user_id, -total, f"تحويل إلى {to_user_id} (شامل الرسوم)")
     record_transaction(to_user_id,   amount, f"تحويل من {from_user_id}")
     return True
 
 
-# ================= المشتريات =================
+# ================= مساعدة الخصومات =================
+
+def _apply_discounts_if_allowed(user_id: int, base_price: int, kind: str = "product"):
+    """
+    يُرجع (final_price, info) حيث info = {"percent":..., "breakdown":[...]}
+    - يطبق خصمين (أدمن + إحالة) فقط إذا kind ضمن DISCOUNT_ALLOWED_KINDS.
+    - بخلاف ذلك يعيد السعر كما هو (بدون خصم).
+    """
+    base_price = int(base_price)
+    kind = (kind or "product").lower()
+
+    if kind not in DISCOUNT_ALLOWED_KINDS:
+        return base_price, {"percent": 0, "breakdown": []}
+
+    final_price, info = _disc_apply_stacked(user_id, base_price)
+    return int(final_price), (info or {"percent": 0, "breakdown": []})
+
+
+# ================= المشتريات: منتجات =================
+
+def add_purchase(user_id: int, product_id, product_name: str, price: int, player_id: str, kind: str = "product"):
+    """
+    إدراج شراء قياسي في جدول purchases.
+    - يطبق الخصمين (أدمن + إحالة) لو kind ∈ {'product','bill','university','internet'}.
+    - لا يطبّق خصم للجُملة.
+    """
+    base_price = int(price)
+    expire_at = datetime.utcnow() + timedelta(hours=15)
+
+    # خصم مزدوج عند السماح
+    final_price, info = _apply_discounts_if_allowed(user_id, base_price, kind)
+    total_percent = int(info.get("percent") or 0)
+
+    data_full = {
+        "user_id": user_id,
+        "product_id": product_id,
+        "product_name": product_name,
+        "price": final_price,
+        "player_id": player_id,
+        "created_at": datetime.utcnow().isoformat(),
+        "expire_at": expire_at.isoformat(),
+        # اختيارية:
+        "original_price": base_price,
+        "discount_percent": total_percent,
+        "discount_id": None,  # لدينا أكثر من خصم محتمل؛ نتركه None
+        "discount_applied_at": datetime.utcnow().isoformat() if total_percent > 0 else None,
+    }
+
+    # إدراج مرن: إن فشل بسبب أعمدة غير موجودة، نُعيد الإدراج بدون الأعمدة الاختيارية
+    try:
+        get_table(PURCHASES_TABLE).insert(data_full).execute()
+    except Exception:
+        data_min = {
+            "user_id": user_id,
+            "product_id": product_id,
+            "product_name": product_name,
+            "price": final_price,
+            "player_id": player_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "expire_at": expire_at.isoformat(),
+        }
+        get_table(PURCHASES_TABLE).insert(data_min).execute()
+
+    # خصم الرصيد بالمبلغ النهائي فقط
+    deduct_balance(user_id, final_price, f"شراء {product_name}")
+
+
+# ================= الفواتير =================
+
+def add_bill_and_units_purchase(user_id: int,
+                                bill_name: str,
+                                price: int,
+                                account_number: str,
+                                provider_name: str | None = None,
+                                category: str | None = None):
+    """
+    إدراج فاتورة في bill_and_units_purchases:
+      - يُطبّق خصمين (أدمن + إحالة) إلا إذا كانت الفاتورة من نوع "جملة كازية" مع (سيرياتيل/MTN) → ممنوع خصم.
+    """
+    base_price = int(price)
+
+    # استثناء "جملة كازية" لمشغلي سيرياتيل/MTN
+    if _bill_is_excluded(bill_name=bill_name, provider_name=provider_name, category=category):
+        final_price = base_price
+    else:
+        final_price, _ = _apply_discounts_if_allowed(user_id, base_price, kind="bill")
+
+    data = {
+        "user_id": user_id,
+        "bill_name": bill_name,
+        "price": final_price,
+        "account_number": account_number,
+        "provider_name": provider_name,
+        "category": category,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    get_table(BILL_TABLE).insert(data).execute()
+    deduct_balance(user_id, final_price, f"سداد فاتورة {bill_name}")
+
+
+# ================= الجامعة =================
+
+def add_university_fee_purchase(user_id: int,
+                                university_name: str,
+                                price: int,
+                                student_number: str):
+    """
+    إدراج رسوم جامعة مع تطبيق الخصمين (أدمن + إحالة).
+    """
+    base_price = int(price)
+    final_price, _ = _apply_discounts_if_allowed(user_id, base_price, kind="university")
+
+    data = {
+        "user_id": user_id,
+        "university_name": university_name,
+        "price": final_price,
+        "student_number": student_number,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    get_table(UNIVERSITY_FEES_TABLE).insert(data).execute()
+    deduct_balance(user_id, final_price, f"رسوم جامعة {university_name}")
+
+
+# ================= الإنترنت =================
+
+def add_internet_provider_purchase(user_id: int,
+                                   provider_name: str,
+                                   price: int,
+                                   account_number: str):
+    """
+    إدراج شراء مزوّد إنترنت مع تطبيق الخصمين (أدمن + إحالة).
+    """
+    base_price = int(price)
+    final_price, _ = _apply_discounts_if_allowed(user_id, base_price, kind="internet")
+
+    data = {
+        "user_id": user_id,
+        "provider_name": provider_name,
+        "price": final_price,
+        "account_number": account_number,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    get_table(INTERNET_PROVIDERS_TABLE).insert(data).execute()
+    deduct_balance(user_id, final_price, f"اشتراك إنترنت {provider_name}")
+
+
+# ================= قراءات/عروض (كما كانت تقريبًا) =================
 
 def get_purchases(user_id: int, limit: int = 10):
     now = datetime.utcnow()
     table = get_table(PURCHASES_TABLE)
-    # تنظيف القديمة
     table.delete().eq("user_id", user_id).lt("expire_at", now.isoformat()).execute()
-    # جلب الفعّالة فقط
     response = (
         table.select("product_name,price,created_at,player_id,expire_at")
         .eq("user_id", user_id)
@@ -183,76 +331,6 @@ def get_purchases(user_id: int, limit: int = 10):
         items.append(f"{row.get('product_name')} ({row.get('price')} ل.س) - آيدي/رقم: {row.get('player_id')} - بتاريخ {ts}")
     return items
 
-def add_purchase(user_id: int, product_id, product_name: str, price: int, player_id: str):
-    """
-    إدراج شراء مع تطبيق أفضل خصم فعّال للحظة الشراء (يتجاهل المنتهي آليًا).
-    نسجّل الحقول الاختيارية لو وُجدت أعمدتها، ون fallback للحقول الأساسية إذا لم توجد.
-    ثم نخصم المبلغ النهائي فقط عبر RPC.
-    """
-    expire_at = datetime.utcnow() + timedelta(hours=15)
-
-    # 1) احسب أفضل خصم فعّال للمستخدم (global/user) – يتجاهل المنتهي
-    base_price = int(price)
-    final_price = base_price
-    disc_id = None
-    disc_percent = 0
-
-    d = _disc_get_active_for_user(user_id)
-    if d:
-        try:
-            disc_percent = int(d.get("percent") or 0)
-            disc_id = d.get("id")
-            cut = (base_price * disc_percent) // 100
-            final_price = max(0, base_price - cut)
-        except Exception:
-            final_price = base_price
-            disc_id = None
-            disc_percent = 0
-
-    # 2) حاول الإدراج مع الحقول الإضافية؛ وإن فشل أعد الإدراج بالحد الأدنى
-    data_full = {
-        "user_id": user_id,
-        "product_id": product_id,
-        "product_name": product_name,
-        "price": final_price,                     # السعر بعد الخصم
-        "player_id": player_id,
-        "created_at": datetime.utcnow().isoformat(),
-        "expire_at": expire_at.isoformat(),
-        # اختياري:
-        "original_price": base_price,
-        "discount_percent": disc_percent,
-        "discount_id": disc_id,
-        "discount_applied_at": datetime.utcnow().isoformat() if disc_id else None,
-    }
-    try:
-        ins = get_table(PURCHASES_TABLE).insert(data_full).execute()
-        purchase_id = (ins.data[0]["id"] if getattr(ins, "data", None) else None)
-    except Exception:
-        # إدراج بالحد الأدنى
-        data_min = {
-            "user_id": user_id,
-            "product_id": product_id,
-            "product_name": product_name,
-            "price": final_price,
-            "player_id": player_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "expire_at": expire_at.isoformat(),
-        }
-        ins = get_table(PURCHASES_TABLE).insert(data_min).execute()
-        purchase_id = (ins.data[0]["id"] if getattr(ins, "data", None) else None)
-
-    # 3) خصم الرصيد بالمبلغ النهائي فقط
-    deduct_balance(user_id, final_price, f"شراء {product_name}")
-
-    # 4) سجّل استخدام الخصم (إن وُجد id)
-    if disc_id:
-        try:
-            _disc_record_use(disc_id, user_id, base_price, final_price, purchase_id)
-        except Exception:
-            pass
-
-
-# ================= السجلات المالية =================
 
 def get_transfers(user_id: int, limit: int = 10):
     response = (
@@ -270,6 +348,7 @@ def get_transfers(user_id: int, limit: int = 10):
         desc = row.get("description") or ""
         transfers.append(f"{desc} ({amount:+,} ل.س) في {ts}")
     return transfers
+
 
 def get_deposit_transfers(user_id: int, limit: int = 10):
     resp = (
@@ -292,8 +371,6 @@ def get_deposit_transfers(user_id: int, limit: int = 10):
     return out
 
 
-# ================= المنتجات =================
-
 def get_all_products():
     response = get_table(PRODUCTS_TABLE).select("*").order("id", desc=True).execute()
     return response.data or []
@@ -302,201 +379,10 @@ def get_product_by_id(product_id: int):
     response = get_table(PRODUCTS_TABLE).select("*").eq("id", product_id).limit(1).execute()
     return response.data[0] if response.data else None
 
-# مساعد انتقائي
-def _select_single(table_name, field, value):
-    response = get_table(table_name).select(field).eq(field, value).limit(1).execute()
-    return response.data[0][field] if response.data else None
 
-
-# ================= جداول مشتريات متخصصة (عرض/قراءة) =================
-# (كما هي)
-
-def get_ads_purchases(user_id: int):
-    response = get_table('ads_purchases').select("*").eq("user_id", user_id).execute()
-    ads_items = []
-    for item in response.data or []:
-        ads_items.append(f"إعلان: {item['ad_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return ads_items if ads_items else ["لا توجد مشتريات إعلانات."]
-
-def get_bill_and_units_purchases(user_id: int):
-    response = get_table('bill_and_units_purchases').select("*").eq("user_id", user_id).execute()
-    bills_items = []
-    for item in response.data or []:
-        bills_items.append(f"فاتورة: {item['bill_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return bills_items if bills_items else ["لا توجد مشتريات فواتير ووحدات."]
-
-def get_cash_transfer_purchases(user_id: int):
-    response = get_table('cash_transfer_purchases').select("*").eq("user_id", user_id).execute()
-    cash_items = []
-    for item in response.data or []:
-        cash_items.append(f"تحويل نقدي: {item['transfer_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return cash_items if cash_items else ["لا توجد مشتريات تحويل نقدي."]
-
-def get_companies_transfer_purchases(user_id: int):
-    response = get_table('companies_transfer_purchases').select("*").eq("user_id", user_id).execute()
-    company_items = []
-    for item in response.data or []:
-        company_items.append(f"تحويل شركة: {item['company_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return company_items if company_items else ["لا توجد مشتريات تحويلات شركات."]
-
-def get_internet_providers_purchases(user_id: int):
-    response = get_table('internet_providers_purchases').select("*").eq("user_id", user_id).execute()
-    internet_items = []
-    for item in response.data or []:
-        internet_items.append(f"مزود إنترنت: {item['provider_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return internet_items if internet_items else ["لا توجد مشتريات مزودي إنترنت."]
-
-def get_university_fees_purchases(user_id: int):
-    response = get_table('university_fees_purchases').select("*").eq("user_id", user_id).execute()
-    uni_items = []
-    for item in response.data or []:
-        uni_items.append(f"رسوم جامعة: {item['university_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return uni_items if uni_items else ["لا توجد مشتريات رسوم جامعية."]
-
-def get_wholesale_purchases(user_id: int):
-    response = get_table('wholesale_purchases').select("*").eq("user_id", user_id).execute()
-    wholesale_items = []
-    for item in response.data or []:
-        wholesale_items.append(f"جملة: {item['wholesale_name']} ({item['price']} ل.س) - تاريخ: {item['created_at']}")
-    return wholesale_items if wholesale_items else ["لا توجد مشتريات جملة."]
-
-# دالة للتحقق من موافقة الأدمن (تعطيلها بإرجاع True دائماً)
-def user_has_admin_approval(user_id):
-    return True
-
-
-# ================= إضافات العرض الموحّد =================
-# (كما هي)
-def get_all_purchases_structured(user_id: int, limit: int = 50):
-    from datetime import datetime as _dt
-    items = []
-
-    try:
-        resp = (
-            get_table(PURCHASES_TABLE)
-            .select("id,product_name,price,created_at,player_id")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit * 2)
-            .execute()
-        )
-        for r in (resp.data or []):
-            items.append({
-                "title": r.get("product_name") or "منتج",
-                "price": int(r.get("price") or 0),
-                "created_at": r.get("created_at"),
-                "id_or_phone": r.get("player_id"),
-            })
-    except Exception:
-        pass
-
-    tables = [
-        ("game_purchases", "product_name"),
-        ("ads_purchases", "ad_name"),
-        ("bill_and_units_purchases", "bill_name"),
-        ("cash_transfer_purchases", "transfer_name"),
-        ("companies_transfer_purchases", "company_name"),
-        ("internet_providers_purchases", "provider_name"),
-        ("university_fees_purchases", "university_name"),
-        ("wholesale_purchases", "wholesale_name"),
-    ]
-    probe = ["player_id","phone","number","msisdn","account","account_number","student_id","student_number","target_id","target","line","game_id"]
-    for tname, title_field in tables:
-        try:
-            resp = (
-                get_table(tname)
-                .select("*")
-                .eq("user_id", user_id)
-                .order("created_at", desc=True)
-                .limit(limit * 2)
-                .execute()
-            )
-            for r in (resp.data or []):
-                idp = None
-                for k in probe:
-                    if k in r and r.get(k):
-                        idp = r.get(k)
-                        break
-                items.append({
-                    "title": r.get(title_field) or tname,
-                    "price": int(r.get("price") or 0),
-                    "created_at": r.get("created_at"),
-                    "id_or_phone": idp,
-                })
-        except Exception:
-            continue
-
-    def _to_sec(s: str):
-        if not s:
-            return None
-        s2 = s[:19].replace("T", " ")
-        try:
-            return int(_dt.fromisoformat(s2).timestamp())
-        except Exception:
-            return None
-
-    seen_lastsec = {}
-    uniq = []
-    for it in sorted(items, key=lambda x: x.get("created_at") or "", reverse=True):
-        key = (it.get("title"), int(it.get("price") or 0), it.get("id_or_phone"))
-        sec = _to_sec(it.get("created_at"))
-        last = seen_lastsec.get(key)
-        if last is not None and sec is not None and abs(sec - last) <= 5:
-            continue
-        if sec is not None:
-            seen_lastsec[key] = sec
-        uniq.append(it)
-        if len(uniq) >= limit:
-            break
-    return uniq
-
-def get_wallet_transfers_only(user_id: int, limit: int = 50):
-    resp = (
-        get_table(TRANSACTION_TABLE)
-        .select("description,amount,timestamp")
-        .eq("user_id", user_id)
-        .order("timestamp", desc=True)
-        .limit(300)
-        .execute()
-    )
-    out = []
-    last = {}
-    for row in (resp.data or []):
-        desc = (row.get("description") or "").strip()
-        amount = int(row.get("amount") or 0)
-
-        if not ((amount > 0 and desc.startswith("شحن محفظة")) or
-                (amount < 0 and desc.startswith("تحويل إلى"))):
-            continue
-
-        ts_raw = (row.get("timestamp") or "")[:19].replace("T", " ")
-        try:
-            dt = datetime.fromisoformat(ts_raw)
-            ts_sec = int(dt.timestamp())
-        except Exception:
-            ts_sec = None
-
-        k = (desc, amount)
-        if ts_sec is not None and k in last and abs(ts_sec - last[k]) <= 3:
-            continue
-        if ts_sec is not None:
-            last[k] = ts_sec
-
-        out.append({"description": desc, "amount": amount, "timestamp": ts_raw})
-        if len(out) >= limit:
-            break
-    return out
-
-
-# ===== واجهات الحجز =====
+# ================= حجز الرصيد (RPC) =================
 
 def create_hold(user_id: int, amount: int, order_or_reason=None, ttl_seconds: int = 900):
-    """
-    يقبل UUID أو وصف نصّي:
-      - لو البراميتر UUID: نستخدمه كـ order_id.
-      - لو None أو نص/أي شيء تاني: نولّد UUID جديد ونستخدمه كـ order_id.
-    دائمًا نمرّر UUID صالح للـ RPC لتفادي 22P02.
-    """
     order_id = str(order_or_reason) if _is_uuid_like(order_or_reason) else str(uuid.uuid4())
     return _rpc_create_hold(user_id, int(amount), order_id, ttl_seconds)
 
