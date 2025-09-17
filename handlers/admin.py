@@ -682,7 +682,6 @@ def register(bot, history):
         if "__admin_pending_handlers__" in globals():
             globals()["__admin_pending_handlers__"].clear()
     except Exception as _e:
-        import logging
         logging.exception("Admin: failed to replay pending handlers: %s", _e)
     # سجل أزرار الأدمن وقوائمها
     try:
@@ -876,7 +875,6 @@ def register(bot, history):
             exists = bool(q.data)  # عدّل حسب شكل الاسترجاع عندك (مثلاً: len(q.data) > 0)
         except Exception as e:
             # سجّل الخطأ لمرجعية سريعة
-            import logging
             logging.exception("User lookup failed for uid=%s", uid)
             return bot.reply_to(m, "⚠️ حدث خطأ أثناء التحقق من المستخدم. حاول لاحقًا.")
 
@@ -2730,7 +2728,6 @@ def _register_admin_roles(bot):
             rows = getattr(r, "data", None) or []
             return rows[0] if rows else None
         except Exception as e:
-            import logging
             logging.exception("manage_user: DB error: %s", e)
             return None
 
@@ -3056,7 +3053,6 @@ def _register_admin_roles(bot):
             exists = bool(q.data)  # عدّل حسب شكل الاسترجاع عندك (مثلاً: len(q.data) > 0)
         except Exception as e:
             # سجّل الخطأ لمرجعية سريعة
-            import logging
             logging.exception("User lookup failed for uid=%s", uid)
             return bot.reply_to(m, "⚠️ حدث خطأ أثناء التحقق من المستخدم. حاول لاحقًا.")
 
@@ -4910,7 +4906,6 @@ def _register_admin_roles(bot):
             rows = getattr(r, "data", None) or []
             return rows[0] if rows else None
         except Exception as e:
-            import logging
             logging.exception("manage_user: DB error: %s", e)
             return None
 
