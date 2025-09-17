@@ -687,7 +687,8 @@ def register(bot, history):
     try:
         _register_admin_roles(bot)
     except Exception as __e:
-        import logging; logging.exception("Admin roles setup failed: %s", __e)
+        logging.exception("Admin roles setup failed: %s", __e)
+
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
