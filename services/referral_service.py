@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
+import time  # NEW
 
 from telebot import apihelper
 from database.db import get_table
@@ -23,6 +24,24 @@ DISCOUNTS_TBL = "discounts"
 ONE_DAY = timedelta(hours=24)
 REFERRAL_DISCOUNT_PERCENT = 1       # نسبة خصم الإحالة
 REFERRAL_DISCOUNT_HOURS   = 14      # مدة خصم الإحالة بعد الاكتمال (ساعات)
+
+# ---------- تنفيذ Supabase مع إعادة محاولات ----------
+_RETRIES = 4
+_BACKOFF = 1.5  # ثواني
+
+def _sb_exec(rb):
+    """
+    يشغّل .execute() على أي RequestBuilder من supabase-py مع إعادة المحاولات.
+    استخدمه هكذا: _sb_exec(get_table(...).select(...).eq(...))
+    """
+    for i in range(_RETRIES):
+        try:
+            return rb.execute()
+        except Exception as e:
+            if i == _RETRIES - 1:
+                raise
+            logging.warning(f"[referral] retry {i+1}/{_RETRIES}: {e}")
+            time.sleep(_BACKOFF * (i + 1))
 
 
 def _ok_member_status(s: str) -> bool:
@@ -55,14 +74,13 @@ def get_or_create_today_goal(referrer_id: int,
     expires = now + ttl
 
     # هل لديه هدف غير منتهي اليوم؟
-    res = (
+    res = _sb_exec(
         get_table(GOALS_TBL)
         .select("*")
         .eq("referrer_id", referrer_id)
         .in_("status", ["open", "satisfied", "redeemed"])
         .order("created_at", desc=True)
         .limit(1)
-        .execute()
     )
     rows = getattr(res, "data", []) or []
     if rows:
@@ -84,30 +102,28 @@ def get_or_create_today_goal(referrer_id: int,
         "status": "open",
         "meta": {"channel_username": CHANNEL_USERNAME, "bot": BOT_USERNAME},
     }
-    g = get_table(GOALS_TBL).insert(payload).execute()
+    g = _sb_exec(get_table(GOALS_TBL).insert(payload))
     data = getattr(g, "data", []) or []
     return data[0] if data else payload
 
 
 def goal_progress(goal_id: str) -> Tuple[int, int, bool]:
     """يعيد (verified_count, required_count, is_satisfied)."""
-    res = (
+    res = _sb_exec(
         get_table("referral_progress")
         .select("*")
         .eq("goal_id", goal_id)
         .limit(1)
-        .execute()
     )
     rows = getattr(res, "data", []) or []
     if not rows:
         # fallback في حال عدم وجود الـ view
-        gq = get_table(GOALS_TBL).select("*").eq("id", goal_id).limit(1).execute()
+        gq = _sb_exec(get_table(GOALS_TBL).select("*").eq("id", goal_id).limit(1))
         g = (getattr(gq, "data", []) or [{}])[0]
-        rq = (
+        rq = _sb_exec(
             get_table(JOINS_TBL)
             .select("id, verified_at, still_member")
             .eq("goal_id", goal_id)
-            .execute()
         )
         cnt = sum(1 for r in (getattr(rq, "data", []) or []) if r.get("verified_at") and r.get("still_member"))
         req = int(g.get("required_count") or 2)
@@ -126,7 +142,7 @@ def attach_referred_start(referrer_id: int, goal_token: str, referred_id: int) -
     تُستدعى عند /start ref-<referrer_id>-<token>
     تقوم بإنشاء سجل join بدون تحقق.
     """
-    g = (
+    g = _sb_exec(
         get_table(GOALS_TBL)
         .select("*")
         .eq("referrer_id", int(referrer_id))
@@ -134,7 +150,6 @@ def attach_referred_start(referrer_id: int, goal_token: str, referred_id: int) -
         .in_("status", ["open", "satisfied"])
         .order("created_at", desc=True)
         .limit(1)
-        .execute()
     )
     rows = getattr(g, "data", []) or []
     if not rows:
@@ -149,7 +164,7 @@ def attach_referred_start(referrer_id: int, goal_token: str, referred_id: int) -
     }
     try:
         # unique (referrer_id, referred_id) يحمي من التكرار
-        get_table(JOINS_TBL).insert(payload, upsert=True).execute()
+        _sb_exec(get_table(JOINS_TBL).insert(payload, upsert=True))
     except Exception:
         pass
     return "✅ تم ربطك بمُحيلك، اشترك في القناة ثم اضغط زر (تحققت)."
@@ -163,14 +178,13 @@ def verify_and_count(bot, referrer_id: int, referred_id: int) -> Tuple[bool, str
     - يحدد verified_at, still_member=True
     - إن اكتمل العدد: ينشئ خصم user بنسبة REFERRAL_DISCOUNT_PERCENT لمدة 14 ساعة من الآن.
     """
-    gq = (
+    gq = _sb_exec(
         get_table(GOALS_TBL)
         .select("*")
         .eq("referrer_id", int(referrer_id))
         .in_("status", ["open", "satisfied"])
         .order("created_at", desc=True)
         .limit(1)
-        .execute()
     )
     goals = getattr(gq, "data", []) or []
     if not goals:
@@ -186,12 +200,11 @@ def verify_and_count(bot, referrer_id: int, referred_id: int) -> Tuple[bool, str
             "last_checked_at": _now().isoformat(),
             "still_member": bool(is_mem),
         }
-        (
+        _sb_exec(
             get_table(JOINS_TBL)
             .update(upd)
             .eq("goal_id", goal["id"])
             .eq("referred_id", int(referred_id))
-            .execute()
         )
     except Exception as e:
         logging.warning(f"[referral] update join failed: {e}")
@@ -217,11 +230,10 @@ def verify_and_count(bot, referrer_id: int, referred_id: int) -> Tuple[bool, str
                 meta={"reason": "referral", "goal_id": str(goal["id"])}
             )
             did = created.get("id") if isinstance(created, dict) else None
-            (
+            _sb_exec(
                 get_table(GOALS_TBL)
                 .update({"status": "satisfied", "granted_discount_id": did})
                 .eq("id", goal["id"])
-                .execute()
             )
             return True, f"🎉 تم تفعيل خصم {REFERRAL_DISCOUNT_PERCENT}% لمدة {REFERRAL_DISCOUNT_HOURS} ساعة."
         except Exception as e:
@@ -238,21 +250,20 @@ def revalidate_user_discount(bot, user_id: int) -> bool:
     يُستدعى قبل الدفع: يعيد فحص اشتراك الأصدقاء المؤثّرين.
     إن لم يعد العدد مكتملاً: نعطّل خصم الإحالات (لا نعطّل خصم الإدمن).
     """
-    gq = (
+    gq = _sb_exec(
         get_table(GOALS_TBL)
         .select("*")
         .eq("referrer_id", int(user_id))
         .in_("status", ["open", "satisfied"])
         .order("created_at", desc=True)
         .limit(1)
-        .execute()
     )
     goals = getattr(gq, "data", []) or []
     if not goals:
         return False
 
     goal = goals[0]
-    jq = get_table(JOINS_TBL).select("*").eq("goal_id", goal["id"]).execute()
+    jq = _sb_exec(get_table(JOINS_TBL).select("*").eq("goal_id", goal["id"]))
     joins = getattr(jq, "data", []) or []
 
     still = 0
@@ -260,11 +271,10 @@ def revalidate_user_discount(bot, user_id: int) -> bool:
         rid = int(j.get("referred_id"))
         is_mem = _is_member(bot, rid)
         try:
-            (
+            _sb_exec(
                 get_table(JOINS_TBL)
                 .update({"still_member": bool(is_mem), "last_checked_at": _now().isoformat()})
                 .eq("id", j["id"])
-                .execute()
             )
         except Exception:
             pass
@@ -281,7 +291,7 @@ def revalidate_user_discount(bot, user_id: int) -> bool:
         except Exception:
             if not ok:
                 try:
-                    get_table(DISCOUNTS_TBL).update({"active": False}).eq("id", did).execute()
+                    _sb_exec(get_table(DISCOUNTS_TBL).update({"active": False}).eq("id", did))
                 except Exception:
                     pass
     return ok
@@ -290,15 +300,14 @@ def revalidate_user_discount(bot, user_id: int) -> bool:
 def expire_due_goals() -> None:
     """تُستدعى من المهمة المجدولة لتعليم الأهداف المنتهية."""
     try:
-        get_table("rpc").rpc("expire_old_referral_goals", {}).execute()
+        _sb_exec(get_table("rpc").rpc("expire_old_referral_goals", {}))
     except Exception:
         try:
-            (
+            _sb_exec(
                 get_table(GOALS_TBL)
                 .update({"status": "expired"})
                 .lte("expires_at", _now().isoformat())
                 .in_("status", ["open", "satisfied"])
-                .execute()
             )
         except Exception:
             pass
