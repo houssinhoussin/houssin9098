@@ -6,9 +6,9 @@ import logging
 
 from database.db import get_table
 
-# محاولة استخدام ساعة المشروع، وإلا فـ fallback
+# ساعة موحّدة (UTC)
 try:
-    from utils.time import now as _now  # يُفترض أنها تُرجع UTC-aware datetime
+    from utils.time import now as _now  # يفترض أنها ترجع datetime مع timezone.utc
 except Exception:
     def _now() -> datetime:
         return datetime.now(timezone.utc)
@@ -16,6 +16,8 @@ except Exception:
 DISCOUNTS_TABLE = "discounts"
 USES_TABLE      = "discount_uses"
 
+
+# --------- أدوات وقتية ---------
 
 def _parse_dt(val) -> Optional[datetime]:
     if not val:
@@ -30,10 +32,25 @@ def _parse_dt(val) -> Optional[datetime]:
         return None
     return None
 
+def _time_window_filter(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    فلترة زمنية: starts_at <= الآن و (ends_at is null أو ends_at > الآن)
+    """
+    now = _now()
+    ok: List[Dict[str, Any]] = []
+    for r in rows:
+        st = _parse_dt(r.get("starts_at")) or now
+        en = _parse_dt(r.get("ends_at"))
+        if st <= now and (en is None or en > now):
+            ok.append(r)
+    return ok
+
+
+# --------- عمليات أساسية على الخصومات ---------
 
 def list_discounts(limit: int = 100) -> List[Dict[str, Any]]:
     """
-    ترجع آخر الخصومات مع حقل computed: effective_active = active and not expired (حتى الآن).
+    عرض آخر الخصومات مع حقل computed: effective_active = active and not expired (حتى الآن).
     """
     try:
         res = (
@@ -64,7 +81,9 @@ def create_discount(scope: str,
                     source: str | None = None,
                     meta: dict | None = None):
     """
-    ينشئ خصمًا جديدًا. إن زوّدت hours أو days سيتم ضبط ends_at تلقائيًا.
+    إنشاء خصم جديد. لو مرّرت hours/days سيتحدد ends_at تلقائيًا.
+    scope: 'global' | 'user' | 'product' | 'code'
+    source: مثال 'admin' أو 'referral'
     """
     scope = (scope or "global").lower()
     percent = max(0, min(int(percent or 0), 100))
@@ -78,7 +97,6 @@ def create_discount(scope: str,
     if scope == "user" and user_id:
         row["user_id"] = int(user_id)
 
-    # مدة الانتهاء: الساعات تسبق الأيام
     delta = None
     if hours and int(hours) > 0:
         delta = timedelta(hours=int(hours))
@@ -97,7 +115,7 @@ def create_discount(scope: str,
 
 
 def end_discount_now(did: str) -> bool:
-    """إنهاء فوري: يعطّل ويضبط ends_at = الآن."""
+    """تعطيل فوري وتعيين ends_at = الآن."""
     try:
         get_table(DISCOUNTS_TABLE).update(
             {"active": False, "ends_at": _now().isoformat()}
@@ -126,51 +144,15 @@ def set_discount_active(did: str, active: bool) -> bool:
         return False
 
 
-def _time_window_filter(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """فلترة الوقت: starts_at <= الآن و (ends_at is null أو > الآن)."""
-    now = _now()
-    ok: List[Dict[str, Any]] = []
-    for r in rows:
-        st = _parse_dt(r.get("starts_at")) or now
-        en = _parse_dt(r.get("ends_at"))
-        if st <= now and (en is None or en > now):
-            ok.append(r)
-    return ok
-
-def _list_active_for_user(user_id: int):
-    """
-    ترجّع كل الخصومات الفعّالة زمنيًا لهذا المستخدم (global + user) بدون تجميع.
-    """
-    try:
-        res = get_table(DISCOUNTS_TABLE).select("*").eq("active", True).execute()
-        rows = getattr(res, "data", []) or []
-    except Exception:
-        rows = []
-
-    # فلترة زمنية: starts_at <= الآن و (ends_at is null أو > الآن)
-    rows = _time_window_filter(rows)
-
-    out = []
-    for r in rows:
-        sc = (r.get("scope") or "global").lower()
-        if sc == "global":
-            out.append(r)
-        elif sc == "user" and int(r.get("user_id") or 0) == int(user_id):
-            out.append(r)
-    return out
+# --------- اختيار أعلى خصم فعّال (قديم) ---------
 
 def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     """
-    يرجع أعلى خصم فعّال وغير منتهٍ للمستخدم (خاص أو عام).
-    - لا يراكِم خصمين؛ نختار الأعلى فقط.
+    يعيد أعلى خصم فعّال (global أو user) للمستخدم، بدون جمع.
+    يبقى موجودًا للتوافق الخلفي.
     """
     try:
-        res = (
-            get_table(DISCOUNTS_TABLE)
-            .select("*")
-            .eq("active", True)
-            .execute()
-        )
+        res = get_table(DISCOUNTS_TABLE).select("*").eq("active", True).execute()
         rows: List[Dict[str, Any]] = getattr(res, "data", []) or []
     except Exception as e:
         logging.exception("[discounts] get_active_for_user failed: %s", e)
@@ -181,12 +163,7 @@ def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     best: Optional[Dict[str, Any]] = None
     for r in rows:
         sc = (r.get("scope") or "global").lower()
-        if sc == "global":
-            ok = True
-        elif sc == "user":
-            ok = int(r.get("user_id") or 0) == int(user_id)
-        else:
-            ok = False
+        ok = (sc == "global") or (sc == "user" and int(r.get("user_id") or 0) == int(user_id))
         if not ok:
             continue
         if (best is None) or (int(r.get("percent") or 0) > int(best.get("percent") or 0)):
@@ -194,55 +171,57 @@ def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
     return best
 
 
-def apply_discount(user_id: int, amount_syp: int) -> Tuple[int, Optional[Dict[str, Any]]]:
-    """
-    يطبق أعلى خصم فعّال. يرجع (السعر_بعد_الخصم, {id, percent}) أو (السعر, None).
-    """
+# --------- جمع خصم الأدمن + خصم الإحالة ---------
+
+def _list_active_for_user(user_id: int) -> List[Dict[str, Any]]:
     try:
-        d = get_active_for_user(user_id)
-        if not d:
-            return int(amount_syp), None
-        pct = int(d.get("percent") or 0)
-        after = int(round(amount_syp * (100 - pct) / 100.0))
-        return after, {"id": d.get("id"), "percent": pct}
-    except Exception as e:
-        logging.exception("[discounts] apply failed: %s", e)
-        return int(amount_syp), None
-        
-def apply_discount_stacked(user_id: int, amount_syp: int):
+        res = get_table(DISCOUNTS_TABLE).select("*").eq("active", True).execute()
+        rows = getattr(res, "data", []) or []
+    except Exception:
+        rows = []
+    rows = _time_window_filter(rows)
+
+    out = []
+    for r in rows:
+        sc = (r.get("scope") or "global").lower()
+        if sc == "global":
+            out.append(r)
+        elif sc == "user" and int(r.get("user_id") or 0) == int(user_id):
+            out.append(r)
+        # يمكن لاحقًا دعم product/code إذا رغبت
+    return out
+
+
+def apply_discount_stacked(user_id: int, amount_syp: int) -> Tuple[int, Dict[str, Any]]:
     """
-    يجمع خصم الإدمن + خصم الإحالة:
-      - إدمن = أي خصم مصدره NULL أو 'admin' (global/user) ← نأخذ أعلى نسبة منها
-      - إحالة = أي خصم مصدره 'referral' ← نأخذ أعلى نسبة منها
-      - الإجمالي = إدمن + إحالة (مع سقف 100%)
-    يرجّع (السعر بعد الخصم, {"percent": الإجمالي, "breakdown":[...]})
+    يجمع أعلى خصم من نوع 'admin' (أو NULL) + أعلى خصم من نوع 'referral'.
+    السقف 100%. يرجع (السعر بعد الخصم, info={percent,breakdown})
     """
     rows = _list_active_for_user(user_id)
 
-    # أعلى خصم إدمن (نعتبر NULL = admin)
-    admin_pct = 0
+    admin_pct = 0  # أي خصم مصدره admin أو NULL
+    referral_pct = 0
+
     for r in rows:
         src = (r.get("source") or "admin").lower()
-        if src != "referral":
-            admin_pct = max(admin_pct, int(r.get("percent") or 0))
+        pct = int(r.get("percent") or 0)
+        if src == "referral":
+            referral_pct = max(referral_pct, pct)
+        else:
+            admin_pct = max(admin_pct, pct)
 
-    # أعلى خصم إحالة
-    referral_pct = 0
-    for r in rows:
-        if (r.get("source") or "").lower() == "referral":
-            referral_pct = max(referral_pct, int(r.get("percent") or 0))
-
-    total_pct = min(100, admin_pct + referral_pct)  # سقف 100%
-    after = int(round(amount_syp * (100 - total_pct) / 100.0))
-
-    breakdown = []
+    total_pct = min(100, admin_pct + referral_pct)
+    after = int(round(int(amount_syp) * (100 - total_pct) / 100.0))
+    info = {"percent": total_pct, "breakdown": []}
     if admin_pct:
-        breakdown.append({"source": "admin", "percent": admin_pct})
+        info["breakdown"].append({"source": "admin", "percent": admin_pct})
     if referral_pct:
-        breakdown.append({"source": "referral", "percent": referral_pct})
+        info["breakdown"].append({"source": "referral", "percent": referral_pct})
 
-    return after, {"percent": total_pct, "breakdown": breakdown, "id": None}
+    return after, info
 
+
+# --------- تسجيل استخدام الخصم ---------
 
 def record_discount_use(discount_id: str, user_id: int, amount_before: int, amount_after: int, purchase_id: Optional[int] = None) -> None:
     try:
@@ -255,23 +234,3 @@ def record_discount_use(discount_id: str, user_id: int, amount_before: int, amou
         }).execute()
     except Exception as e:
         logging.exception("[discounts] record use failed: %s", e)
-
-
-def discount_stats(days: int = 30) -> List[str]:
-    """
-    يرجع نصوصًا تلخيصية بسيطة للاستخدام.
-    """
-    try:
-        res = get_table(USES_TABLE).select(
-            "discount_id, user_id, amount_before, amount_after, created_at"
-        ).limit(500).execute()
-        rows = getattr(res, "data", []) or []
-    except Exception:
-        rows = []
-    if not rows:
-        return ["لا يوجد استخدامات."]
-    total_saved = sum(
-        (int(r.get("amount_before") or 0) - int(r.get("amount_after") or 0))
-        for r in rows
-    )
-    return [f"عدد الاستخدامات: {len(rows)}", f"إجمالي التخفيض: {total_saved:,} ل.س"]
