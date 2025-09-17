@@ -1,5 +1,6 @@
 # database/db.py
 import os
+import logging  # NEW
 from typing import Optional, Any, Dict
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -25,8 +26,19 @@ if not SUPABASE_KEY:
 if not SUPABASE_URL.startswith("http"):
     raise RuntimeError("SUPABASE_URL must start with http/https")
 
-# عميل موحّد (Singleton)
-_supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# عميل موحّد (Singleton) مع ضبط httpx (و Fallback تلقائي)
+try:
+    import httpx  # NEW
+    _httpx = httpx.Client(
+        http2=False,  # يخفف مشاكل ReadError في بعض البيئات (Render/HTTP2)
+        timeout=httpx.Timeout(10.0, connect=10.0, read=10.0),
+        limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+    )
+    _supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY, http_client=_httpx)  # NEW
+except Exception as e:  # Fallback إذا كانت نسخة supabase-py لا تدعم http_client
+    logging.warning(f"[db] using default http client due to: {e}")
+    _supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY")
 
