@@ -52,22 +52,30 @@ def client() -> Client:
 def get_table(table_name: Optional[str] = None):
     """
     أرجِع كائن الجدول المطلوب.
-    لو لم يُمرَّر اسم جدول، نستخدم DEFAULT_TABLE (من البيئة أو الافتراضي).
+    لو لم يُمرَّر اسم جدول، نستخدم DEFAULT_TABLE.
+    كما نستبدل القيمة الحرفية 'USERS_TABLE' بالقيمة الفعلية DEFAULT_TABLE.
     """
     name = (table_name or DEFAULT_TABLE)
+    if name == "USERS_TABLE":
+        name = DEFAULT_TABLE
     if not name:
         raise RuntimeError("No table name provided and SUPABASE_TABLE_NAME is not set.")
     return _supabase.table(name)
+
 
 
 def table(table_name: Optional[str] = None):
     """
     بديل مريح: لو ما زوّدت اسم جدول، يستخدم DEFAULT_TABLE.
+    كذلك نحول 'USERS_TABLE' إلى DEFAULT_TABLE تلقائيًا.
     """
     name = (table_name or DEFAULT_TABLE)
+    if name == "USERS_TABLE":
+        name = DEFAULT_TABLE
     if not name:
         raise RuntimeError("No table name provided and SUPABASE_TABLE_NAME is not set.")
     return _supabase.table(name)
+
 
 
 # ---------- دوال مساعدة لجدول المستخدمين (USERS_TABLE) ----------
