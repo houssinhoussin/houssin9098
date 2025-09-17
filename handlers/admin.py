@@ -106,7 +106,17 @@ except NameError:
             return noop
     bot = _BotRecorder()
 # ===== End proxy =====
-USERS_TABLE = "houssin363"
+try:
+    from config import SUPABASE_TABLE_NAME as _CFG_USERS_TBL
+except Exception:
+    _CFG_USERS_TBL = None
+try:
+    from database.db import DEFAULT_TABLE as _DB_DEFAULT_TABLE
+except Exception:
+    _DB_DEFAULT_TABLE = None
+USERS_TABLE = (_CFG_USERS_TBL or _DB_DEFAULT_TABLE or "houssin363")
+if USERS_TABLE == "USERS_TABLE":
+    USERS_TABLE = "houssin363"
 logging.info(f"[admin] USERS_TABLE set to: {USERS_TABLE}")
 # ====== Admin menu (global) ======
 def admin_menu(msg):
