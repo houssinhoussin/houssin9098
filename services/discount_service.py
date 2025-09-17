@@ -234,3 +234,60 @@ def record_discount_use(discount_id: str, user_id: int, amount_before: int, amou
         }).execute()
     except Exception as e:
         logging.exception("[discounts] record use failed: %s", e)
+
+
+# --------- الدالة المطلوبة من admin.py: discount_stats ---------
+
+def discount_stats(days: int = 30) -> List[str]:
+    """
+    تُعيد ملخصًا نصّيًا بسيطًا لإحصائيات الخصومات آخر (days) يومًا.
+    الناتج: List[str] لتلائُم استدعاء لوحة الأدمن.
+    """
+    try:
+        res = get_table(DISCOUNTS_TABLE).select(
+            "id, percent, active, source, starts_at, ends_at, created_at"
+        ).order("created_at", desc=True).limit(1000).execute()
+        rows = getattr(res, "data", []) or []
+    except Exception as e:
+        logging.exception("[discounts] stats failed: %s", e)
+        rows = []
+
+    now = _now()
+    act, exp, admin_n, ref_n = 0, 0, 0, 0
+    top_admin, top_ref = 0, 0
+    nearest_end = None
+
+    for r in rows:
+        pct = int(r.get("percent") or 0)
+        src = (r.get("source") or "admin").lower()
+        st  = _parse_dt(r.get("starts_at")) or now
+        en  = _parse_dt(r.get("ends_at"))
+
+        is_active_time = st <= now and (en is None or en > now)
+        is_active_flag = bool(r.get("active"))
+
+        if is_active_time and is_active_flag:
+            act += 1
+        else:
+            exp += 1
+
+        if src == "referral":
+            ref_n += 1
+            top_ref = max(top_ref, pct)
+        else:
+            admin_n += 1
+            top_admin = max(top_admin, pct)
+
+        if en and en > now:
+            if nearest_end is None or en < nearest_end:
+                nearest_end = en
+
+    out = [
+        f"النشِطة حاليًا: {act}",
+        f"منتهية/غير نشِطة: {exp}",
+        f"خصومات الأدمن: {admin_n} (أعلى: {top_admin}%)",
+        f"خصومات الإحالة: {ref_n} (أعلى: {top_ref}%)",
+    ]
+    if nearest_end:
+        out.append(f"أقرب انتهاء: {nearest_end.isoformat()}")
+    return out
