@@ -4,6 +4,7 @@
 from telebot import types
 from config import BOT_NAME
 from handlers import keyboards
+from database.db import DEFAULT_TABLE  # اسم جدول المستخدمين الفعلي
 from services.wallet_service import (
     get_all_purchases_structured,
     get_balance, add_balance, deduct_balance, get_purchases, get_deposit_transfers,
@@ -381,7 +382,7 @@ def register(bot, history=None):
             return
 
         # تحقق من أنّه عميل مسجّل
-        is_client = _select_single("USERS_TABLE", "user_id", target_id)
+        is_client = _select_single(DEFAULT_TABLE, "user_id", target_id)
         if not is_client:
             bot.send_message(
                 msg.chat.id,
