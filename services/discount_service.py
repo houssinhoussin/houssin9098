@@ -65,7 +65,6 @@ def create_discount(scope: str,
                     meta: dict | None = None):
     """
     ينشئ خصمًا جديدًا. إن زوّدت hours أو days سيتم ضبط ends_at تلقائيًا.
-    لا نلمس خصم الإدمن؛ فقط نضيف دعم الوقت والعلامات الاختيارية.
     """
     scope = (scope or "global").lower()
     percent = max(0, min(int(percent or 0), 100))
