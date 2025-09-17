@@ -57,7 +57,6 @@ else:
     _supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     if _httpx is not None and not _supports_http_client:
         logging.info("[db] create_client() does not accept http_client; using default client.")
-)
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY")
