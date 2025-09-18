@@ -360,16 +360,19 @@ def register(bot):
     def cb_back_to_speed(call):
         if _service_unavailable_guard(bot, call.message.chat.id):
             return bot.answer_callback_query(call.id)
+
         uid = call.from_user.id
         nm = _name(bot, uid)
         st = user_net_state.get(uid, {})
         if "provider" not in st:
             return cb_back_to_prov(call)
+
         st["step"] = "choose_speed"
         txt_raw = _client_card(
             f"⚡ يا {nm}، اختار السرعة المطلوبة",
             [f"💸 العمولة لكل 10000 ل.س: {_fmt_syp(COMMISSION_PER_10000)}"]
         )
+
         try:
             bot.edit_message_text(
                 chat_id=call.message.chat.id,
@@ -378,8 +381,14 @@ def register(bot):
                 reply_markup=_speeds_inline_kb(user_id=call.from_user.id)
             )
         except Exception:
-            bot.send_message(call.message.chat.id, _with_cancel(txt_raw), reply_markup=_speeds_inline_kb(user_id=call.from_user.id)
+            bot.send_message(
+                call.message.chat.id,
+                _with_cancel(txt_raw),
+                reply_markup=_speeds_inline_kb(user_id=call.from_user.id)
+            )
+
         bot.answer_callback_query(call.id)
+
 
     # إلغاء من المستخدم (زر)
     @bot.callback_query_handler(func=lambda c: c.data == CB_CANCEL)
