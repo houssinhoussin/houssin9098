@@ -1254,7 +1254,7 @@ def setup_inline_handlers(bot, admin_ids):
         ])
 
         # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
-        add_pending_request(
+        ok = _safe_add_pending(dict(
         user_id=user_id,
         username=call.from_user.username,
         request_text=admin_msg,
@@ -1268,8 +1268,10 @@ def setup_inline_handlers(bot, admin_ids):
             "reserved": price_syp,
             "hold_id": hold_id
         }
-    )
-
+    ))
+    if not ok:
+        bot.send_message(user_id, _with_cancel("⚠️ حصل انقطاع بسيط أثناء إرسال الطلب. سنحاول تلقائيًا مرة أخرى بعد قليل. إن استمر، افتح الطلب مجددًا."))
+        return
 
         # رسالة موحّدة للعميل بعد إرسال الطلب
         bot.send_message(
