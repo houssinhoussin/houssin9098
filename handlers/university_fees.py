@@ -15,6 +15,7 @@ from config import ADMIN_MAIN_ID
 from services.wallet_service import register_user_if_not_exist
 from services.discount_service import apply_discount_stacked as apply_discount
 from services.referral_service import revalidate_user_discount
+from services.offer_badge import badge as offer_badge
 from handlers import keyboards
 try:
     from services.queue_service import add_pending_request, process_queue, delete_pending_request
@@ -232,11 +233,17 @@ def register_university_fees(bot, history):
             ]
         )
 
+        has_offer = bool(user_uni_state.get(user_id, {}).get("discount"))
+        confirm_label = "✔️ تأكيد"
+        if has_offer:
+            confirm_label = offer_badge(confirm_label, user_id, with_percent=False)
+
         kb = make_inline_buttons(
             ("✏️ تعديل", "edit_university_fees"),
-            ("✔️ تأكيد", "uni_confirm"),
+            (confirm_label, "uni_confirm"),
             ("❌ إلغاء", "uni_cancel")
         )
+
         bot.send_message(msg.chat.id, text, reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda call: call.data == "back")
