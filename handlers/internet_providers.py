@@ -21,7 +21,7 @@ from services.wallet_service import (
 )
 from services.discount_service import apply_discount_stacked as apply_discount
 from services.referral_service import revalidate_user_discount
-
+from services.offer_badge import badge as offer_badge
 # طابور/رسائل للأدمن (اختياري)
 try:
     from services.queue_service import add_pending_request, process_queue
@@ -209,15 +209,14 @@ def _provider_inline_kb() -> types.InlineKeyboardMarkup:
     kb.add(types.InlineKeyboardButton("❌ إلغاء", callback_data=CB_CANCEL))
     return kb
 
-def _speeds_inline_kb() -> types.InlineKeyboardMarkup:
+def _speeds_inline_kb(user_id: int | None = None) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
-    btns = [
-        types.InlineKeyboardButton(
-            text=f"{speed['label']} • {_fmt_syp(speed['price'])}",
-            callback_data=f"{CB_SPEED_PREFIX}:{idx}"
-        )
-        for idx, speed in enumerate(INTERNET_SPEEDS)
-    ]
+    btns = []
+    for idx, speed in enumerate(INTERNET_SPEEDS):
+        label = f"{speed['label']} • {_fmt_syp(speed['price'])}"
+        if user_id:
+            label = offer_badge(label, user_id, with_percent=False)
+        btns.append(types.InlineKeyboardButton(label, callback_data=f"{CB_SPEED_PREFIX}:{idx}"))
     kb.add(*btns)
     kb.add(types.InlineKeyboardButton("⬅️ رجوع للمزوّدين", callback_data=CB_BACK_PROV))
     return kb
@@ -305,7 +304,7 @@ def register(bot):
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
             text=_with_cancel(txt_raw),
-            reply_markup=_speeds_inline_kb()
+            reply_markup=_speeds_inline_kb(user_id=call.from_user.id)
         )
         bot.answer_callback_query(call.id)
 
@@ -376,10 +375,10 @@ def register(bot):
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
                 text=_with_cancel(txt_raw),
-                reply_markup=_speeds_inline_kb()
+                reply_markup=_speeds_inline_kb(user_id=call.from_user.id)
             )
         except Exception:
-            bot.send_message(call.message.chat.id, _with_cancel(txt_raw), reply_markup=_speeds_inline_kb())
+            bot.send_message(call.message.chat.id, _with_cancel(txt_raw), reply_markup=_speeds_inline_kb(user_id=call.from_user.id)
         bot.answer_callback_query(call.id)
 
     # إلغاء من المستخدم (زر)
