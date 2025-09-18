@@ -17,6 +17,13 @@ from services.commands_setup import setup_bot_commands
 from services.outbox_worker import start_outbox_worker
 from services.maintenance_worker import start_housekeeping
 
+# ✅ لعرض حالة المستخدم عند ضغط أي زر من القوائم
+try:
+    from services.status_helper import send_status_hint
+except Exception:
+    def send_status_hint(*args, **kwargs):  # fallback صامت
+        pass
+
 # ✅ تعديل بسيط ليتوافق مع ويندوز: تشغيل الخادم الوهمي يصبح اختياريًا
 ENABLE_DUMMY_SERVER = os.environ.get("ENABLE_DUMMY_SERVER", "0") == "1"
 
@@ -192,6 +199,10 @@ def handle_back(msg):
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda msg: msg.text == "تحويلات كاش و حوالات")
 def handle_transfers(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     bot.send_message(
         msg.chat.id,
         "من خلال هذه الخدمة تستطيع تحويل رصيد محفظتك إليك أو لأي شخص آخر عن طريق شركات الحوالات (كالهرم)، أو كرصيد كاش (سيرياتيل/MTN)."
@@ -201,22 +212,38 @@ def handle_transfers(msg):
 
 @bot.message_handler(func=lambda msg: msg.text == "💵 تحويل الى رصيد كاش")
 def handle_cash_transfer(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     from handlers.cash_transfer import start_cash_transfer
     start_cash_transfer(bot, msg, history)
     user_state[msg.from_user.id]['step'] = "cash_menu"
 
 @bot.message_handler(func=lambda msg: msg.text == "حوالة مالية عبر شركات")
 def handle_companies_transfer(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     from handlers.companies_transfer import register_companies_transfer
     register_companies_transfer(bot, history)
 
 @bot.message_handler(func=lambda msg: msg.text == "🌐 دفع مزودات الإنترنت ADSL")
 def handle_internet(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     from handlers.internet_providers import start_internet_provider_menu
     start_internet_provider_menu(bot, msg)
 
 @bot.message_handler(func=lambda msg: msg.text == "🎓 دفع رسوم جامعية")
 def handle_university_fees(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     from handlers.university_fees import start_university_fee
     start_university_fee(bot, msg)
 
@@ -228,12 +255,20 @@ def handle_university_fees(msg):
     "✏️ طلب مخصص"
 ])
 def handle_media(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     from handlers.media_services import show_media_services
     show_media_services(bot, msg, user_state)
 
 # أزرار الشركات الجديدة (حسب النصوص الموجودة)
 @bot.message_handler(func=lambda msg: msg.text == "شركة الهرم")
 def handle_al_haram(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة الهرم**.\n"
@@ -247,6 +282,10 @@ def handle_al_haram(msg):
 
 @bot.message_handler(func=lambda msg: msg.text == "شركة الفؤاد")
 def handle_alfouad(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة الفؤاد**.\n"
@@ -260,6 +299,10 @@ def handle_alfouad(msg):
 
 @bot.message_handler(func=lambda msg: msg.text == "شركة شخاشير")
 def handle_shakhashir(msg):
+    try:
+        send_status_hint(bot, msg)
+    except Exception:
+        pass
     bot.send_message(
         msg.chat.id,
         "💸 هذه الخدمة تخولك إلى استلام حوالتك المالية عبر **شركة شخاشير**.\n"
