@@ -2958,7 +2958,6 @@ def _register_admin_roles(bot):
                 bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
                 pass
-
     # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
@@ -2967,9 +2966,8 @@ def _register_admin_roles(bot):
     try:
         ensure_seed()
     except Exception:
-        pass
-    
+        pass    
 def _register_admin_roles(bot):
+    pass
 
-        
-
+  
