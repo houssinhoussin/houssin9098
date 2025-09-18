@@ -602,7 +602,10 @@ def register_bill_and_units(bot, history):
                                     f"كازية سيرياتيل — {amount:,} ل.س"):
             return
 
-        available = get_available_balance(user_id)
+        available = _safe_get_available(bot, call.message.chat.id, user_id)
+        if available is None:
+            return bot.answer_callback_query(call.id)
+
         if available < price:
             missing = price - (available or 0)
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
@@ -1125,7 +1128,9 @@ def register_bill_and_units(bot, history):
         if require_feature_or_alert(bot, call.message.chat.id, key_units("MTN", unit_name), f"وحدات MTN — {unit_name}"):
             return
 
-        available = get_available_balance(user_id)
+        available = _safe_get_available(bot, call.message.chat.id, user_id)
+        if available is None:
+            return bot.answer_callback_query(call.id)
         if available < price:
             missing = price - (available or 0)
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
@@ -1354,7 +1359,9 @@ def register_bill_and_units(bot, history):
             if applied_disc else None
         )
 
-        available = get_available_balance(user_id)
+        available = _safe_get_available(bot, call.message.chat.id, user_id)
+        if available is None:
+            return bot.answer_callback_query(call.id)
         if available < total:
             missing = total - (available or 0)
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
