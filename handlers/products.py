@@ -1008,15 +1008,16 @@ def setup_inline_handlers(bot, admin_ids):
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_products")
     def back_to_products(call):
-        # 👇 جديد: أوقف انتظار إدخال الآيدي (آمن لكل النسخ)
+        # إيقاف انتظار إدخال أي نص سابق
         _clear_next_step(bot, call.message.chat.id)
-
         _hide_inline_kb(bot, call)
-        user_id = call.from_user.id
+
+        user_id = call.from_user.id  # ← ضروري لتمريره لبنّاء الأزرار مع "عرض"
+
         order = user_orders.get(user_id, {}) or {}
         category = order.get("category")
         subset = order.get("subset")
-        
+
         if not category:
             name = _name_from_user(call.from_user)
             bot.send_message(
@@ -1026,26 +1027,33 @@ def setup_inline_handlers(bot, admin_ids):
             )
             return bot.answer_callback_query(call.id)
 
-        if category:
-            if subset and category == "MixedApps":
-                options = _filter_products_by_key(category, subset)
-                kb, pages = _build_products_keyboard_subset(category, options, page=0)
-            else:
-                kb, pages = _build_products_keyboard(category, page=0)
-            try:
-                bot.edit_message_text(
-                    _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=kb
-                )
-            except Exception:
-                bot.send_message(
-                    call.message.chat.id,
-                    _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
-                    reply_markup=kb
-                )
+        # بناء الكيبورد مع تمرير user_id لإظهار شارة "عرض"
+        if subset and category == "MixedApps":
+            options = _filter_products_by_key(category, subset)
+            kb, pages = _build_products_keyboard_subset(
+                category, options, page=0, user_id=user_id  # ← هنا
+            )
+        else:
+            kb, pages = _build_products_keyboard(
+                category, page=0, user_id=user_id  # ← وهنا
+            )
+
+        try:
+            bot.edit_message_text(
+                _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=kb
+            )
+        except Exception:
+            bot.send_message(
+                call.message.chat.id,
+                _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
+                reply_markup=kb
+            )
+
         bot.answer_callback_query(call.id)
+
 
     @bot.callback_query_handler(func=lambda c: c.data == "back_to_categories")
     def back_to_categories(call):
