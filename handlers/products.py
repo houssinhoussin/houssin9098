@@ -452,7 +452,7 @@ def _button_label(p: Product) -> str:
     except Exception:
         return f"{p.name}"
 
-def _build_products_keyboard(category: str, page: int = 0):
+def _build_products_keyboard(category: str, page: int = 0, user_id: int | None = None):
     """لوحة منتجات مع صفحات + إبراز المنتجات الموقوفة + (جديد) فلاغ لكل كمية."""
     options = PRODUCTS.get(category, [])
     total = len(options)
@@ -475,7 +475,15 @@ def _build_products_keyboard(category: str, page: int = 0):
     slice_items = options[start:end]
 
     kb = types.InlineKeyboardMarkup(row_width=2)
-
+    # هل للمستخدم خصم فعّال؟
+    has_offer = False
+    try:
+        # alias: apply_discount = apply_discount_stacked
+        _, info = apply_discount(int(user_id or 0), 100)
+        has_offer = bool(info and int(info.get("percent", 0)) > 0)
+    except Exception:
+        has_offer = False
+    
     for p in slice_items:
         # فعال على مستوى المنتج العام + فعال على مستوى هذا الخيار؟
         try:
@@ -488,7 +496,12 @@ def _build_products_keyboard(category: str, page: int = 0):
 
         if active:
             # زر عادي لاختيار المنتج
-            kb.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
+            if active:
+            # زر عادي مع شارة العرض إن وُجد خصم
+            label = _button_label(p)
+            if has_offer:
+                label += " | عرض"
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"select_{p.product_id}"))
         else:
             # نعرضه لكن كموقوف — ويعطي Alert عند الضغط
             try:
@@ -535,6 +548,14 @@ def _build_products_keyboard_subset(category: str, options: list[Product], page:
     slice_items = options[start:end]
 
     kb = types.InlineKeyboardMarkup(row_width=2)
+    # هل للمستخدم خصم فعّال؟
+    has_offer = False
+    try:
+        # alias: apply_discount = apply_discount_stacked
+        _, info = apply_discount(int(user_id or 0), 100)
+        has_offer = bool(info and int(info.get("percent", 0)) > 0)
+    except Exception:
+        has_offer = False
 
     for p in slice_items:
         try:
@@ -546,7 +567,12 @@ def _build_products_keyboard_subset(category: str, options: list[Product], page:
         active = active_global and active_option
 
         if active:
-            kb.add(types.InlineKeyboardButton(_button_label(p), callback_data=f"select_{p.product_id}"))
+            if active:
+            # زر عادي مع شارة العرض إن وُجد خصم
+            label = _button_label(p)
+            if has_offer:
+                label += " | عرض"
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"select_{p.product_id}"))
         else:
             try:
                 label = f"🔴 {p.name} — ${float(p.price):.2f} (موقوف)"
@@ -782,6 +808,14 @@ def register_message_handlers(bot, history):
         # ===== (جديد) لو كان الزر هو "🎮 شحن العاب و تطبيقات مختلفة" اعرض قائمة فرعية ديناميكية =====
         if msg.text in ("🎮 شحن العاب و تطبيقات مختلفة", "🎮 شحن ألعاب و تطبيقات مختلفة"):
             kb = types.InlineKeyboardMarkup(row_width=2)
+            # هل للمستخدم خصم فعّال؟
+            has_offer = False
+            try:
+                # alias: apply_discount = apply_discount_stacked
+                _, info = apply_discount(int(user_id or 0), 100)
+                has_offer = bool(info and int(info.get("percent", 0)) > 0)
+            except Exception:
+                has_offer = False
             for sc in MIXEDAPPS_SUBCATS:
                 kb.add(types.InlineKeyboardButton(sc["label"], callback_data=f"open_subcat:MixedApps:{sc['key']}"))
             kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_categories"))
