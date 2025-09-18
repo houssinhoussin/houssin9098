@@ -4,7 +4,7 @@
 from telebot import types
 import math
 import logging
-
+from services.offer_badge import badge as offer_badge
 from services.wallet_service import (
     register_user_if_not_exist,
     get_balance,               # لعرض الرصيد الحقيقي في رسالة الإدمن
@@ -81,8 +81,9 @@ def key_kazia(carrier: str, amount: int | float) -> str:
     # مفتاح ميزة لكل مبلغ كازية
     return f"kazia:{slugify(carrier)}:{int(amount)}"
 
-def _unit_label(unit: dict) -> str:
-    return f"{unit['name']} • {unit['price']:,} ل.س"
+def _unit_label(unit: dict, user_id: int | None = None) -> str:
+    base = f"{unit['name']} • {unit['price']:,} ل.س"
+    return offer_badge(base, user_id, with_percent=False) if user_id else base
 
 def _lamp(key: str) -> str:
     return "🟢" if is_feature_enabled(key, True) else "🔴"
@@ -310,7 +311,7 @@ def register_bill_and_units(bot, history):
             if block_if_disabled(bot, chat_id, "syr_unit", "وحدات سيرياتيل"):
                 return bot.answer_callback_query(call.id)
             user_states[user_id] = {"step": "select_syr_unit"}
-            _send_syr_units_page(chat_id, page=0, message_id=call.message.message_id)
+            _send_syr_units_page(chat_id, user_id, page=0, message_id=call.message.message_id)
             return bot.answer_callback_query(call.id)
 
         if action == "syr_bill":
@@ -328,7 +329,7 @@ def register_bill_and_units(bot, history):
             if block_if_disabled(bot, chat_id, "mtn_unit", "وحدات MTN"):
                 return bot.answer_callback_query(call.id)
             user_states[user_id] = {"step": "select_mtn_unit"}
-            _send_mtn_units_page(chat_id, page=0, message_id=call.message.message_id)
+            _send_mtn_units_page(chat_id, user_id, page=0, message_id=call.message.message_id)
             return bot.answer_callback_query(call.id)
 
         if action == "mtn_bill":
@@ -370,12 +371,12 @@ def register_bill_and_units(bot, history):
         bot.answer_callback_query(call.id)
 
     # ===== صفحات وحدات سيرياتيل/MTN =====
-    def _send_syr_units_page(chat_id, page=0, message_id=None):
+    def _send_syr_units_page(chat_id, user_id, page=0, message_id=None):
         # 🔧 زرع مفاتيح كل كمية (idempotent)
         for u in SYRIATEL_UNITS:
             ensure_feature(key_units("Syriatel", u['name']), f"وحدات سيرياتيل — {u['name']}", default_active=True)
 
-        items = [(idx, _unit_label(u)) for idx, u in enumerate(SYRIATEL_UNITS)]
+        items = [(idx, _unit_label(u, user_id)) for idx, u in enumerate(SYRIATEL_UNITS)]
         kb, pages = _build_paged_inline_keyboard(items, page=page, page_size=PAGE_SIZE_UNITS, prefix="syrunits", back_data="ubm:back")
         txt = with_cancel_hint(banner("🎯 اختار كمية الوحدات", [f"صفحة {page+1}/{pages}"]))
         if message_id is not None:
@@ -383,12 +384,12 @@ def register_bill_and_units(bot, history):
         else:
             bot.send_message(chat_id, txt, reply_markup=kb)
 
-    def _send_mtn_units_page(chat_id, page=0, message_id=None):
+    def _send_mtn_units_page(chat_id, user_id, page=0, message_id=None):
         # 🔧 زرع مفاتيح كل كمية (idempotent)
         for u in MTN_UNITS:
             ensure_feature(key_units("MTN", u['name']), f"وحدات MTN — {u['name']}", default_active=True)
 
-        items = [(idx, _unit_label(u)) for idx, u in enumerate(MTN_UNITS)]
+        items = [(idx, _unit_label(u, user_id)) for idx, u in enumerate(MTN_UNITS)]
         kb, pages = _build_paged_inline_keyboard(items, page=page, page_size=PAGE_SIZE_UNITS, prefix="mtnunits", back_data="ubm:back")
         txt = with_cancel_hint(banner("🎯 اختار كمية الوحدات", [f"صفحة {page+1}/{pages}"]))
         if message_id is not None:
@@ -433,7 +434,7 @@ def register_bill_and_units(bot, history):
 
         if action == "page":
             page = int(parts[2]) if len(parts) > 2 else 0
-            _send_syr_units_page(chat_id, page=page, message_id=call.message.message_id)
+            _send_syr_units_page(chat_id, user_id, page=page, message_id=call.message.message_id)
             return bot.answer_callback_query(call.id)
 
         if action == "sel":
@@ -464,7 +465,7 @@ def register_bill_and_units(bot, history):
 
         if action == "page":
             page = int(parts[2]) if len(parts) > 2 else 0
-            _send_mtn_units_page(chat_id, page=page, message_id=call.message.message_id)
+            _send_mtn_units_page(chat_id, user_id, page=page, message_id=call.message.message_id)
             return bot.answer_callback_query(call.id)
 
         if action == "sel":
