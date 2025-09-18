@@ -496,8 +496,6 @@ def _build_products_keyboard(category: str, page: int = 0, user_id: int | None =
 
         if active:
             # زر عادي لاختيار المنتج
-            if active:
-            # زر عادي مع شارة العرض إن وُجد خصم
             label = _button_label(p)
             if has_offer:
                 label += " | عرض"
@@ -567,8 +565,6 @@ def _build_products_keyboard_subset(category: str, options: list[Product], page:
         active = active_global and active_option
 
         if active:
-            if active:
-            # زر عادي مع شارة العرض إن وُجد خصم
             label = _button_label(p)
             if has_offer:
                 label += " | عرض"
@@ -926,7 +922,7 @@ def setup_inline_handlers(bot, admin_ids):
             bot.answer_callback_query(call.id, "❌ لا توجد خيارات متاحة حاليًا.", show_alert=True)
             return
 
-        kb, pages = _build_products_keyboard_subset(category, options, page=0)
+        kb, pages = _build_products_keyboard_subset(category, options, page=0, user_id=user_id)
         
         # أضف تنبيه خاص بالكلاش: لا تراجعنا قبل 12 ساعة
         warning = ""
