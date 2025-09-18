@@ -1298,23 +1298,23 @@ def setup_inline_handlers(bot, admin_ids):
 
         # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
         ok = _safe_add_pending(dict(
-        user_id=user_id,
-        username=call.from_user.username,
-        request_text=admin_msg,
-        payload={
-            "type": "order",
-            "product_id": product.product_id,
-            "product_name": product.name,
-            "player_id": player_id,
-            "price_before": _pb,
-            "price": _pa,
-            "reserved": price_syp,
-            "hold_id": hold_id
-        }
-    ))
-    if not ok:
-        bot.send_message(user_id, _with_cancel("⚠️ حصل انقطاع بسيط أثناء إرسال الطلب. سنحاول تلقائيًا مرة أخرى بعد قليل. إن استمر، افتح الطلب مجددًا."))
-        return
+            user_id=user_id,
+            username=call.from_user.username,
+            request_text=admin_msg,
+            payload={
+                "type": "order",
+                "product_id": product.product_id,
+                "product_name": product.name,
+                "player_id": player_id,
+                "price_before": _pb,
+                "price": _pa,
+                "reserved": price_syp,
+                "hold_id": hold_id
+            }
+        ))
+        if not ok:
+            bot.send_message(user_id, _with_cancel("⚠️ حصل انقطاع بسيط أثناء إرسال الطلب. سنحاول تلقائيًا مرة أخرى بعد قليل. إن استمر، افتح الطلب مجددًا."))
+            return
 
         # رسالة موحّدة للعميل بعد إرسال الطلب
         bot.send_message(
@@ -1353,6 +1353,7 @@ def setup_inline_handlers(bot, admin_ids):
         )
 
         process_queue(bot)
+
 
 # ================= نقطة التسجيل من main.py =================
 
