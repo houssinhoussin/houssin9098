@@ -526,7 +526,7 @@ def _build_products_keyboard(category: str, page: int = 0, user_id: int | None =
     return kb, pages
 
 # ======== (جديد) باني لوحة لجزء فرعي (subset) داخل نفس التصنيف ========
-def _build_products_keyboard_subset(category: str, options: list[Product], page: int = 0):
+def _build_products_keyboard_subset(category: str, options: list[Product], page: int = 0, user_id: int | None = None):
     """نسخة من الباني الرئيسي لكن تعمل على قائمة options المفلترة (مثل Call of Duty فقط داخل MixedApps)."""
     total = len(options)
 
@@ -609,7 +609,7 @@ def show_game_categories(bot, message):
 
 def show_product_options(bot, message, category):
     # ⬅️ الآن مع صفحات + عرض كل المنتجات (حتى الموقوفة بعلامة 🔴)
-    keyboard, pages = _build_products_keyboard(category, page=0)
+    keyboard, pages = _build_products_keyboard(category, page=0, user_id=message.from_user.id)
     bot.send_message(
         message.chat.id,
         _with_cancel(f"📦 منتجات {category}: (صفحة 1/{pages}) — اختار اللي على مزاجك 😎"),
@@ -961,9 +961,9 @@ def setup_inline_handlers(bot, admin_ids):
         # إن كان المستخدم في subset داخل MixedApps، نحافظ على نفس الفلترة أثناء التنقل
         if subset and category == "MixedApps":
             options = _filter_products_by_key(category, subset)
-            kb, pages = _build_products_keyboard_subset(category, options, page=page)
+            kb, pages = _build_products_keyboard_subset(category, options, page=page, user_id=user_id)
         else:
-            kb, pages = _build_products_keyboard(category, page=page)
+            kb, pages = _build_products_keyboard(category, page=page, user_id=user_id)
 
         try:
             bot.edit_message_text(
