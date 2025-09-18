@@ -72,6 +72,20 @@ def make_inline_buttons(*buttons):
     for text, data in buttons:
         kb.add(types.InlineKeyboardButton(text, callback_data=data))
     return kb
+    
+def _safe_get_available(bot, chat_id: int, user_id: int):
+    try:
+        return int(get_available_balance(user_id))
+    except Exception as e:
+        logging.exception("[bill_and_units] wallet read failed: %s", e)
+        try:
+            bot.send_message(
+                chat_id,
+                with_cancel_hint("⚠️ تعذّر الاتصال بالمحفظة مؤقتًا. حاول بعد لحظات.")
+            )
+        except Exception:
+            pass
+        return None
 
 def _kz_label(item: dict) -> str:
     # يظهر "المبلغ • السعر"
@@ -904,15 +918,22 @@ def register_bill_and_units(bot, history):
         if require_feature_or_alert(bot, call.message.chat.id, key_units("Syriatel", unit_name), f"وحدات سيرياتيل — {unit_name}"):
             return
 
-        available = get_available_balance(user_id)
+        available = _safe_get_available(bot, call.message.chat.id, user_id)
+        if available is None:
+            return bot.answer_callback_query(call.id)
         if available < price:
-            missing = price - (available or 0)
             kb = make_inline_buttons(("❌ إلغاء", "cancel_all"))
+            missing = price - available
             return bot.send_message(
                 call.message.chat.id,
-                with_cancel_hint(banner("❌ رصيدك مش مكفّي", [f"متاحك: {_fmt_syp(available)}", f"المطلوب: {_fmt_syp(price)}", f"الناقص: {_fmt_syp(missing)}"])),
+                with_cancel_hint(banner("❌ رصيدك غير كافٍ", [
+                    f"متاحك: {_fmt_syp(available)}",
+                    f"المطلوب: {_fmt_syp(price)}",
+                    f"الناقص: {_fmt_syp(missing)}",
+                ])),
                 reply_markup=kb
             )
+
 
         # إنشاء الحجز على السعر بعد الخصم
         hold_id = None
