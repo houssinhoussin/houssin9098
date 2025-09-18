@@ -107,6 +107,49 @@ def _card(title: str, lines: list[str]) -> str:
 def _unavailable_short(product_name: str) -> str:
     return UNAVAILABLE_MSG.format(label=product_name)
     
+# === دوال آمنة ضد انقطاع Supabase/HTTPX ===
+try:
+    import httpx  # متاح ضمن البيئة
+except Exception:
+    httpx = None
+
+def _is_transient(err: Exception) -> bool:
+    txt = str(err).lower()
+    return ("resource temporarily unavailable" in txt) or (httpx and isinstance(err, httpx.ReadError))
+
+def _safe_get_available(bot, chat_id: int, user_id: int, retries: int = 2):
+    for i in range(retries + 1):
+        try:
+            return int(get_available_balance(user_id))
+        except Exception as e:
+            if i < retries and _is_transient(e):
+                import time; time.sleep(0.4 * (i + 1))
+                continue
+            try:
+                bot.send_message(chat_id, _with_cancel("⚠️ تعذر قراءة رصيدك مؤقتًا. جرّب بعد لحظات."))
+            except Exception:
+                pass
+            return None
+
+def _safe_get_balance(user_id: int, default: int = 0) -> int:
+    try:
+        return int(get_balance(user_id))
+    except Exception as e:
+        logging.exception("[products] get_balance failed: %s", e)
+        return int(default)
+
+def _safe_add_pending(payload_kwargs: dict, retries: int = 2) -> bool:
+    for i in range(retries + 1):
+        try:
+            add_pending_request(**payload_kwargs)
+            return True
+        except Exception as e:
+            if i < retries and _is_transient(e):
+                import time; time.sleep(0.5 * (i + 1))
+                continue
+            logging.exception("[products] add_pending_request failed: %s", e)
+            return False
+    
 # ===== تصنيف مرئي واضح للرسائل (حسب الطلبية) =====
 _CATEGORY_LABELS = {
     "PUBG": "شحن شدات ببجي",
