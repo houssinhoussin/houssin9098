@@ -1166,7 +1166,10 @@ def setup_inline_handlers(bot, admin_ids):
             return bot.answer_callback_query(call.id)
 
         # تحقق الرصيد (المتاح فقط)
-        available = get_available_balance(user_id)
+        available = _safe_get_available(bot, call.message.chat.id, user_id)
+        if available is None:
+            return bot.answer_callback_query(call.id)
+
         if available < price_syp:
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("💳 طرق الدفع/الشحن", callback_data="show_recharge_methods"))
@@ -1222,7 +1225,7 @@ def setup_inline_handlers(bot, admin_ids):
             return
 
         # عرض الرصيد الحالي في رسالة الأدمن
-        balance = get_balance(user_id)
+        balance = _safe_get_balance(user_id, default=0)
 
         # تهيئة سطر السعر (قبل/بعد الخصم) للأدمن
         _pb = int(order.get('price_before', price_syp))
@@ -1252,20 +1255,21 @@ def setup_inline_handlers(bot, admin_ids):
 
         # ✅ تمرير hold_id + اسم المنتج الحقيقي داخل الـ payload
         add_pending_request(
-            user_id=user_id,
-            username=call.from_user.username,
-            request_text=admin_msg,
-            payload={
-                "type": "order",
-                "product_id": product.product_id,
-                "product_name": product.name,   # مهم لرسالة التنفيذ باسم المنتج
-                "player_id": player_id,
-                "price_before": _pb,
-                "price": _pa,
-                "reserved": price_syp,
-                "hold_id": hold_id
-            }
-        )
+        user_id=user_id,
+        username=call.from_user.username,
+        request_text=admin_msg,
+        payload={
+            "type": "order",
+            "product_id": product.product_id,
+            "product_name": product.name,
+            "player_id": player_id,
+            "price_before": _pb,
+            "price": _pa,
+            "reserved": price_syp,
+            "hold_id": hold_id
+        }
+    )
+
 
         # رسالة موحّدة للعميل بعد إرسال الطلب
         bot.send_message(
