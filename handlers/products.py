@@ -599,7 +599,7 @@ def handle_player_id(message, bot):
 
     order = user_orders.get(user_id)
     if not order or "product" not in order:
-        bot.send_message(user_id, f"❌ {name}، ما عندنا طلب شغّال دلوقتي. اختار المنتج وابدأ من جديد.")
+        bot.send_message(user_id, f"❌ {name}، ما عندنا طلب شغّال دلوقتي. اختار المنتج من القائمة.")
         return
 
     product = order["product"]
