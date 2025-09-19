@@ -10,12 +10,13 @@ except Exception:
     except Exception:
         def _feat_on(key: str) -> bool:
             return True  # في حال غياب النظام، لا نعطّل شيء
+
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
 
     row1 = ["🛒 المنتجات"]
     markup.row(*row1)
-    pass
+
     # باقي الصفوف كما كانت
     markup.row("💳 شحن محفظتي", "💰 محفظتي")
     markup.row("📢 إعلاناتك", "🌐 صفحتنا")
