@@ -2663,7 +2663,7 @@ def _register_admin_roles(bot):
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
     def disc_new_user_choose_pct(c):
-        if not _is_admin_cb(c.from_user.id):
+        if not _is_admin_cb(c):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
         uid = int(uid); pct = int(pct)
@@ -2683,7 +2683,7 @@ def _register_admin_roles(bot):
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
-        if not _is_admin_cb(c.from_user.id):
+        if not _is_admin_cb(c):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
         try:
@@ -2997,7 +2997,7 @@ def disc_new_user_choose_duration(c: types.CallbackQuery):
 # ─────────────────────────────────────
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new:global:"))
 def disc_new_global_choose_pct(c):
-    if not _is_admin_cb(c.from_user.id):
+    if not _is_admin_cb(c):
         try:
             return bot.answer_callback_query(c.id, "غير مصرح.")
         except Exception:
@@ -3024,7 +3024,7 @@ def disc_new_global_choose_pct(c):
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_global_dur:"))
 def disc_new_global_create(c):
-    if not _is_admin_cb(c.from_user.id):
+    if not _is_admin_cb(c):
         try:
             return bot.answer_callback_query(c.id, "غير مصرح.")
         except Exception:
