@@ -18,13 +18,12 @@ def _norm_btn_text(s: str) -> str:
 def _match_admin_alias(txt: str, aliases: list[str]) -> bool:
     t = _norm_btn_text(txt)
     return any(_norm_btn_text(a) == t for a in aliases)
-
+    
 import re
 import logging
 import os
 from datetime import datetime, timedelta
 from telebot import types
-
 # --- helper: back/cancel keyboard for admin flows ---
 def _admin_back_cancel_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
@@ -83,6 +82,7 @@ def _append_bot_link_for_user(_t: str) -> str:
     except Exception:
         return _t
 
+       
 # === End Injected ===
 from database.db import get_table, DEFAULT_TABLE
 
@@ -118,7 +118,6 @@ USERS_TABLE = (_CFG_USERS_TBL or _DB_DEFAULT_TABLE or "houssin363")
 if USERS_TABLE == "USERS_TABLE":
     USERS_TABLE = "houssin363"
 logging.info(f"[admin] USERS_TABLE set to: {USERS_TABLE}")
-
 # ====== Admin menu (global) ======
 def admin_menu(msg):
     if not allowed(msg.from_user.id, "admin:menu"):
@@ -126,16 +125,19 @@ def admin_menu(msg):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     is_primary = (msg.from_user.id == ADMIN_MAIN_ID)
 
-    # ✅ مشترك لكل الأدمنز
-    kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
-    kb.row("🎟️ أكواد خصم", "👤 إدارة عميل")
-    kb.row("🛒 إدارة المنتجات")
     if is_primary:
+        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
         kb.row("📊 تقارير سريعة", "📈 تقرير المساعدين")
+        kb.row("🎟️ أكواد خصم", "👤 إدارة عميل")
         kb.row("📈 تقرير الإداريين (الكل)", "📣 رسالة للجميع")
         kb.row("✉️ رسالة لعميل", "⛔ حظر عميل")
         kb.row("✅ فكّ الحظر", "⚙️ النظام")
-    kb.row("⬅️ رجوع")
+        kb.row("🛒 إدارة المنتجات")
+        kb.row("⬅️ رجوع")
+    else:
+        kb.row("🧩 تشغيل/إيقاف المزايا", "⏳ طابور الانتظار")
+        kb.row("🛒 إدارة المنتجات")
+        kb.row("⬅️ رجوع")
 
     bot.send_message(msg.chat.id, "لوحة الأدمن:", reply_markup=kb)
 
@@ -166,6 +168,7 @@ def _collect_clients_with_names():
         out.append((uid_int, nm))
     return out
 
+    
 from services.state_service import purge_state
 from services.products_admin import set_product_active, get_product_active, bulk_ensure_products
 from services.report_service import totals_deposits_and_purchases_syp, pending_queue_count, summary
@@ -204,7 +207,6 @@ from services.wallet_service import (
 )
 from services.cleanup_service import delete_inactive_users
 from handlers import cash_transfer, companies_transfer
-
 def _is_admin_user_id(uid: int) -> bool:
     return (uid == ADMIN_MAIN_ID) or (uid in ADMINS)
 
@@ -270,12 +272,18 @@ def _clear_admin_states(uid: int):
         except Exception:
             pass
 
+# ✨ NEW: إشعار موحّد للأدمن عند النجاح
+def _notify_admin_success(chat_id: int, text: str = "✅ تمت العملية بنجاح."):
+    try:
+        bot.send_message(chat_id, text)
+    except Exception:
+        pass
+
 # ─────────────────────────────────────
 #   تنسيقات ونصوص
 # ─────────────────────────────────────
 BAND = "━━━━━━━━━━━━━━━━"
 CANCEL_HINT_ADMIN = "✋ اكتب /cancel لإلغاء الوضع الحالي."
-
 def _funny_welcome_text(name):
     n = name or "صديقنا"
     return (
@@ -319,7 +327,7 @@ def _admin_mention(bot, user_id: int) -> str:
 def _safe(v, dash="—"):
     v = ("" if v is None else str(v)).strip()
     return v if v else dash
-
+    
 import html
 def _h(x):
     try:
@@ -408,18 +416,6 @@ def _clear_recharge_local_lock_safe(user_id: int):
     except Exception as e:
         logging.exception("[ADMIN] clear recharge local lock failed: %s", e)
 
-# 🔔 موحّد: إشعار نجاح للأدمن
-def _notify_admin_success(call, request_id: int, user_id: int, action_title: str, extras: list[str] | None = None):
-    try:
-        lines = [f"✅ {action_title} لطلب #{request_id} (العميل: {user_id}) تم بنجاح."]
-        if extras:
-            for x in extras:
-                if x:
-                    lines.append(f"• {x}")
-        bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="HTML")
-    except Exception:
-        pass
-
 # ─────────────────────────────────────
 #   متصفح المنتجات للأدمن (حسب الملفات)
 # ─────────────────────────────────────
@@ -470,17 +466,17 @@ def _features_home_markup():
     kb.add(types.InlineKeyboardButton("🔄 مزامنة المزايا", callback_data="adm_feat_sync"))
     kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
     return kb
-
 def _features_markup(page: int = 0, page_size: int = 20):
-    # ===== إزالة الازدواجية حسب *التسمية* =====
+# ===== إزالة الازدواجية حسب *التسمية* (تعالج تكرار الشدّات/التوكنز/الجواهر) =====
     items = list_features() or []
-
+ 
     import re as _re
     def _norm_label(s: str) -> str:
         s = (s or "").strip()
         s = s.replace("—", "-")
         s = _re.sub(r"[\u200f\u200e]+", "", s)         # إزالة علامات الاتجاه
-        s = _re.sub(r"\s+", " ", s)                    # مسافات موحّدة
+        s = _re.sub(r"\s+", " ", s)                     # مسافات موحّدة
+        # نُبقي الحروف العربية/اللاتينية والأرقام والشرطة
         s = _re.sub(r"[^0-9A-Za-z\u0600-\u06FF\- ]+", "", s)
         return s.lower()
 
@@ -500,6 +496,7 @@ def _features_markup(page: int = 0, page_size: int = 20):
     kb = types.InlineKeyboardMarkup(row_width=1)
     if total == 0:
         kb.add(types.InlineKeyboardButton("لا توجد مزايا مُسجّلة", callback_data="noop"))
+    # زر رجوع للقائمة الرئيسية للأدمن
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         return kb
 
@@ -537,6 +534,7 @@ def _features_groups_markup():
     except Exception as e:
         logging.exception("[ADMIN] list_features_grouped failed: %s", e)
         grouped = {}
+    # فرز أسماء المجموعات أبجديًا بالعربية/الإنجليزية
     names = sorted(grouped.keys(), key=lambda s: s or "")
     for name in names:
         items = grouped.get(name) or []
@@ -561,6 +559,7 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
     start = page * page_size
     page_items = items[start:start+page_size]
 
+    # أزرار التبديل الفردي
     for it in page_items:
         k = it.get("key") or ""
         label = it.get("label") or k
@@ -570,8 +569,10 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
         kb.add(types.InlineKeyboardButton(
             text=f"{lamp} {label}",
             callback_data=f"adm_feat_tg:{k}:{to}:{_slug(group_name)}:{page}"
+
         ))
 
+    # شريط الصفحات
     if total_pages > 1:
         prev_page = (page - 1) % total_pages
         next_page = (page + 1) % total_pages
@@ -582,13 +583,14 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
             types.InlineKeyboardButton("التالي »", callback_data=f"adm_feat_g:{gslug}:{next_page}")
         )
 
+    # أزرار تشغيل/إيقاف الكل في المجموعة
     kb.row(
         types.InlineKeyboardButton("✅ تشغيل الكل", callback_data=f"adm_feat_gtoggle:{gslug}:1:{page}"),
         types.InlineKeyboardButton("🚫 إيقاف الكل", callback_data=f"adm_feat_gtoggle:{gslug}:0:{page}")
     )
+
     kb.add(types.InlineKeyboardButton("⬅️ رجوع للمجموعات", callback_data="adm_feat_home:groups"))
     return kb
-
 # ⬇️ ضع الدوال هنا قبل register()
 
 def _prune_admin_msg_from_payload(request_id: int, payload: dict, admin_id: int, message_id: int):
@@ -630,10 +632,12 @@ def register(bot, history):
             bot.answer_callback_query(c.id, "تم.")
         except Exception:
             pass
+        # remove inline keyboard from the triggering message
         try:
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception:
             pass
+        # notify and go to main menu
         try:
             if c.data == "admin:home":
                 bot.send_message(c.from_user.id, "تم الرجوع إلى القائمة الرئيسية.")
@@ -646,6 +650,7 @@ def register(bot, history):
                 admin_menu(c.message)
         except Exception:
             try:
+                # fallback: open menu in private chat
                 from types import SimpleNamespace
                 dummy = SimpleNamespace(from_user=SimpleNamespace(id=c.from_user.id), chat=SimpleNamespace(id=c.from_user.id))
                 admin_menu(dummy)
@@ -679,7 +684,6 @@ def register(bot, history):
             globals()["__admin_pending_handlers__"].clear()
     except Exception as _e:
         logging.exception("Admin: failed to replay pending handlers: %s", _e)
-
     # سجل أزرار الأدمن وقوائمها
     try:
         _register_admin_roles(bot)
@@ -701,7 +705,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
         st = {"step": "ask_duration", "user_id": uid}
         _ban_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
             types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
@@ -728,8 +732,8 @@ def register(bot, history):
             pass
         try:
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: 
             pass
+        except Exception: pass
         bot.send_message(c.message.chat.id, "اكتب سبب الحظر (إلزامي):" )
 
     @bot.message_handler(func=lambda m: _ban_pending.get(m.from_user.id, {}).get("step") == "ask_reason")
@@ -741,12 +745,13 @@ def register(bot, history):
         st["reason"] = reason
         st["step"] = "confirm"
         _ban_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup(row_width=2)
+        uid = st.get("user_id")
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("✔️ تأكيد الحظر", callback_data="adm_ban:confirm"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_ban:cancel"),
         )
-        bot.send_message(m.chat.id, f"تأكيد حظر <code>{st.get('user_id')}</code>؟", parse_mode="HTML", reply_markup=kb)
+        bot.send_message(m.chat.id, f"تأكيد حظر <code>{uid}</code>؟", parse_mode="HTML", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_ban:"))
     def ban_confirm(c):
@@ -762,12 +767,12 @@ def register(bot, history):
             _ban_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         try:
             secs = parse_duration_choice(st.get("duration_choice"))
@@ -778,6 +783,7 @@ def register(bot, history):
             ban_user(st["user_id"], c.from_user.id, st["reason"], banned_until_iso=until_iso)
             log_action(c.from_user.id, "user:ban", reason=f"uid:{st['user_id']} until:{until_iso or 'perm'} reason:{st['reason']}")
             bot.send_message(c.message.chat.id, "✅ تم الحظر.")
+            _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (حظر العميل).")
         except Exception as e:
             bot.send_message(c.message.chat.id, f"❌ تعذّر الحظر: {e}")
         finally:
@@ -786,16 +792,17 @@ def register(bot, history):
             bot.answer_callback_query(c.id, "تم.")
         except Exception:
             pass
+
         try:
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: 
             pass
+        except Exception: pass
 
     @bot.message_handler(func=lambda m: m.text == "✅ فكّ الحظر" and allowed(m.from_user.id, "user:unban"))
     def unban_start(m):
         _unban_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/cancel لإلغاء", reply_markup=_admin_back_cancel_kb())
-
+    
     @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def unban_get_id(m):
         try:
@@ -806,7 +813,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
 
         _unban_pending[m.from_user.id] = {"step": "confirm", "user_id": uid}
-        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("✔️ تأكيد", callback_data="adm_unban:confirm"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_unban:cancel"),
@@ -819,25 +826,26 @@ def register(bot, history):
         if not st:
             try:
                 bot.answer_callback_query(c.id, "لا توجد عملية.")
-            except Exception: 
                 pass
+            except Exception: pass
             return
         action = c.data.split(":",1)[1]
         if action == "cancel":
             _unban_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         try:
             unban_user(st["user_id"], c.from_user.id)
             log_action(c.from_user.id, "user:unban", reason=f"uid:{st['user_id']}")
             bot.send_message(c.message.chat.id, "✅ تم فكّ الحظر.")
+            _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (فكّ الحظر).")
         except Exception as e:
             bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
         finally:
@@ -848,8 +856,8 @@ def register(bot, history):
             pass
         try:
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception: 
             pass
+        except Exception: pass
 
     @bot.message_handler(func=lambda m: m.text == "✉️ رسالة لعميل" and allowed(m.from_user.id, "user:message_by_id"))
     def msg_by_id_start(m):
@@ -858,21 +866,25 @@ def register(bot, history):
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def msg_by_id_get_id(m):
+        # 1) قراءة الآيدي والتحقق
         try:
             uid = parse_user_id(m.text)
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.", reply_markup=_admin_back_cancel_kb())
 
+        # 2) تحقق أنه عميل مسجّل في قاعدة البيانات
         try:
             q = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
-            exists = bool(q.data)
+            exists = bool(q.data)  # عدّل حسب شكل الاسترجاع عندك (مثلاً: len(q.data) > 0)
         except Exception as e:
+            # سجّل الخطأ لمرجعية سريعة
             logging.exception("User lookup failed for uid=%s", uid)
             return bot.reply_to(m, "⚠️ حدث خطأ أثناء التحقق من المستخدم. حاول لاحقًا.")
 
         if not exists:
             return bot.reply_to(m, f"❌ لا يوجد عميل بهذا الآيدي: {uid}")
 
+        # 3) انتقال للخطوة التالية: طلب نص الرسالة
         _msg_by_id_pending[m.from_user.id] = {"step": "ask_text", "user_id": uid}
 
         kb = types.InlineKeyboardMarkup(row_width=1)
@@ -880,8 +892,8 @@ def register(bot, history):
 
         return bot.reply_to(
             m,
-            f"✅ سيتم الإرسال إلى المستخدم <code>{uid}</code>.\nأرسل نص الرسالة الآن (أو أرسل /cancel للإلغاء):",
-            reply_markup=kb, parse_mode="HTML"
+            f"✅ سيتم الإرسال إلى المستخدم {uid}.\nأرسل نص الرسالة الآن (أو أرسل /cancel للإلغاء):",
+            reply_markup=kb
         )
 
     @bot.message_handler(func=lambda m: _msg_by_id_pending.get(m.from_user.id, {}).get("step") == "ask_text")
@@ -893,7 +905,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ الحالة غير صالحة. أعد البدء.")
         st["text"] = m.text
         _msg_by_id_pending[m.from_user.id] = st
-        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("✔️ إرسال", callback_data=f"adm_msgid:send:{uid}"),
             types.InlineKeyboardButton("✖️ إلغاء", callback_data="adm_msgid:cancel"),
@@ -915,22 +927,25 @@ def register(bot, history):
         if action == "cancel":
             _msg_by_id_pending.pop(c.from_user.id, None)
             try:
-                bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
+                bot.answer_callback_query(c.id, "❎ أُلغي.");
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if action == "send":
             uid = int(parts[2])
             text = st.get("text") or ""
             try:
                 text = _append_bot_link_for_user(text)
+                # إن كانت notify_user تدعم HTML، اتركها؛ إن لم تكن كذلك استبدل بالسطر التالي:
+                # bot.send_message(uid, text, parse_mode="HTML")
                 notify_user(bot, uid, text)
                 log_action(c.from_user.id, "user:message_by_id", reason=f"to:{uid}")
                 bot.send_message(c.message.chat.id, "✅ تم الإرسال.")
+                _notify_admin_success(c.message.chat.id)
             except Exception as e:
                 bot.send_message(c.message.chat.id, f"❌ تعذّر الإرسال: {e}")
             finally:
@@ -941,8 +956,8 @@ def register(bot, history):
                 pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
 
     @bot.message_handler(func=lambda m: m.text == "🧩 تشغيل/إيقاف المزايا" and allowed(m.from_user.id, "feature:toggle"))
     def features_home(m):
@@ -983,6 +998,7 @@ def register(bot, history):
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=_features_markup(0))
         except Exception:
             pass
+        _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (مزامنة المزايا).")
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_g:"))
     def _features_group_cb(c):
@@ -993,14 +1009,14 @@ def register(bot, history):
             if not group:
                 try:
                     bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
-                except Exception: 
                     pass
+                except Exception: pass
                 return
             kb = _features_group_items_markup(group, int(page))
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
         except Exception as e:
             logging.exception("[ADMIN] feature group cb failed: %s", e)
-
+            
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_tg:") and _is_admin_cb(c))
     def adm_feature_toggle_in_group(call: types.CallbackQuery):
         try:
@@ -1009,35 +1025,38 @@ def register(bot, history):
         except Exception:
             try:
                 bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
-            except Exception: 
                 pass
+            except Exception: pass
             return
         try:
             grouped = list_features_grouped() or {}
+            # رجّع اسم المجموعة الحقيقي من الـ slug
             group = next((n for n in grouped.keys() if _slug(n) == gslug), None)
             if not group:
                 return bot.answer_callback_query(call.id, "❌ المجموعة غير موجودة.")
             kb = _features_group_items_markup(group, int(page_s))
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=kb)
             bot.answer_callback_query(call.id, "✅ تم التحديث.")
+            _notify_admin_success(call.message.chat.id)
         except Exception:
             try:
                 bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
-            except Exception: 
                 pass
-
+            except Exception: pass
+        
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
     def _features_group_toggle_all(c):
         try:
             _, slug, to, page = c.data.split(":", 3)
             to = int(to)
             grouped = list_features_grouped() or {}
+            # رجّع الاسم الحقيقي من الـslug
             group = next((n for n in grouped.keys() if _slug(n) == slug), None)
             if not group:
                 try:
                     bot.answer_callback_query(c.id, "❌ المجموعة غير موجودة.")
-                except Exception: 
                     pass
+                except Exception: pass
                 return
             for it in grouped.get(group, []) or []:
                 k = it.get("key")
@@ -1052,10 +1071,11 @@ def register(bot, history):
                 pass
             kb = _features_group_items_markup(group, int(page))
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
+            _notify_admin_success(c.message.chat.id)
         except Exception as e:
             logging.exception("[ADMIN] feature group toggle-all failed: %s", e)
 
-    # تسجيل هاندلرات التحويلات (مرة واحدة)
+    # تسجيل هاندلرات التحويلات (كما هي)
     cash_transfer.register(bot, history)
     companies_transfer.register_companies_transfer(bot, history)
 
@@ -1065,6 +1085,7 @@ def register(bot, history):
     except Exception:
         pass
 
+    # إلغاء لأي وضع إدخال للأدمن (/cancel)
     @bot.message_handler(commands=['cancel'])
     def _admin_cancel_any(msg: types.Message):
         _clear_admin_states(msg.from_user.id)
@@ -1122,17 +1143,20 @@ def register(bot, history):
         if data["mode"] == "text":
             if m.content_type != "text":
                 return bot.reply_to(m, "❌ المطلوب نص فقط.")
-            msg = f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{m.text}\n{BAND}"
+            # نص (احترافي)
+            msg = f"{BAND}\n<b>📩 إشعار من الإدارة</b>\n{m.text}\n{BAND}"
             bot.send_message(uid, _append_bot_link_for_user(msg), parse_mode="HTML")
         else:
             if m.content_type != "photo":
                 return bot.reply_to(m, "❌ المطلوب صورة فقط.")
+            # صورة (احترافي)
             cap = m.caption or ""
-            cap_msg = f"{BAND}\n📩 <b>رسالة من الإدارة</b>\n{cap}\n{BAND}"
+            cap_msg = f"{BAND}\n<b>📩 إشعار من الإدارة</b>\n{cap}\n{BAND}"
             bot.send_photo(uid, m.photo[-1].file_id,
                            caption=_append_bot_link_for_user(cap_msg),
                            parse_mode="HTML")
-        bot.reply_to(m, "✅ أُرسلت للعميل. يمكنك متابعة تأكيد/إلغاء الطلب.")
+        bot.reply_to(m, "✅ أُرسلت للعميل. تقدر تكمل بتأكيد/إلغاء الطلب.")
+        _notify_admin_success(m.chat.id)
 
     @bot.callback_query_handler(func=lambda call: (call.data.startswith("admin_queue_")) and (call.from_user.id in ADMINS or call.from_user.id == ADMIN_MAIN_ID))
     def handle_queue_action(call):
@@ -1156,7 +1180,7 @@ def register(bot, history):
         req_text = req.get("request_text") or ""
         name     = _user_name(bot, user_id)
 
-        # ✳️ إذا كان الطلب محجوز من أدمن آخر — نخرج فورًا
+        # ✳️ إذا كان الطلب محجوز من أدمن آخر — نخرج فورًا (كما هو موجود أصلًا)
         locked_by = payload.get('locked_by')
         locked_by_username = payload.get('locked_by_username')
         admin_msgs = payload.get('admin_msgs') or []
@@ -1189,7 +1213,8 @@ def register(bot, history):
                     bot.edit_message_caption(lock_line + req_text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=call.message.reply_markup)
             except Exception:
                 pass
-
+                
+        # لو ما في قفل، فعِّل القفل (كما هو عندك)
         if not locked_by:
             try:
                 locked_by_username = _admin_mention(bot, call.from_user.id)
@@ -1197,6 +1222,7 @@ def register(bot, history):
                 new_payload['locked_by'] = int(call.from_user.id)
                 new_payload['locked_by_username'] = locked_by_username
 
+                # 👇 تحديث ذرّي: لا ينجح إلا إذا كان القفل فارغًا حاليًا
                 res = (
                     get_table('pending_requests')
                     .update({'payload': new_payload})
@@ -1209,26 +1235,29 @@ def register(bot, history):
 
                 _disable_others(except_aid=call.message.chat.id, except_mid=call.message.message_id)
                 _mark_locked_here()
-                payload = new_payload
+                payload = new_payload  # حدّث النسخة المحلية
+
             except Exception as e:
                 logging.exception('[ADMIN] failed to set lock: %s', e)
 
         # === زر الاستلام (📌 استلمت) ===
         if action == 'claim':
             try:
+                # علِّم أنه "تم الاستلام" لتُفتح الأزرار لاحقًا
                 claimed_payload = dict(payload)
                 claimed_payload['claimed'] = True
                 get_table('pending_requests').update({'payload': claimed_payload}).eq('id', request_id).execute()
             except Exception as e:
                 logging.exception('[ADMIN] failed to set claimed: %s', e)
             bot.answer_callback_query(call.id, '✅ تم الاستلام — أنت المتحكم بهذا الطلب الآن.')
-            _notify_admin_success(call, request_id, user_id, "استلام التحكم", [f"العميل: <code>{user_id}</code>"])
+            _notify_admin_success(call.message.chat.id, "✅ تمت العملية بنجاح (استلام الطلب).")
             return
 
         # === تأجيل الطلب ===
         if action == "postpone":
             if not (call.from_user.id == ADMIN_MAIN_ID or call.from_user.id in ADMINS or allowed(call.from_user.id, "queue:postpone")):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
+            # إزالة الكيبورد لتجنُّب النقر المزدوج
             try:
                 from services.telegram_safety import remove_inline_keyboard
             except Exception:
@@ -1237,7 +1266,7 @@ def register(bot, history):
                 remove_inline_keyboard(bot, call.message)
             except Exception:
                 pass
-
+            # ... بعد remove_inline_keyboard و قبل أو بعد postpone_request
             new_payload = dict(payload)
             for k in ("locked_by", "locked_by_username", "claimed"):
                 new_payload.pop(k, None)
@@ -1247,26 +1276,31 @@ def register(bot, history):
                 pass
 
             postpone_request(request_id)
-
-            # 🧑‍💻 إشعار العميل — صياغة احترافية
+    
+            # إبلاغ العميل — صياغة احترافية
             try:
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n⏳ عزيزي {_h(name)}, تم إعادة جدولة طلبك مؤقتًا بسبب ضغط مرتفع على النظام."
-                    f"\nنعتذر عن الإزعاج، وسيتم تنفيذ الطلب في أقرب وقت ممكن."
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"⏳ إشعار بخصوص طلبك رقم {request_id}:\n"
+                        f"تمت إعادة جدولة الطلب مؤقتًا نظرًا لضغط أو عطل طارئ. نعتذر عن التأخير، ونعمل على تنفيذه بأقرب وقت ممكن.\n"
+                        f"شكرًا لتفهمك.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
             except Exception as e:
                 logging.error(f"[admin] postpone notify error: {e}", exc_info=True)
+            # تأكيد للأدمن + بدء فترة الخمول
             try:
                 bot.answer_callback_query(call.id, "✅ تم تأجيل الطلب.")
             except Exception:
                 pass
             queue_cooldown_start(bot)
-            _notify_admin_success(call, request_id, user_id, "تأجيل الطلب")
+            _notify_admin_success(call.message.chat.id, "✅ تمت العملية بنجاح (تأجيل الطلب).")
             return
-
+            
         # === إلغاء الطلب ===
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
@@ -1287,33 +1321,43 @@ def register(bot, history):
                     add_balance(user_id, reserved, "إلغاء حجز (قديم)")
 
             delete_pending_request(request_id)
-            # 🧑‍💻 إشعار العميل
             if reserved > 0:
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🚫 تم إلغاء طلبك، وتم رد {_fmt_syp(reserved)} إلى محفظتك بنجاح."
-                    f"\nيسعدنا مساعدتك في أي وقت."
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"🚫 تم إلغاء طلبك رقم {request_id}.\n"
+                        f"🔁 تمت إعادة {_fmt_syp(reserved)} من المبلغ المحجوز إلى محفظتك.\n"
+                        f"يسعدنا خدمتك في أي وقت.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
             else:
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🚫 تم إلغاء طلبك. إن وُجد مبلغ محجوز فقد تمت إعادته."
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"🚫 تم إلغاء طلبك رقم {request_id}.\n"
+                        f"🔁 إن وُجد أي مبلغ محجوز فقد تمت إعادته إلى محفظتك.\n"
+                        f"يسعدنا خدمتك في أي وقت.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
             bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب.")
             queue_cooldown_start(bot)
 
+            # NEW: لو طلب شحن — نظّف قفل الشحن المحلي
             if typ in ("recharge", "wallet_recharge", "deposit"):
                 _clear_recharge_local_lock_safe(user_id)
 
-            _notify_admin_success(call, request_id, user_id, "إلغاء الطلب", [f"القيمة المرجعة: {_fmt_syp(reserved)}"])
+            _notify_admin_success(call.message.chat.id, "✅ تمت العملية بنجاح (إلغاء الطلب).")
             return
 
         # === قبول الطلب ===
         if action == "accept":
+            # ✅ فحص صلاحية التأكيد (مهم)
             if not allowed(call.from_user.id, "queue:confirm"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
 
@@ -1357,8 +1401,21 @@ def register(bot, history):
                 except Exception:
                     pass
 
+                # سجل استخدام الخصم (إن وُجد فرق بين السعر قبل/بعد)
+                try:
+                    before = int(payload.get("price_before") or amt)
+                    after  = int(payload.get("price") or amt)
+                    if before and after and before != after:
+                        try:
+                            percent = max(0, int(round((before - after) * 100.0 / before)))
+                        except Exception:
+                            percent = None
+                        record_discount_use(None, user_id, before, after, purchase_id=None)
+                except Exception:
+                    pass
+
                 delete_pending_request(request_id)
-                # 🧑‍💻 إشعار العميل — احترافي
+                # ✅ رسالة احترافية للعميل
                 try:
                     before = int(payload.get("price_before") or amt)
                     after  = int(payload.get("price") or amt)
@@ -1366,21 +1423,25 @@ def register(bot, history):
                     before, after = amt, amt
                 msg_lines = [
                     f"{BAND}",
-                    f"✅ تم تنفيذ طلبك بنجاح يا {_h(name)}.",
-                    f"• الخدمة: {_h(product_name)}",
-                    f"• الحساب/المعرف: {_h(_safe(player_id))}",
+                    f"✅ تم تنفيذ طلبك رقم {request_id} بنجاح.",
+                    f"المنتج: {_h(product_name)}",
+                    f"المعرّف/الحساب: {_h(_safe(player_id))}",
                 ]
                 if before != after:
                     try:
                         percent = max(0, int(round((before - after) * 100.0 / max(1, before))))
                     except Exception:
                         percent = None
-                    msg_lines.append(f"• السعر قبل الخصم: {_fmt_syp(before)}")
-                    msg_lines.append(f"• السعر بعد الخصم: {_fmt_syp(after)}" + (f" (خصم {percent}%)" if percent is not None else ""))
-                msg_lines.append(f"• المبلغ المخصوم: {_fmt_syp(amt)}")
+                    msg_lines.append(f"السعر قبل الخصم: {_fmt_syp(before)}")
+                    msg_lines.append(f"السعر بعد الخصم: {_fmt_syp(after)}" + (f" (خصم {percent}%)" if percent is not None else ""))
+                msg_lines.append(f"المبلغ المخصوم من محفظتك: {_fmt_syp(amt)}")
+                msg_lines.append("شكرًا لاختيارك خدمتنا. لأي استفسار يرجى مراسلة الدعم.")
                 msg_lines.append(f"{BAND}")
-                bot.send_message(user_id, "\n".join(msg_lines), parse_mode="HTML")
-
+                bot.send_message(
+                    user_id,
+                    _append_bot_link_for_user("\n".join(msg_lines)),
+                    parse_mode="HTML"
+                )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
@@ -1388,14 +1449,9 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
-                _notify_admin_success(call, request_id, user_id, "تنفيذ الطلب", [
-                    f"النوع: منتج رقمي",
-                    f"الخدمة: {_h(product_name)}",
-                    f"المعرف: {_h(_safe(player_id))}",
-                    f"المبلغ: {_fmt_syp(amt)}",
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (قبول طلب #{request_id}).")
                 return
-
+            # ——— إعلانات ———
             elif typ in ("ads", "media"):
                 amt     = int(amt or payload.get("price", 0) or 0)
                 times   = payload.get("count")
@@ -1411,25 +1467,41 @@ def register(bot, history):
                     pass
 
                 delete_pending_request(request_id)
+
+                # NEW: أنشئ إعلانًا فعّالًا لبدء النشر الآلي ضمن نافذة 9→22 بتوقيت دمشق
+                try:
+                    times_total = int(payload.get("times_total") or payload.get("count") or 1)
+                    duration_days = int(payload.get("duration_days") or 30)
+                    add_channel_ad(
+                        user_id=user_id,
+                        times_total=times_total,
+                        price=amt,
+                        contact=contact,
+                        ad_text=ad_text,
+                        images=images,
+                        duration_days=duration_days,
+                    )
+                except Exception as e:
+                    logging.exception("[ADMIN][ADS] add_channel_ad failed: %s", e)
+
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n📣 تم تأكيد باقة الإعلان ({_h(title)})."
-                    f"\n• تم خصم: {_fmt_syp(amt)}"
-                    f"\n• جهة التواصل: {_h(contact)}"
-                    f"\nسيتم النشر آليًا حسب الجدولة."
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم تفعيل باقة الإعلان الخاصة بك بنجاح.\n"
+                        f"الاسم: {title}\n"
+                        f"القيمة: {_fmt_syp(amt)}\n"
+                        f"سيتم النشر تلقائيًا وفق الجدولة المعتمدة.\n"
+                        f"شاكرين ثقتك بنا.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
-                _notify_admin_success(call, request_id, user_id, "تنفيذ باقة إعلان", [
-                    f"الباقة: {title}",
-                    f"المبلغ: {_fmt_syp(amt)}",
-                    f"تواصل: {_h(contact)}",
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (قبول إعلان #{request_id}).")
                 return
-
             elif typ in ("syr_unit", "mtn_unit"):
                 price = int(payload.get("price", 0) or amt or 0)
                 num   = _extract_identifier(payload, req_text, ["number","msisdn","phone"])
@@ -1444,11 +1516,18 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n✅ تم تحويل {_h(unit_name)} للرقم «{_h(_safe(num))}»."
-                    f"\n• المبلغ المخصوم: {_fmt_syp(price)}"
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم تنفيذ طلبك رقم {request_id}.\n"
+                        f"الخدمة: {_h(unit_name)}\n"
+                        f"الرقم: {_h(_safe(num))}\n"
+                        f"المبلغ المخصوم: {_fmt_syp(price)}\n"
+                        f"لأي مساعدة إضافية نحن بالخدمة.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
+
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
@@ -1456,9 +1535,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
-                _notify_admin_success(call, request_id, user_id, "تنفيذ تحويل وحدات", [
-                    f"الوحدة: {unit_name}", f"الرقم: {_h(_safe(num))}", f"المبلغ: {_fmt_syp(price)}"
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (تحويل وحدات #{request_id}).")
                 return
 
             elif typ in ("syr_bill", "mtn_bill"):
@@ -1475,9 +1552,13 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🧾 تم دفع {_h(label)} للرقم «{_h(_safe(num))}»."
-                    f"\n• المبلغ المخصوم: {_fmt_syp(amt)}"
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم سداد { _h(label) } للرقم «{_h(_safe(num))}» بنجاح.\n"
+                        f"المبلغ المخصوم: {_fmt_syp(amt)}\n"
+                        f"شاكرين تعاملكم.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -1487,9 +1568,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
-                _notify_admin_success(call, request_id, user_id, "سداد فاتورة", [
-                    f"النوع: {label}", f"الرقم: {_h(_safe(num))}", f"المبلغ: {_fmt_syp(amt)}"
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (فاتورة #{request_id}).")
                 return
 
             elif typ == "internet":
@@ -1508,19 +1587,20 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🌐 تم دفع فاتورة الإنترنت ({_h(name_lbl)}) للرقم «{_h(_safe(phone))}»."
-                    f"\n• المبلغ المخصوم: {_fmt_syp(amt)}"
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم سداد اشتراك الإنترنت ({_h(name_lbl)}) للرقم «{_h(_safe(phone))}» بنجاح.\n"
+                        f"المبلغ المخصوم: {_fmt_syp(amt)}\n"
+                        f"سعداء بخدمتكم دائمًا.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
-                _notify_admin_success(call, request_id, user_id, "سداد إنترنت", [
-                    f"المزوّد/السرعة: {name_lbl}", f"الرقم: {_h(_safe(phone))}", f"المبلغ: {_fmt_syp(amt)}"
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (إنترنت #{request_id}).")
                 return
-
             elif typ == "cash_transfer":
                 amt       = int(amt or payload.get("price", 0) or 0)
                 number    = payload.get("number")
@@ -1536,9 +1616,13 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n💸 تم تنفيذ {_h(name_lbl)} للرقم «{_h(_safe(number))}»."
-                    f"\n• المبلغ المخصوم: {_fmt_syp(amt)}"
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم تنفيذ { _h(name_lbl) } للرقم «{_h(_safe(number))}» بنجاح.\n"
+                        f"المبلغ المخصوم: {_fmt_syp(amt)}\n"
+                        f"تم التنفيذ وفق البيانات المزوّدة.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML",
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -1548,9 +1632,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
-                _notify_admin_success(call, request_id, user_id, "تحويل كاش", [
-                    f"النوع: {name_lbl}", f"الرقم: {_h(_safe(number))}", f"المبلغ: {_fmt_syp(amt)}"
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (تحويل كاش #{request_id}).")
                 return
 
             elif typ == "companies_transfer":
@@ -1568,9 +1650,13 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🏢 تم تنفيذ {_h(name_lbl)} للمستفيد «{_h(_safe(beneficiary_number))}»."
-                    f"\n• المبلغ المخصوم: {_fmt_syp(amt)}"
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم تنفيذ {_h(name_lbl)} للمستفيد «{_h(_safe(beneficiary_number))}» بنجاح.\n"
+                        f"المبلغ المخصوم: {_fmt_syp(amt)}\n"
+                        f"يسعدنا خدمتك دائمًا.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML",
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
@@ -1580,9 +1666,7 @@ def register(bot, history):
                     purge_state(user_id)
                 except Exception:
                     pass
-                _notify_admin_success(call, request_id, user_id, "حوالة شركات", [
-                    f"الشركة: {company or '—'}", f"المستفيد: {_h(_safe(beneficiary_number))}", f"المبلغ: {_fmt_syp(amt)}"
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (حوالة شركات #{request_id}).")
                 return
 
             elif typ in ("university_fees",):
@@ -1600,17 +1684,19 @@ def register(bot, history):
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n🎓 تم دفع {_h(name_lbl)} للرقم الجامعي «{_h(_safe(university_id))}»."
-                    f"\n• المبلغ المخصوم: {_fmt_syp(amt)}"
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"✅ تم سداد {_h(name_lbl)} للرقم الجامعي «{_h(_safe(university_id))}» بنجاح.\n"
+                        f"المبلغ المخصوم: {_fmt_syp(amt)}\n"
+                        f"بالتوفيق.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ العملية")
                 queue_cooldown_start(bot)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
-                _notify_admin_success(call, request_id, user_id, "سداد رسوم جامعية", [
-                    f"الجامعة: {university or '—'}", f"الرقم: {_h(_safe(university_id))}", f"المبلغ: {_fmt_syp(amt)}"
-                ])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (رسوم جامعية #{request_id}).")
                 return
 
             elif typ in ("recharge", "wallet_recharge", "deposit"):
@@ -1622,11 +1708,13 @@ def register(bot, history):
                     except Exception:
                         return
 
+                # تأكد أن للمستخدم صفًّا في جدول المحفظة
                 try:
                     register_user_if_not_exist(user_id, name)
                 except Exception:
                     pass
 
+                # ✅ الشحن الفعلي للمحفظة
                 try:
                     r = add_balance(
                         user_id,
@@ -1646,17 +1734,22 @@ def register(bot, history):
                     except Exception:
                         return
 
+                # سجل العملية في دفتر الإداري اختيارياً
                 try:
-                    log_action(call.from_user.id, "admin:deposit", reason=f"req={request_id}")
+                    log_admin_deposit(call.from_user.id, user_id, int(amount), f"req={request_id}")
                 except Exception as _e:
                     logging.exception("[ADMIN_LEDGER] deposit log failed: %s", _e)
 
+                # نظّف الطلب من الطابور وأبلغ العميل
                 delete_pending_request(request_id)
                 bot.send_message(
                     user_id,
-                    f"{BAND}\n⚡ تم شحن محفظتك بقيمة {_fmt_syp(amount)} بنجاح."
-                    f"\nيمكنك الآن إتمام مشترياتك مباشرة."
-                    f"\n{BAND}",
+                    _append_bot_link_for_user(
+                        f"{BAND}\n"
+                        f"⚡ تم شحن محفظتك بمبلغ {_fmt_syp(amount)} بنجاح.\n"
+                        f"متاح الآن للاستخدام في جميع الخدمات.\n"
+                        f"{BAND}"
+                    ),
                     parse_mode="HTML"
                 )
                 bot.answer_callback_query(call.id, "✅ تم تنفيذ عملية الشحن")
@@ -1664,7 +1757,7 @@ def register(bot, history):
 
                 _clear_recharge_local_lock_safe(user_id)
                 _prompt_admin_note(bot, call.from_user.id, user_id)
-                _notify_admin_success(call, request_id, user_id, "شحن المحفظة", [f"المبلغ: {_fmt_syp(amount)}"])
+                _notify_admin_success(call.message.chat.id, f"✅ تمت العملية بنجاح (شحن محفظة #{request_id}).")
                 return
 
             else:
@@ -1685,13 +1778,16 @@ def register(bot, history):
             note = f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{msg.text.strip()}\n{BAND}"
             bot.send_message(user_id, _append_bot_link_for_user(note), parse_mode="HTML")
             bot.send_message(msg.chat.id, "✅ أُرسلت الملاحظة للعميل.")
+            _notify_admin_success(msg.chat.id)
         elif msg.content_type == "photo":
             cap = msg.caption or ""
             cap_note = f"{BAND}\n📝 <b>ملاحظة من الإدارة</b>\n{cap}\n{BAND}"
             bot.send_photo(user_id, msg.photo[-1].file_id,
                            caption=_append_bot_link_for_user(cap_note),
                            parse_mode="HTML")
+
             bot.send_message(msg.chat.id, "✅ أُرسلت الصورة للعميل.")
+            _notify_admin_success(msg.chat.id)
         else:
             bot.send_message(msg.chat.id, "❌ نوع الرسالة غير مدعوم. ابعت نص أو صورة، أو /skip للتخطي.")
         _accept_pending.pop(msg.from_user.id, None)
@@ -1704,6 +1800,7 @@ def register(bot, history):
             return bot.reply_to(m, "صلاحية الأدمن فقط.")
         return admin_menu(m)
 
+    # افتح لوحة الأدمن بالضغط على أزرار مثل: "ادمن" / "الأدمن" / "لوحة الأدمن" / "Admin"…
     @bot.message_handler(func=lambda m: (m.text and _is_admin_msg(m) and _match_admin_alias(
         m.text, ["الأدمن","الادمن","لوحة الأدمن","ادمن","Admin","ADMIN"]
     )))
@@ -1767,20 +1864,20 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if c.data in ("bw_dest_clients","bw_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
             try:
                 bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if c.data == "bw_confirm":
             sent = 0
@@ -1805,13 +1902,14 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ ترحيب أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+            _notify_admin_success(c.message.chat.id)
 
     # =========================
     # 📢 عرض اليوم (مباشر)
@@ -1829,7 +1927,7 @@ def register(bot, history):
         if not body:
             return bot.reply_to(m, "❌ النص فارغ.")
         _broadcast_pending[m.from_user.id] = {"mode": "deal_confirm", "body": body, "dest": "clients"}
-        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bd_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bd_dest_channel"),
@@ -1854,20 +1952,20 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if c.data in ("bd_dest_clients","bd_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
             try:
                 bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-            except Exception: 
                 pass
+            except Exception: pass
             return
 
         if c.data == "bd_confirm":
@@ -1890,19 +1988,21 @@ def register(bot, history):
                 dest = CHANNEL_USERNAME or FORCE_SUB_CHANNEL_USERNAME
                 try:
                     bot.send_message(dest, _append_bot_link_for_channel(text), parse_mode="HTML")
+
                     sent = 1
                 except Exception:
                     pass
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ العرض أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+            _notify_admin_success(c.message.chat.id)
 
     # =========================
     # 📊 استفتاء سريع (مباشر)
@@ -1922,6 +2022,7 @@ def register(bot, history):
             return bot.reply_to(m, "❌ الصيغة غير صحيحة. المطلوب: سؤال + خيارين على الأقل.")
 
         q, raw_opts = lines[0], lines[1:]
+        # إزالة المكررات والإفراغ وقصّ حتى 10 خيارات (شرط تيليجرام)
         opts = []
         for o in raw_opts:
             if not o:
@@ -1959,20 +2060,20 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if c.data in ("bp_dest_clients","bp_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
             try:
                 bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-            except Exception: 
                 pass
+            except Exception: pass
             return
 
         if c.data == "bp_confirm":
@@ -1998,13 +2099,14 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الاستفتاء أُرسل ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
+            _notify_admin_success(c.message.chat.id)
 
     # =========================
     # 📝 رسالة من عندي (مباشر)
@@ -2020,7 +2122,7 @@ def register(bot, history):
         if not text:
             return bot.reply_to(m, "❌ النص فارغ.")
         _broadcast_pending[m.from_user.id] = {"mode": "free_confirm", "text": text, "dest": "clients"}
-        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb = types.InlineKeyboardMarkup(row_width=2)  # injected to prevent NameError
         kb.row(
             types.InlineKeyboardButton("👥 إلى العملاء", callback_data="bf_dest_clients"),
             types.InlineKeyboardButton("📣 إلى القناة",  callback_data="bf_dest_channel"),
@@ -2040,20 +2142,20 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "❎ أُلغي.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if c.data in ("bf_dest_clients","bf_dest_channel"):
             st["dest"] = "clients" if c.data.endswith("clients") else "channel"
             _broadcast_pending[c.from_user.id] = st
             try:
                 bot.answer_callback_query(c.id, "✅ تم اختيار الوجهة.")
-            except Exception: 
                 pass
+            except Exception: pass
             return
         if c.data == "bf_confirm":
             sent = 0
@@ -2076,14 +2178,15 @@ def register(bot, history):
             _broadcast_pending.pop(c.from_user.id, None)
             try:
                 bot.answer_callback_query(c.id, "🚀 تم الإرسال.")
-            except Exception: 
                 pass
+            except Exception: pass
             try:
                 bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-            except Exception: 
                 pass
+            except Exception: pass
             bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
-
+            _notify_admin_success(c.message.chat.id)
+    
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and _is_admin_msg(m))
     def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -2091,9 +2194,11 @@ def register(bot, history):
         kb.row("🔄 مزامنة المنتجات (DB)")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
-
+ 
+    # ⏳ عرض طابور الانتظار للأدمن
     @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and _is_admin_msg(m))
     def admin_queue_list(m: types.Message):
+        # حمّل أول 30 طلب أقدم فالأحدث
         try:
             res = (
                 get_table("pending_requests")
@@ -2117,6 +2222,7 @@ def register(bot, history):
             req_txt = (r.get("request_text") or "").strip()
             payload = r.get("payload") or {}
 
+            # لوحة الأزرار للطلب
             kb = types.InlineKeyboardMarkup(row_width=3)
             kb.row(
                 types.InlineKeyboardButton("📌 استلمت", callback_data=f"admin_queue_claim_{rid}"),
@@ -2129,24 +2235,29 @@ def register(bot, history):
                 types.InlineKeyboardButton("🖼️ صورة",  callback_data=f"admin_queue_photo_{rid}"),
             )
 
+            # نص الرسالة (نحافظ على HTML لو موجود)
             head = f"🆕 طلب #{rid} — {name}\n"
             try:
                 sent = bot.send_message(m.chat.id, head + req_txt, parse_mode="HTML", reply_markup=kb)
             except Exception:
                 sent = bot.send_message(m.chat.id, head + req_txt, reply_markup=kb)
 
+            # خزّن مرجع رسالة الأدمن في payload.admin_msgs لدعم نظام القفل
             try:
                 admin_msgs = (payload.get("admin_msgs") or [])
                 admin_msgs.append({"admin_id": m.chat.id, "message_id": sent.message_id})
-                payload["admin_msgs"] = admin_msgs[-20:]
+                payload["admin_msgs"] = admin_msgs[-20:]  # احتفظ بآخر 20 فقط
                 get_table("pending_requests").update({"payload": payload}).eq("id", rid).execute()
+
             except Exception as ee:
                 logging.exception("[ADMIN] update admin_msgs failed: %s", ee)
 
+    # ✅ بدّل إدخال الـID بمتصفح ملفات/منتجات إنلاين
     @bot.message_handler(func=lambda m: m.text in ["🚫 إيقاف منتج", "✅ تشغيل منتج"] and _is_admin_msg(m))
     def admin_products_browser(m):
         bot.send_message(m.chat.id, "اختر الملف لعرض منتجاته:", reply_markup=_admin_products_groups_markup())
 
+    # 🔄 مزامنة كل المنتجات المعرفة في PRODUCTS إلى جدول products
     @bot.message_handler(func=lambda m: m.text == "🔄 مزامنة المنتجات (DB)" and _is_admin_msg(m))
     def seed_products(m):
         try:
@@ -2156,6 +2267,7 @@ def register(bot, history):
                     items.append((p.product_id, p.name, group))
             created = bulk_ensure_products(items)
             bot.reply_to(m, f"✅ تمت المزامنة.\nأُنشئ/تأكّد {created} صف(ًا).")
+            _notify_admin_success(m.chat.id, "✅ تمت العملية بنجاح (مزامنة المنتجات).")
         except Exception as e:
             logging.exception("[ADMIN] bulk ensure products failed: %s", e)
             bot.reply_to(m, "❌ فشلت المزامنة. تفقد السجلات.")
@@ -2170,6 +2282,7 @@ def register(bot, history):
             bot.edit_message_text(f"📁 {group_name} — اختر منتجًا:", call.message.chat.id, call.message.message_id,
                                   reply_markup=_admin_products_list_markup(group_name))
         except Exception:
+            # لو تعذّر التعديل أرسل رسالة جديدة
             bot.send_message(call.message.chat.id, f"📁 {group_name} — اختر منتجًا:", reply_markup=_admin_products_list_markup(group_name))
         bot.answer_callback_query(call.id)
 
@@ -2196,8 +2309,9 @@ def register(bot, history):
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_prod_t:") and _is_admin_cb(c))
     def adm_product_toggle(call: types.CallbackQuery):
+        # كان سابقًا: _, pid, to = call.data.split(":")
         try:
-            _, pid, to = call.data.split(":", 2)
+            _, pid, to = call.data.split(":", 2)  # آمن حتى لو زاد المحتوى مستقبلًا
         except ValueError:
             return bot.answer_callback_query(call.id, "❌ تنسيق غير صحيح.")
         pid, to = int(pid), bool(int(to))
@@ -2213,14 +2327,16 @@ def register(bot, history):
         except Exception:
             bot.send_message(call.message.chat.id, txt, reply_markup=_admin_product_actions_markup(pid))
         bot.answer_callback_query(call.id, "تم التحديث.")
+        _notify_admin_success(call.message.chat.id)
 
     # ===== لوحة المزايا (Feature Flags) =====
+
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_t:") and _is_admin_cb(c))
     def adm_feature_toggle(call: types.CallbackQuery):
         try:
             prefix = "adm_feat_t:"
             tail = call.data[len(prefix):] if call.data.startswith(prefix) else call.data
-            parts = tail.rsplit(":", 2)
+            parts = tail.rsplit(":", 2)  # <= 3 عناصر
             if len(parts) == 3:
                 key, to, page_s = parts
                 try:
@@ -2254,6 +2370,7 @@ def register(bot, history):
             except Exception:
                 pass
         bot.answer_callback_query(call.id, "✅ تم التحديث.")
+        _notify_admin_success(call.message.chat.id)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_p:") and _is_admin_cb(c))
     def adm_feature_page(call: types.CallbackQuery):
@@ -2283,6 +2400,7 @@ def register(bot, history):
     def quick_reports(m):
         dep, pur, _ = totals_deposits_and_purchases_syp()
         lines = [f"💰 إجمالي الإيداعات: {dep:,} ل.س", f"🧾 إجمالي الشراء: {pur:,} ل.س"]
+        # أفضل 5 عملاء خلال 7 أيام (إضافة جديدة)
         try:
             top5 = top5_clients_week()
             if top5:
@@ -2312,15 +2430,20 @@ def register(bot, history):
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر نوع الرسالة للإرسال إلى الجميع:", reply_markup=kb)
 
-# === أدوات مساعدة خارج register ===
+# === نقلناها إلى مستوى الموديول لتتفادا NameError ===
 def _collect_all_user_ids() -> set[int]:
-    """يرجع مجموعة بكل user_id المعروفين (من الجدول + الأدمن)."""
+    """
+    يرجع مجموعة بكل user_id المعروفين (من الجدول + الأدمن).
+    """
     ids: set[int] = set()
+
+    # نسحب كل المستخدمين من الجدول
     try:
         rs = get_table(USERS_TABLE).select("user_id").execute()
         rows = rs.data or []
     except Exception:
         rows = []
+
     for r in rows:
         try:
             uid = int(r.get("user_id") or 0)
@@ -2328,10 +2451,13 @@ def _collect_all_user_ids() -> set[int]:
                 ids.add(uid)
         except Exception:
             pass
+
+    # اختياري: إضافة الأدمن الرئيسي وباقي الأدمنين لسهولة الاختبار
     try:
         ids.add(int(ADMIN_MAIN_ID))
     except Exception:
         pass
+
     try:
         for aid in ADMINS:
             try:
@@ -2340,11 +2466,13 @@ def _collect_all_user_ids() -> set[int]:
                 pass
     except Exception:
         pass
-    return ids
 
+    return ids
+    
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and _is_admin_msg(m))
     def admins_roles(m):
+        # انتبه: لا تستورد داخل الدالة إذا المتغيرات متاحة أصلاً بالموديول
         ids_str = ", ".join(str(x) for x in ADMINS)
         bot.send_message(m.chat.id, f"الأدمن الرئيسي: {ADMIN_MAIN_ID}\nالأدمنون: {ids_str}")
 
@@ -2352,7 +2480,6 @@ def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS)) and _match_admin_alias(m.text, ["النظام","إعدادات النظام","اعدادات النظام","الاعدادات"]))
     def system_menu_alias(m):
         return system_menu(m)
-
     def system_menu(m):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.add(
@@ -2369,15 +2496,15 @@ def _register_admin_roles(bot):
         )
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
-
+        
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
     def system_actions(c):
         try:
             act = c.data.split(":",1)[1]
             if act == "maint_on":
-                set_maintenance(True);  bot.answer_callback_query(c.id, "تم تفعيل الصيانة.")
+                set_maintenance(True);  bot.answer_callback_query(c.id, "تم تفعيل الصيانة."); _notify_admin_success(c.message.chat.id)
             elif act == "maint_off":
-                set_maintenance(False); bot.answer_callback_query(c.id, "تم إلغاء الصيانة.")
+                set_maintenance(False); bot.answer_callback_query(c.id, "تم إلغاء الصيانة."); _notify_admin_success(c.message.chat.id)
             elif act == "health":
                 try:
                     _ = get_table("features").select("id").limit(1).execute()
@@ -2385,16 +2512,19 @@ def _register_admin_roles(bot):
                 except Exception:
                     msg = "❌ مشكلة في الاتصال بقاعدة البيانات"
                 bot.answer_callback_query(c.id, msg, show_alert=True)
+
             elif act == "cleanup":
                 try:
-                    purge_state()
-                    delete_inactive_users()
+                    purge_state()           # من services.state_service (مستوردة أعلى الملف)
+                    delete_inactive_users() # من services.cleanup_service (مستوردة أعلى الملف)
                     bot.answer_callback_query(c.id, "تم تنظيف الحالات المؤقتة.")
+                    _notify_admin_success(c.message.chat.id)
                 except Exception:
                     bot.answer_callback_query(c.id, "تعذّر التنظيف.")
+
             elif act == "forcesub":
                 try:
-                    force_sub_recheck(); bot.answer_callback_query(c.id, "تمت إعادة فحص الاشتراك.")
+                    force_sub_recheck(); bot.answer_callback_query(c.id, "تمت إعادة فحص الاشتراك."); _notify_admin_success(c.message.chat.id)
                 except Exception:
                     bot.answer_callback_query(c.id, "تعذّر إعادة الفحص.")
             elif act == "logs":
@@ -2411,6 +2541,8 @@ def _register_admin_roles(bot):
     # =========================
     # 🎟️ أكواد/نِسَب خصم
     # =========================
+    # نفترض أن ADMINS, ADMIN_MAIN_ID, parse_user_id, USERS_TABLE, get_table معرفة فوق
+
     def _is_admin(uid: int) -> bool:
         return (uid in ADMINS) or (uid == ADMIN_MAIN_ID)
 
@@ -2441,10 +2573,13 @@ def _register_admin_roles(bot):
             ended     = bool(r.get("ends_at")) and not effective
             state     = "🟢" if effective else ("⏳" if ended else "🔴")
             to        = '0' if effective else '1'
+
+            # عنوان الزر
             if scope == "user" and r.get("user_id"):
                 title = f"{pct}٪ — عميل {r['user_id']}"
             else:
                 title = f"{pct}٪ — عام"
+
             kb.add(types.InlineKeyboardButton(f"{state} {title}",
                                               callback_data=f"disc:toggle:{did}:{to}"))
             kb.row(
@@ -2476,6 +2611,7 @@ def _register_admin_roles(bot):
             try:
                 create_discount(scope=scope, percent=int(pct))
                 bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم.")
+                _notify_admin_success(c.message.chat.id)
             except Exception as e:
                 bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
             return discount_menu(c.message)
@@ -2499,6 +2635,7 @@ def _register_admin_roles(bot):
             try:
                 set_discount_active(did, bool(int(to)))
                 bot.answer_callback_query(c.id, "تم التبديل.")
+                _notify_admin_success(c.message.chat.id)
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر التبديل.")
             return discount_menu(c.message)
@@ -2508,6 +2645,7 @@ def _register_admin_roles(bot):
             try:
                 n = _disc_toggle_all(to)
                 bot.answer_callback_query(c.id, f"تم تحديث {n} كود.")
+                _notify_admin_success(c.message.chat.id)
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر التحديث.")
             return discount_menu(c.message)
@@ -2519,10 +2657,11 @@ def _register_admin_roles(bot):
             try:
                 end_discount_now(did)
                 bot.answer_callback_query(c.id, "⏳ تم إنهاء الخصم.")
+                _notify_admin_success(c.message.chat.id)
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
             return discount_menu(c.message)
-
+            
         elif act == "delete":
             if len(parts) < 3:
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
@@ -2530,6 +2669,7 @@ def _register_admin_roles(bot):
             try:
                 delete_discount(did)
                 bot.answer_callback_query(c.id, "🗑 تم الحذف.")
+                _notify_admin_success(c.message.chat.id)
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الحذف.")
             return discount_menu(c.message)
@@ -2548,8 +2688,8 @@ def _register_admin_roles(bot):
         _disc_new_user_state.pop(c.from_user.id, None)
         try:
             bot.answer_callback_query(c.id, "❎ أُلغي.")
-        except Exception: 
             pass
+        except Exception: pass
         return discount_menu(c.message)
 
     @bot.message_handler(func=lambda m: _disc_new_user_state.get(m.from_user.id, {}).get("step") == "ask_user")
@@ -2577,8 +2717,8 @@ def _register_admin_roles(bot):
             if nums:
                 try:
                     uid = int("".join(nums))
-                except Exception: 
-                    uid = None
+                    pass
+                except Exception: uid = None
         if uid is None:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة أو /cancel.")
         try:
@@ -2615,6 +2755,8 @@ def _register_admin_roles(bot):
         bot.answer_callback_query(c.id)
         return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
 
+    # --- Discounts: choose user duration ---
+    # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
@@ -2631,16 +2773,19 @@ def _register_admin_roles(bot):
             create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
             _disc_new_user_state.pop(c.from_user.id, None)
             bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+            _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (خصم لعميل).")
 
+            # ⬅️ إشعار العميل
             try:
                 dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
                 msg = (
                     f"{BAND}\n"
-                    f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}."
-                    f"\nنتمنى لك تجربة تسوّق موفّقة."
-                    f"\n{BAND}"
+                    f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
+                    f"استمتع بالتوفير عند الشراء من البوت.\n"
+                    f"{BAND}"
                 )
                 try:
+                    # لو عندك notify_user مفعّلة
                     notify_user(bot, uid_i, _append_bot_link_for_user(msg))
                 except Exception:
                     bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
@@ -2652,6 +2797,7 @@ def _register_admin_roles(bot):
         return discount_menu(c.message)
 
     def _disc_toggle_all(_to: bool) -> int:
+        """تشغيل/إيقاف جميع أكواد الخصم دفعة واحدة."""
         try:
             items = list_discounts() or []
         except Exception:
@@ -2667,6 +2813,7 @@ def _register_admin_roles(bot):
         return changed
 
     def _get_user_by_id(uid: int):
+        """قراءة صف العميل من جدول houssin363 عبر user_id فقط."""
         try:
             r = (
                 get_table(USERS_TABLE)
@@ -2681,9 +2828,11 @@ def _register_admin_roles(bot):
             logging.exception("manage_user: DB error: %s", e)
             return None
 
+ 
     # =========================
     # 👤 إدارة عميل — مبسّطة
     # =========================
+
     @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
     @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
     def manage_user_menu(m):
@@ -2691,7 +2840,6 @@ def _register_admin_roles(bot):
         rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
         rk.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "أرسل آيدي العميل (أرقام):\n/cancel لإلغاء", reply_markup=rk)
-
     @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
     def manage_user_get_id(m):
         txt = (m.text or "").strip()
@@ -2704,6 +2852,7 @@ def _register_admin_roles(bot):
         except Exception:
             return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
 
+        # التحقق بالـ user_id فقط
         try:
             q = (get_table(USERS_TABLE)
                  .select("user_id,name,balance,points")
@@ -2715,7 +2864,7 @@ def _register_admin_roles(bot):
             if not row:
                 return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
         except Exception as e:
-            logging.exception("manage_user: DB error: %s", e)
+            import logging; logging.exception("manage_user: DB error: %s", e)
             return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
 
         _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
@@ -2732,7 +2881,10 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("💸 تعويض",              callback_data=f"mu:refund:{uid}"),
             types.InlineKeyboardButton("٪ خصم لهذا العميل",     callback_data=f"mu:disc:{uid}"),
         )
-        kb.row(types.InlineKeyboardButton("🧾 آخر 5 طلبات",        callback_data=f"mu:last5:{uid}"))
+        kb.row(
+            types.InlineKeyboardButton("🧾 آخر 5 طلبات",        callback_data=f"mu:last5:{uid}"),
+        )
+
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
         bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
 
@@ -2755,8 +2907,8 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
             return admin_menu(c.message)
-
         if act == "disc":
+            # فتح فلو الخصم الجاهز لكن لعميل معيّن
             _disc_new_user_state[c.from_user.id] = {"step": "ask_pct", "user_id": uid}
             kb = types.InlineKeyboardMarkup(row_width=3)
             for p in (1, 2, 3):
@@ -2770,6 +2922,7 @@ def _register_admin_roles(bot):
                     reply_markup=kb
                 )
                 bot.answer_callback_query(c.id)
+                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (بدء خصم لعميل).")
             except Exception:
                 pass
             return
@@ -2785,8 +2938,11 @@ def _register_admin_roles(bot):
                     for x in rows
                 ]
                 bot.send_message(c.message.chat.id, "\n".join(lines))
+                _notify_admin_success(c.message.chat.id)
             except Exception:
                 bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
+         
+            # اطلب الآيدي من جديد...
             _manage_user_state[c.from_user.id] = {"step": "ask_id"}
             try:
                 rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -2805,18 +2961,22 @@ def _register_admin_roles(bot):
             bot.send_message(c.message.chat.id, f"اكتب الرسالة للعميل <code>{uid}</code>:", parse_mode="HTML")
             try:
                 bot.answer_callback_query(c.id)
+                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (فتح مراسلة العميل).")
             except Exception:
                 pass
             return
 
         if act == "refund":
+            # أوقف ask_id مؤقتًا كي لا يتداخل مع إدخال مبلغ التعويض
             _manage_user_state.pop(c.from_user.id, None)
             _refund_state[c.from_user.id] = {"user_id": uid}
+
             bot.send_message(c.message.chat.id, "اكتب قيمة التعويض (ل.س).")
             try:
                 bot.answer_callback_query(c.id)
+                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (بدء تعويض).")
             except Exception:
-                pass
+              pass
             return
 
         if act == "profile":
@@ -2825,6 +2985,7 @@ def _register_admin_roles(bot):
                 row = (getattr(u, "data", None) or [None])[0] or {}
             except Exception:
                 row = {}
+            # الرصيد من خدمة المحفظة إن متاحة
             try:
                 bal = get_balance(uid)
             except Exception:
@@ -2838,11 +2999,13 @@ def _register_admin_roles(bot):
             bot.send_message(c.message.chat.id, txt)
             try:
                 bot.answer_callback_query(c.id)
+                _notify_admin_success(c.message.chat.id)
             except Exception:
                 pass
             return
 
         if act == "ban":
+            # إعادة استخدام فلو الحظر العام
             _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
             kb = types.InlineKeyboardMarkup(row_width=2)
             kb.row(
@@ -2853,6 +3016,7 @@ def _register_admin_roles(bot):
             bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
             try:
                 bot.answer_callback_query(c.id)
+                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (إعداد الحظر).")
             except Exception:
                 pass
             return
@@ -2862,6 +3026,7 @@ def _register_admin_roles(bot):
                 unban_user(uid, c.from_user.id)
                 log_action(c.from_user.id, "user:unban", reason=f"uid:{uid}")
                 bot.send_message(c.message.chat.id, "✅ تم فكّ الحظر.")
+                _notify_admin_success(c.message.chat.id)
             except Exception as e:
                 bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
             try:
@@ -2870,11 +3035,12 @@ def _register_admin_roles(bot):
                 pass
             return
 
+        # فرع افتراضي لأي فعل غير معروف
         try:
             bot.answer_callback_query(c.id, "❌ غير مفهوم")
         except Exception:
             pass
-
+            
     @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
     def _refund_amount(m):
         st = _refund_state.get(m.from_user.id)
@@ -2889,16 +3055,20 @@ def _register_admin_roles(bot):
         try:
             add_balance(uid, int(amount), "تعويض إداري")
             bot.reply_to(m, f"✅ تم تعويض <code>{uid}</code> بمقدار {amount:,} ل.س", parse_mode="HTML")
+            _notify_admin_success(m.chat.id, "✅ تمت العملية بنجاح (تعويض).")
+
+            # إشعار العميل (احترافي)
             try:
                 note = (
                     f"{BAND}\n"
-                    f"💸 تم إضافة تعويض إلى محفظتك بقيمة {_fmt_syp(amount)}."
-                    f"\nلو عندك أي استفسار، يسعدنا خدمتك."
-                    f"\n{BAND}"
+                    f"💸 تم إضافة رصيد تعويضي إلى محفظتك بقيمة {_fmt_syp(amount)}.\n"
+                    f"يمكنك استخدامه مباشرة في خدماتنا.\n"
+                    f"{BAND}"
                 )
                 bot.send_message(uid, _append_bot_link_for_user(note), parse_mode="HTML")
             except Exception:
                 pass
+
         except Exception as e:
             bot.reply_to(m, f"❌ فشل التعويض: {e}")
         finally:
@@ -2909,6 +3079,24 @@ def _register_admin_roles(bot):
             try:
                 bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
             except Exception:
-                pass
+                pass      
 
-# ✅ لا تُعيد تعريف _register_admin_roles مرة أخرى هنا (كان سبب عطب سابق)
+    # تسجيل هاندلرات التحويلات (كما هي)
+    cash_transfer.register(bot, history)
+    companies_transfer.register_companies_transfer(bot, history)
+
+    # زرع مزايا افتراضية (مرة عند الإقلاع)
+    try:
+        ensure_seed()
+    except Exception:
+        pass
+
+    
+# ⚠️ لا تعيد تعريف _register_admin_roles إن كانت معرفة — هذا يمنع كسر أزرار (إدارة عميل/أكواد خصم)
+try:
+    _register_admin_roles  # موجودة أعلاه
+except NameError:
+    def _register_admin_roles(bot):
+        pass
+
+ 
