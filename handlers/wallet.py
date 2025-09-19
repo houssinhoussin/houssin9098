@@ -297,7 +297,7 @@ def register(bot, history=None):
             "اضغط (✅ موافق) للمتابعة أو (⬅️ رجوع) للعودة."
         )
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add("✅ موافق", "⬅️ رجوع", "🔄 ابدأ من جديد")
+        kb.add("✅ موافق", "⬅️ رجوع")
         bot.send_message(msg.chat.id, warning, reply_markup=kb)
 
     @bot.message_handler(func=lambda msg: msg.text == "✅ موافق")
@@ -349,21 +349,7 @@ def register(bot, history=None):
         # أي حالة غير معروفة → للقائمة
         bot.send_message(msg.chat.id, "تم الرجوع.", reply_markup=keyboards.wallet_menu())
         transfer_steps.pop(user_id, None)
-
-    # "🔄 ابدأ من جديد" يمسح الحالة ويعيد شاشة التحذير
-    @bot.message_handler(func=lambda msg: msg.text == "🔄 ابدأ من جديد")
-    def restart_flow(msg):
-        user_id = msg.from_user.id
-        name = _name_from_msg(msg)
-        transfer_steps.pop(user_id, None)
-        warning = (
-            f"⚠️ يا {name}، تنبيه مهم:\n"
-            "الخدمة دي تحويل مباشر بين العملاء. رجاءً راجع البيانات كويس قبل التأكيد.\n\n"
-            f"{CANCEL_HINT}\n\n"
-            "اضغط (✅ موافق) للمتابعة أو (⬅️ رجوع) للعودة."
-        )
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add("✅ موافق", "⬅️ رجوع", "🔄 ابدأ من جديد")
+        kb.add("✅ موافق", "⬅️ رجوع")
         bot.send_message(msg.chat.id, warning, reply_markup=kb)
 
     @bot.message_handler(func=lambda msg: transfer_steps.get(msg.from_user.id, {}).get("step") == "awaiting_id")
@@ -455,7 +441,7 @@ def register(bot, history=None):
         transfer_steps[user_id].update({"step": "awaiting_confirm", "amount": int(amount)})
 
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add("✅ تأكيد التحويل", "⬅️ رجوع", "🔄 ابدأ من جديد")
+        kb.add("✅ تأكيد التحويل", "⬅️ رجوع")
         bot.send_message(
             msg.chat.id,
             f"📤 يا {name}، تؤكد تحويل <b>{_fmt_syp(amount)}</b> إلى الحساب <code>{target_id}</code>؟\n{CANCEL_HINT}",
