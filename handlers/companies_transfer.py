@@ -200,7 +200,7 @@ def register_companies_transfer(bot, history):
             reply_markup=companies_transfer_menu()
         )
 
-    # ===== أزرار عامة: رجوع / ابدأ من جديد =====
+    # ===== أزرار عامة: رجوع =====
     @bot.callback_query_handler(func=lambda call: call.data in ["back", "restart"])
     def back_or_restart(call):
         user_id = call.from_user.id
