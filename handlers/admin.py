@@ -2997,7 +2997,7 @@ def disc_new_user_choose_duration(c: types.CallbackQuery):
 # ─────────────────────────────────────
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new:global:"))
 def disc_new_global_choose_pct(c):
-    if not _is_admin_cb(c.from_user.id):
+    if not _is_admin_cb(c):
         try:
             return bot.answer_callback_query(c.id, "غير مصرح.")
         except Exception:
@@ -3024,13 +3024,13 @@ def disc_new_global_choose_pct(c):
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_global_dur:"))
 def disc_new_global_create(c):
-    if not _is_admin_cb(c.from_user.id):
+    if not _is_admin_cb(c):
         try:
             return bot.answer_callback_query(c.id, "غير مصرح.")
         except Exception:
             return
     try:
-        _, _, pct_str, days_str = c.data.split(":")
+        _, _, pct_str, days_str = c.data.split(\":\")
         pct = int(pct_str); days = int(days_str)
     except Exception:
         return bot.answer_callback_query(c.id, "❌ بيانات غير صالحة.")
