@@ -18,7 +18,7 @@ def _norm_btn_text(s: str) -> str:
 def _match_admin_alias(txt: str, aliases: list[str]) -> bool:
     t = _norm_btn_text(txt)
     return any(_norm_btn_text(a) == t for a in aliases)
-    
+
 import re
 import logging
 import os
@@ -328,7 +328,7 @@ def _admin_mention(bot, user_id: int) -> str:
 def _safe(v, dash="—"):
     v = ("" if v is None else str(v)).strip()
     return v if v else dash
-    
+
 import html
 def _h(x):
     try:
@@ -471,7 +471,7 @@ def _features_home_markup():
 def _features_markup(page: int = 0, page_size: int = 20):
     # ===== إزالة الازدواجية حسب *التسمية* =====
     items = list_features() or []
- 
+
     import re as _re
     def _norm_label(s: str) -> str:
         s = (s or "").strip()
@@ -790,7 +790,7 @@ def register(bot, history):
     def unban_start(m):
         _unban_pending[m.from_user.id] = {"step": "ask_id"}
         bot.send_message(m.chat.id, "أرسل آيدي العميل لفك الحظر.\n/cancel لإلغاء", reply_markup=_admin_back_cancel_kb())
-    
+
     @bot.message_handler(func=lambda m: _unban_pending.get(m.from_user.id, {}).get("step") == "ask_id")
     def unban_get_id(m):
         try:
@@ -998,7 +998,7 @@ def register(bot, history):
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=kb)
         except Exception as e:
             logging.exception("[ADMIN] feature group cb failed: %s", e)
-            
+
     @bot.callback_query_handler(func=lambda c: c.data.startswith("adm_feat_tg:") and _is_admin_cb(c))
     def adm_feature_toggle_in_group(call: types.CallbackQuery):
         try:
@@ -1024,7 +1024,7 @@ def register(bot, history):
                 bot.answer_callback_query(call.id, "❌ تعذّر التحديث.")
             except Exception:
                 pass
-        
+
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("adm_feat_gtoggle:"))
     def _features_group_toggle_all(c):
         try:
@@ -1187,7 +1187,7 @@ def register(bot, history):
                     bot.edit_message_caption(lock_line + req_text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=call.message.reply_markup)
             except Exception:
                 pass
-                
+
         if not locked_by:
             try:
                 locked_by_username = _admin_mention(bot, call.from_user.id)
@@ -1243,7 +1243,7 @@ def register(bot, history):
                 pass
 
             postpone_request(request_id)
-    
+
             try:
                 bot.send_message(
                     user_id,
@@ -1265,7 +1265,7 @@ def register(bot, history):
             queue_cooldown_start(bot)
             _notify_admin_success(call.message.chat.id, "✅ تمت العملية بنجاح (تأجيل الطلب).")
             return
-            
+
         if action == "cancel":
             if not allowed(call.from_user.id, "queue:cancel"):
                 return bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية لهذا الإجراء.")
@@ -2136,7 +2136,7 @@ def register(bot, history):
                 pass
             bot.send_message(c.message.chat.id, f"✅ الرسالة أُرسلت ({'القناة' if st['dest']=='channel' else f'{sent} عميل'}).")
             _notify_admin_success(c.message.chat.id)
-    
+
     @bot.message_handler(func=lambda m: m.text == "🛒 إدارة المنتجات" and _is_admin_msg(m))
     def admin_products_menu(m):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -2144,7 +2144,7 @@ def register(bot, history):
         kb.row("🔄 مزامنة المنتجات (DB)")
         kb.row("⬅️ رجوع")
         bot.send_message(m.chat.id, "اختر إجراء:", reply_markup=kb)
- 
+
     @bot.message_handler(func=lambda m: m.text == "⏳ طابور الانتظار" and _is_admin_msg(m))
     def admin_queue_list(m: types.Message):
         try:
@@ -2395,7 +2395,7 @@ def _collect_all_user_ids() -> set[int]:
     except Exception:
         pass
     return ids
-    
+
 def _register_admin_roles(bot):
     @bot.message_handler(func=lambda m: m.text == "👥 صلاحيات الأدمن" and _is_admin_msg(m))
     def admins_roles(m):
@@ -2423,7 +2423,7 @@ def _register_admin_roles(bot):
         )
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.send_message(m.chat.id, "قائمة النظام:", reply_markup=kb)
-        
+
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("sys:"))
     def system_actions(c):
         try:
@@ -2586,7 +2586,7 @@ def _register_admin_roles(bot):
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
             return discount_menu(c.message)
-            
+
         elif act == "delete":
             if len(parts) < 3:
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
@@ -2660,7 +2660,7 @@ def _register_admin_roles(bot):
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
     def disc_new_user_choose_pct(c):
-        if not _is_admin(c.from_user.id):
+        if not _is_admin_cb(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
         uid = int(uid); pct = int(pct)
@@ -2680,7 +2680,7 @@ def _register_admin_roles(bot):
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
-        if not _is_admin(c.from_user.id):
+        if not _is_admin_cb(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
         try:
@@ -2746,251 +2746,234 @@ def _register_admin_roles(bot):
             return None
 
     # =========================
-    # 👤 إدارة عميل — مبسّطة
-    # =========================
 
-    @bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID))
-    @bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and (m.from_user.id in ADMINS or m.from_user.id == ADMIN_MAIN_ID)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
-    def manage_user_menu(m):
-        _manage_user_state[m.from_user.id] = {"step": "ask_id"}
-        rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        rk.row("⬅️ رجوع")
-        bot.send_message(m.chat.id, "أرسل آيدي العميل (أرقام):\n/cancel لإلغاء", reply_markup=rk)
+# =========================
+# 👤 إدارة عميل — مبسّطة (نسخة مُصحّحة وموسَّعة)
+# =========================
 
-    @bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
-    def manage_user_get_id(m):
-        txt = (m.text or "").strip()
-        if txt in ("/admin", "/cancel", "⬅️ رجوع"):
-            _clear_admin_states(m.from_user.id)
-            return admin_menu(m)
+from telebot import types
 
+# يفترض وجود هذه المتغيّرات/الدوال مُعرّفة أعلى الملف:
+# - _manage_user_state, _disc_new_user_state
+# - _is_admin_msg, _is_admin_cb, allowed
+# - get_table, USERS_TABLE
+# - get_balance, create_discount
+# - _notify_admin_success, _user_name
+# - _get_user_by_id
+# - BAND, notify_user, _append_bot_link_for_user
+# - admin_menu
+
+# حافظ على قواميس الحالة إن لم تكن موجودة
+try:
+    _manage_user_state
+except NameError:
+    _manage_user_state = {}
+try:
+    _disc_new_user_state
+except NameError:
+    _disc_new_user_state = {}
+
+def _match_admin_alias(text, variants):
+    t = (text or "").strip()
+    return any(v in t for v in variants)
+
+@bot.message_handler(func=lambda m: m.text == "👤 إدارة عميل" and _is_admin_msg(m))
+@bot.message_handler(func=lambda m: (m.from_user and hasattr(m, 'text') and isinstance(m.text, str) and _is_admin_msg(m)) and _match_admin_alias(m.text, ["عميل","ادارة عميل","إدارة عميل","العميل"]))
+def manage_user_menu(m):
+    _manage_user_state[m.from_user.id] = {"step": "ask_id"}
+    rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    rk.row("⬅️ رجوع")
+    bot.send_message(m.chat.id, "أرسل آيدي العميل (أرقام):\n/cancel لإلغاء", reply_markup=rk)
+
+@bot.message_handler(func=lambda m: _manage_user_state.get(m.from_user.id, {}).get("step") == "ask_id")
+def manage_user_get_id(m: types.Message):
+    # 1) نحاول استخراج UID بأمان
+    try:
         try:
-            uid = parse_user_id(txt)
+            uid = parse_user_id(m.text)
         except Exception:
-            return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
+            uid = None
+        if uid is None:
+            import re
+            nums = re.findall(r"\d+", m.text or "")
+            if nums:
+                try:
+                    uid = int("".join(nums))
+                except Exception:
+                    uid = None
+    except Exception:
+        return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
 
+    if uid is None:
+        return bot.reply_to(m, "❌ آيدي غير صالح. أعد المحاولة، أو اكتب /cancel.")
+
+    # 2) تأكد أنه موجود بقاعدة البيانات
+    try:
+        ex = get_table(USERS_TABLE).select("user_id").eq("user_id", uid).limit(1).execute()
+        if not (getattr(ex, "data", None) or []):
+            return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في العملاء.")
+    except Exception:
+        return bot.reply_to(m, "❌ تعذّر التحقق من قاعدة البيانات الآن.")
+
+    _manage_user_state[m.from_user.id] = {"step": "menu", "user_id": uid}
+
+    # 3) اعرض قائمة إدارة العميل
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.row(
+        types.InlineKeyboardButton("📇 بيانات العميل", callback_data=f"mu:info:{uid}"),
+        types.InlineKeyboardButton("🧾 آخر 5 طلبات",  callback_data=f"mu:last5:{uid}"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("💸 تعويض",          callback_data=f"mu:refund:{uid}"),
+        types.InlineKeyboardButton("٪ خصم لهذا العميل", callback_data=f"mu:disc:{uid}"),
+    )
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
+    bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
+def manage_user_actions(c: types.CallbackQuery):
+    try:
+        _, act, uid_s = c.data.split(":", 2)
+        uid = int(uid_s)
+    except Exception:
         try:
-            q = (get_table(USERS_TABLE)
-                 .select("user_id,name,balance,points")
-                 .eq("user_id", uid)
-                 .limit(1)
-                 .execute())
-            rows = getattr(q, "data", None) or []
-            row = rows[0] if rows else None
-            if not row:
-                return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
-        except Exception as e:
-            logging.exception("manage_user: DB error: %s", e)
-            return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
-
-        _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
-        kb = types.InlineKeyboardMarkup(row_width=2)
-        kb.row(
-            types.InlineKeyboardButton("👁️ عرض مختصر", callback_data=f"mu:profile:{uid}"),
-            types.InlineKeyboardButton("✉️ رسالة",      callback_data=f"mu:message:{uid}"),
-        )
-        kb.row(
-            types.InlineKeyboardButton("⛔ حظر",        callback_data=f"mu:ban:{uid}"),
-            types.InlineKeyboardButton("✅ فكّ الحظر",  callback_data=f"mu:unban:{uid}"),
-        )
-        kb.row(
-            types.InlineKeyboardButton("💸 تعويض",              callback_data=f"mu:refund:{uid}"),
-            types.InlineKeyboardButton("٪ خصم لهذا العميل",     callback_data=f"mu:disc:{uid}"),
-        )
-        kb.row(
-            types.InlineKeyboardButton("🧾 آخر 5 طلبات",        callback_data=f"mu:last5:{uid}"),
-        )
-        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data=f"mu:back:{uid}"))
-        bot.send_message(m.chat.id, f"تم تحديد العميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mu:"))
-    def manage_user_actions(c):
-        try:
-            _, act, uid = c.data.split(":", 2)
-            uid = int(uid)
-        except Exception:
-            try:
-                bot.answer_callback_query(c.id, "❌ صيغة غير صحيحة.")
-            except Exception:
-                pass
-            return
-
-        if act == "back":
-            _manage_user_state.pop(c.from_user.id, None)
-            try:
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
-            return admin_menu(c.message)
-
-        if act == "disc":
-            _disc_new_user_state[c.from_user.id] = {"step": "ask_pct", "user_id": uid}
-            kb = types.InlineKeyboardMarkup(row_width=3)
-            for p in (1, 2, 3):
-                kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
-            kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
-            try:
-                bot.send_message(
-                    c.message.chat.id,
-                    f"اختر نسبة الخصم للعميل <code>{uid}</code>:",
-                    parse_mode="HTML",
-                    reply_markup=kb
-                )
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
-            return
-
-        if act == "last5":
-            try:
-                r = get_table("purchases").select(
-                    "created_at, product_name, price"
-                ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
-                rows = getattr(r, "data", []) or []
-                lines = ["🧾 آخر 5 عمليات:"] + [
-                    f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
-                    for x in rows
-                ]
-                bot.send_message(c.message.chat.id, "\n".join(lines))
-                _notify_admin_success(c.message.chat.id)
-            except Exception:
-                bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
-         
-            _manage_user_state[c.from_user.id] = {"step": "ask_id"}
-            try:
-                rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                rk.row("⬅️ رجوع")
-                bot.send_message(c.message.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
-            except Exception:
-                pass
-            try:
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
-            return
-
-        if act == "message":
-            _msg_by_id_pending[c.from_user.id] = {"step": "ask_text", "user_id": uid}
-            bot.send_message(c.message.chat.id, f"اكتب الرسالة للعميل <code>{uid}</code>:", parse_mode="HTML")
-            try:
-                bot.answer_callback_query(c.id)
-                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (فتح مراسلة العميل).")
-            except Exception:
-                pass
-            return
-
-        if act == "refund":
-            _manage_user_state.pop(c.from_user.id, None)
-            _refund_state[c.from_user.id] = {"user_id": uid}
-            bot.send_message(c.message.chat.id, "اكتب قيمة التعويض (ل.س).")
-            try:
-                bot.answer_callback_query(c.id)
-                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (بدء تعويض).")
-            except Exception:
-              pass
-            return
-
-        if act == "profile":
-            try:
-                u = get_table(USERS_TABLE).select("user_id,name,balance,points").eq("user_id", uid).limit(1).execute()
-                row = (getattr(u, "data", None) or [None])[0] or {}
-            except Exception:
-                row = {}
-            try:
-                bal = get_balance(uid)
-            except Exception:
-                bal = row.get("balance")
-            txt = (
-                f"👤 العميل: {uid}\n"
-                f"الاسم: {row.get('name') or '—'}\n"
-                f"الرصيد: {('—' if bal is None else f'{int(bal):,} ل.س')}\n"
-                f"النقاط: {int(row.get('points') or 0)}"
-            )
-            bot.send_message(c.message.chat.id, txt)
-            try:
-                bot.answer_callback_query(c.id)
-                _notify_admin_success(c.message.chat.id)
-            except Exception:
-                pass
-            return
-
-        if act == "ban":
-            _ban_pending[c.from_user.id] = {"step": "ask_duration", "user_id": uid}
-            kb = types.InlineKeyboardMarkup(row_width=2)
-            kb.row(
-                types.InlineKeyboardButton("🕒 1 يوم", callback_data=f"adm_ban_dur:1d"),
-                types.InlineKeyboardButton("🗓️ 7 أيام", callback_data=f"adm_ban_dur:7d"),
-            )
-            kb.row(types.InlineKeyboardButton("🚫 دائم", callback_data="adm_ban_dur:perm"))
-            bot.send_message(c.message.chat.id, f"اختر مدة الحظر للعميل <code>{uid}</code>:", parse_mode="HTML", reply_markup=kb)
-            try:
-                bot.answer_callback_query(c.id)
-                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (إعداد الحظر).")
-            except Exception:
-                pass
-            return
-
-        if act == "unban":
-            try:
-                unban_user(uid, c.from_user.id)
-                log_action(c.from_user.id, "user:unban", reason=f"uid:{uid}")
-                bot.send_message(c.message.chat.id, "✅ تم فكّ الحظر.")
-                _notify_admin_success(c.message.chat.id)
-            except Exception as e:
-                bot.send_message(c.message.chat.id, f"❌ تعذّر فكّ الحظر: {e}")
-            try:
-                bot.answer_callback_query(c.id)
-            except Exception:
-                pass
-            return
-
-        try:
-            bot.answer_callback_query(c.id, "❌ غير مفهوم")
+            bot.answer_callback_query(c.id, "❌ صيغة غير صحيحة.")
         except Exception:
             pass
-            
-    @bot.message_handler(func=lambda m: m.from_user.id in _refund_state)
-    def _refund_amount(m):
-        st = _refund_state.get(m.from_user.id)
-        if not st:
-            return
-        uid = st["user_id"]
+        return
+
+    if act == "back":
+        _manage_user_state.pop(c.from_user.id, None)
         try:
-            amount = int((m.text or "").strip())
+            bot.answer_callback_query(c.id)
         except Exception:
-            return bot.reply_to(m, "❌ أدخل رقم صحيح.")
+            pass
+        return admin_menu(c.message)
 
+    if act == "info":
+        # بطاقة بيانات مختصرة للعميل
         try:
-            add_balance(uid, int(amount), "تعويض إداري")
-            bot.reply_to(m, f"✅ تم تعويض <code>{uid}</code> بمقدار {amount:,} ل.س", parse_mode="HTML")
-            _notify_admin_success(m.chat.id, "✅ تمت العملية بنجاح (تعويض).")
-
+            u = _get_user_by_id(uid) or {}
+            name = (u.get("name") or "").strip() or _user_name(bot, uid)
+            bal  = 0
             try:
-                note = (
-                    f"{BAND}\n"
-                    f"💸 تم إضافة رصيد تعويضي إلى محفظتك بقيمة {_fmt_syp(amount)}.\n"
-                    f"يمكنك استخدامه مباشرة في خدماتنا.\n"
-                    f"{BAND}"
-                )
-                bot.send_message(uid, _append_bot_link_for_user(note), parse_mode="HTML")
+                bal = int(get_balance(uid) or 0)
+            except Exception:
+                bal = 0
+            approved = "نعم" if (u.get("admin_approved") is True or u.get("admin_approved") == 1) else "لا"
+            points   = int(u.get("points") or 0)
+            msg = (
+                f"📇 <b>بيانات العميل</b>\n"
+                f"• الآيدي: <code>{uid}</code>\n"
+                f"• الاسم: {name}\n"
+                f"• الرصيد: {bal:,} ل.س\n"
+                f"• مُعتمد: {approved}\n"
+                f"• النقاط: {points}"
+            )
+            try:
+                bot.answer_callback_query(c.id)
             except Exception:
                 pass
-
+            bot.send_message(c.message.chat.id, msg, parse_mode="HTML")
+            _notify_admin_success(c.message.chat.id)
         except Exception as e:
-            bot.reply_to(m, f"❌ فشل التعويض: {e}")
-        finally:
-            _refund_state.pop(m.from_user.id, None)
-            _manage_user_state[m.from_user.id] = {"step": "ask_id"}
-            rk = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            rk.row("⬅️ رجوع")
-            try:
-                bot.send_message(m.chat.id, "أرسل آيدي العميل من جديد:", reply_markup=rk)
-            except Exception:
-                pass
+            bot.send_message(c.message.chat.id, f"❌ تعذّر جلب البيانات: {e}")
+        return
 
-# ⚠️ لا تعيد تعريف _register_admin_roles إن كانت معرفة
-try:
-    _register_admin_roles  # موجودة أعلاه
-except NameError:
-    def _register_admin_roles(bot):
+    if act == "disc":
+        # ابدأ باختيار نسبة الخصم (بدون إرسال رسالة نجاح مبكرة)
+        _disc_new_user_state[c.from_user.id] = {"step": "ask_pct", "user_id": uid}
+        kb = types.InlineKeyboardMarkup(row_width=3)
+        for p in (1, 2, 3):
+            kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+        try:
+            bot.send_message(
+                c.message.chat.id,
+                f"اختر نسبة الخصم للعميل <code>{uid}</code>:",
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+            bot.answer_callback_query(c.id)
+        except Exception:
+            pass
+        return
+
+    if act == "last5":
+        try:
+            r = get_table("purchases").select(
+                "created_at, product_name, price"
+            ).eq("user_id", uid).order("created_at", desc=True).limit(5).execute()
+            rows = getattr(r, "data", []) or []
+            lines = ["🧾 آخر 5 عمليات:"] + [
+                f"- {str(x.get('created_at',''))[:16]} — {x.get('product_name','')} — {int(x.get('price',0)):,} ل.س"
+                for x in rows
+            ]
+            bot.send_message(c.message.chat.id, "\n".join(lines))
+            _notify_admin_success(c.message.chat.id)
+        except Exception:
+            bot.send_message(c.message.chat.id, "لا يمكن جلب السجل.")
+        return
+
+# —— خصم لعميل: اختيار النسبة ثم المدة — (تصحيح تحقق الصلاحية)
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
+def disc_new_user_choose_pct(c: types.CallbackQuery):
+    if not _is_admin_cb(c):
+        return bot.answer_callback_query(c.id, "غير مصرح.")
+    _, _, uid, pct = c.data.split(":", 3)
+    uid = int(uid); pct = int(pct)
+    _disc_new_user_state[c.from_user.id] = {"step": "ask_dur", "user_id": uid, "pct": pct}
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.row(
+        types.InlineKeyboardButton("يوم",    callback_data=f"disc:new_user_dur:{uid}:{pct}:1"),
+        types.InlineKeyboardButton("3 أيام", callback_data=f"disc:new_user_dur:{uid}:{pct}:3"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_user_dur:{uid}:{pct}:7"),
+        types.InlineKeyboardButton("♾ يدوي", callback_data=f"disc:new_user_dur:{uid}:{pct}:0"),
+    )
+    kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+    try:
+        bot.answer_callback_query(c.id)
+    except Exception:
         pass
+    return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
+def disc_new_user_choose_duration(c: types.CallbackQuery):
+    if not _is_admin_cb(c):
+        return bot.answer_callback_query(c.id, "غير مصرح.")
+    _, _, uid, pct, days = c.data.split(":", 4)
+    try:
+        uid_i  = int(uid)
+        pct_i  = int(pct)
+        days_i = int(days)
+    except Exception:
+        uid_i, pct_i, days_i = int(uid), int(pct), 0
+
+    try:
+        create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
+        _disc_new_user_state.pop(c.from_user.id, None)
+        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+        _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (خصم لعميل).")
+
+        # إشعار المستخدم (اختياري)
+        try:
+            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+            msg = (
+                f"{BAND}\n"
+                f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
+                f"استمتع بالتوفير عند الشراء من البوت.\n"
+                f"{BAND}"
+            )
+            try:
+                notify_user(bot, uid_i, _append_bot_link_for_user(msg))
+            except Exception:
+                bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
+        except Exception:
+            pass
+
+    except Exception as e:
+        bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
+    # يمكنك الرجوع لقائمة الخصومات العامة إن وجدت، أو تجاهل ذلك:
+    # return discount_menu(c.message)
