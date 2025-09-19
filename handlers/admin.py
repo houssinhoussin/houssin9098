@@ -2478,51 +2478,6 @@ def _register_admin_roles(bot):
         return discount_menu(m)
 
     def discount_menu(m):
-    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new:global:"))
-    def disc_new_global_choose_pct(c):
-        if not _is_admin_cb(c.from_user.id):
-            try:
-                return bot.answer_callback_query(c.id, "غير مصرح.")
-            except Exception:
-                return
-        try:
-            parts = c.data.split(":")
-            pct = int(parts[-1])
-        except Exception:
-            return bot.answer_callback_query(c.id, "❌ نسبة غير صالحة.")
-        kb = types.InlineKeyboardMarkup(row_width=3)
-        # مدد: دائم، يوم، يومان، أسبوع
-        kb.add(
-            types.InlineKeyboardButton("♾ دائم", callback_data=f"disc:new_global_dur:{pct}:0"),
-            types.InlineKeyboardButton("يوم",     callback_data=f"disc:new_global_dur:{pct}:1"),
-            types.InlineKeyboardButton("يومان",   callback_data=f"disc:new_global_dur:{pct}:2"),
-        )
-        kb.add(types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_global_dur:{pct}:7"))
-        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
-        try:
-            bot.answer_callback_query(c.id, f"اختر مدة خصم {pct}٪")
-        except Exception:
-            pass
-        return bot.send_message(c.message.chat.id, f"اختر مدة خصم {pct}٪:", reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_global_dur:"))
-    def disc_new_global_create(c):
-        if not _is_admin_cb(c.from_user.id):
-            try:
-                return bot.answer_callback_query(c.id, "غير مصرح.")
-            except Exception:
-                return
-        try:
-            _,_,_, pct_str, days_str = c.data.split(":")
-            pct = int(pct_str); days = int(days_str)
-        except Exception:
-            return bot.answer_callback_query(c.id, "❌ بيانات غير صالحة.")
-        try:
-            create_discount(scope="global", percent=pct, days=(days or None), active=True, source="admin")
-            bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم العام.")
-            _notify_admin_success(c.message.chat.id, f"✅ تم إنشاء خصم عام {pct}٪" + ("" if days == 0 else f" لمدة {days} يوم"))
-        except Exception as e:
-            bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
     
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
