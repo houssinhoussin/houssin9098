@@ -672,13 +672,12 @@ def register(bot, history):
         if "__admin_pending_handlers__" in globals():
             globals()["__admin_pending_handlers__"].clear()
     except Exception as _e:
-        import logging
         logging.exception("Admin: failed to replay pending handlers: %s", _e)
     # سجل أزرار الأدمن وقوائمها
     try:
         _register_admin_roles(bot)
     except Exception as __e:
-        import logging; logging.exception("Admin roles setup failed: %s", __e)
+        logging.exception("Admin roles setup failed: %s", __e)
     @bot.message_handler(func=lambda m: m.text == "⛔ حظر عميل" and allowed(m.from_user.id, "user:ban"))
     def ban_start(m):
         _ban_pending[m.from_user.id] = {"step": "ask_id"}
@@ -866,7 +865,6 @@ def register(bot, history):
             exists = bool(q.data)  # عدّل حسب شكل الاسترجاع عندك (مثلاً: len(q.data) > 0)
         except Exception as e:
             # سجّل الخطأ لمرجعية سريعة
-            import logging
             logging.exception("User lookup failed for uid=%s", uid)
             return bot.reply_to(m, "⚠️ حدث خطأ أثناء التحقق من المستخدم. حاول لاحقًا.")
 
@@ -2720,7 +2718,6 @@ def _register_admin_roles(bot):
             rows = getattr(r, "data", None) or []
             return rows[0] if rows else None
         except Exception as e:
-            import logging
             logging.exception("manage_user: DB error: %s", e)
             return None
 
@@ -2760,7 +2757,7 @@ def _register_admin_roles(bot):
             if not row:
                 return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
         except Exception as e:
-            import logging; logging.exception("manage_user: DB error: %s", e)
+            logging.exception("manage_user: DB error: %s", e)
             return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
 
         _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
@@ -3046,7 +3043,6 @@ def _register_admin_roles(bot):
             exists = bool(q.data)  # عدّل حسب شكل الاسترجاع عندك (مثلاً: len(q.data) > 0)
         except Exception as e:
             # سجّل الخطأ لمرجعية سريعة
-            import logging
             logging.exception("User lookup failed for uid=%s", uid)
             return bot.reply_to(m, "⚠️ حدث خطأ أثناء التحقق من المستخدم. حاول لاحقًا.")
 
@@ -4900,7 +4896,6 @@ def _register_admin_roles(bot):
             rows = getattr(r, "data", None) or []
             return rows[0] if rows else None
         except Exception as e:
-            import logging
             logging.exception("manage_user: DB error: %s", e)
             return None
 
@@ -4940,7 +4935,7 @@ def _register_admin_roles(bot):
             if not row:
                 return bot.reply_to(m, f"❌ الآيدي {uid} غير موجود في جدول {USERS_TABLE}.")
         except Exception as e:
-            import logging; logging.exception("manage_user: DB error: %s", e)
+            logging.exception("manage_user: DB error: %s", e)
             return bot.reply_to(m, "❌ تعذّر الوصول لقاعدة البيانات.")
 
         _manage_user_state[m.from_user.id] = {"step": "actions", "user_id": uid}
