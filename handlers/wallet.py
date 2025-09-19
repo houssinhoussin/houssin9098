@@ -60,7 +60,7 @@ def _card_footer() -> str:
 
 import logging
 from services.feature_flags import block_if_disabled
-
+from database.db import DEFAULT_TABLE
 transfer_steps = {}
 
 CANCEL_HINT = "✋ اكتب /cancel للإلغاء في أي وقت."
@@ -367,7 +367,7 @@ def register(bot, history=None):
             return
 
         # تحقق من أنّه عميل مسجّل
-        is_client = _select_single("USERS_TABLE", "user_id", target_id)
+        is_client = _select_single(DEFAULT_TABLE, "user_id", target_id)
         if not is_client:
             bot.send_message(
                 msg.chat.id,
