@@ -316,7 +316,7 @@ def register(bot, user_state):
         st = user_wholesale_state.get(uid)
         if not st:
             try:
-                bot.answer_callback_query(c.id, "انتهت الجلسة. ابدأ من جديد لو سمحت.", show_alert=True)
+                bot.answer_callback_query(c.id, "انتهت الجلسة. ارجع إلى القائمة الرئيسية.", show_alert=True)
             except Exception:
                 pass
             return
