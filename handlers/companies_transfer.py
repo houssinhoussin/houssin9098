@@ -146,7 +146,6 @@ def companies_transfer_menu():
         types.InlineKeyboardButton("🏦 شركة الفؤاد", callback_data="company_alfouad"),
         types.InlineKeyboardButton("🏦 شركة شخاشير", callback_data="company_shakhashir"),
         types.InlineKeyboardButton("⬅️ رجوع", callback_data="back"),
-        types.InlineKeyboardButton("🔄 ابدأ من جديد", callback_data="restart")
     )
     return kb
 
