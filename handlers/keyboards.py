@@ -10,7 +10,7 @@ def main_menu():
     # باقي الصفوف كما كانت
     markup.row("💳 شحن محفظتي", "💰 محفظتي")
     markup.row("📢 إعلاناتك", "🌐 صفحتنا")
-    markup.row("🛠️ الدعم الفني", "🔄 ابدأ من جديد")
+    markup.row("🛠️ الدعم الفني")
     return markup
 
 def products_menu():
@@ -40,21 +40,21 @@ def recharge_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row("📲 سيرياتيل كاش", "📲 أم تي إن كاش")
     markup.row("📲 شام كاش", "💳 Payeer")
-    markup.row("⬅️ رجوع", "🔄 ابدأ من جديد")
+    markup.row("⬅️ رجوع")
     return markup
 
 def cash_transfer_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row("تحويل إلى سيرياتيل كاش", "تحويل إلى أم تي إن كاش")
     markup.row("تحويل إلى شام كاش")
-    markup.row("⬅️ رجوع", "🔄 ابدأ من جديد")
+    markup.row("⬅️ رجوع")
     return markup
 
 def companies_transfer_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.row("شركة الهرم", "شركة الفؤاد")
     markup.row("شركة شخاشير")
-    markup.row("⬅️ رجوع", "🔄 ابدأ من جديد")
+    markup.row("⬅️ رجوع")
     return markup
 
 def syrian_balance_menu():
@@ -70,7 +70,7 @@ def wallet_menu():
     markup.row("💰 محفظتي", "🛍️ مشترياتي")
     markup.row("📑 سجل التحويلات")
     markup.row("🔁 تحويل من محفظتك إلى محفظة عميل آخر")
-    markup.row("⬅️ رجوع", "🔄 ابدأ من جديد")
+    markup.row("⬅️ رجوع")
     return markup
 
 def support_menu():
