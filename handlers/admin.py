@@ -2522,7 +2522,7 @@ def _register_admin_roles(bot):
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
     def discounts_actions(c):
-        if not _is_admin(c.from_user.id):
+        if not _is_admin_user_id(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         parts = (c.data or "").split(":")
         act = parts[1] if len(parts) > 1 else None
@@ -2653,14 +2653,15 @@ def _register_admin_roles(bot):
 
         _disc_new_user_state[m.from_user.id] = {"step": "ask_pct", "user_id": uid}
         kb = types.InlineKeyboardMarkup(row_width=3)
-        for p in (1, 2, 3):
-            kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
-        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+        for p in (5,10,15,20,25,30):
+                kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
+            kb.add(types.InlineKeyboardButton("٪ مخصص…", callback_data=f"disc:nu_custompct:{uid}"))
+            kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         return bot.send_message(m.chat.id, "اختر نسبة الخصم:", reply_markup=kb)
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
     def disc_new_user_choose_pct(c):
-        if not _is_admin(c.from_user.id):
+        if not _is_admin_user_id(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
         uid = int(uid); pct = int(pct)
@@ -2680,7 +2681,7 @@ def _register_admin_roles(bot):
 
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
-        if not _is_admin(c.from_user.id):
+        if not _is_admin_user_id(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct, days = c.data.split(":", 4)
         try:
@@ -2826,8 +2827,9 @@ def _register_admin_roles(bot):
         if act == "disc":
             _disc_new_user_state[c.from_user.id] = {"step": "ask_pct", "user_id": uid}
             kb = types.InlineKeyboardMarkup(row_width=3)
-            for p in (1, 2, 3):
+            for p in (5,10,15,20,25,30):
                 kb.add(types.InlineKeyboardButton(f"{p}٪", callback_data=f"disc:new_user_pct:{uid}:{p}"))
+            kb.add(types.InlineKeyboardButton("٪ مخصص…", callback_data=f"disc:nu_custompct:{uid}"))
             kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
             try:
                 bot.send_message(
@@ -2837,8 +2839,7 @@ def _register_admin_roles(bot):
                     reply_markup=kb
                 )
                 bot.answer_callback_query(c.id)
-                _notify_admin_success(c.message.chat.id, "✅ تمت العملية بنجاح (بدء خصم لعميل).")
-            except Exception:
+except Exception:
                 pass
             return
 
