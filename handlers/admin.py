@@ -2478,19 +2478,67 @@ def _register_admin_roles(bot):
         return discount_menu(m)
 
     def discount_menu(m):
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new:global:"))
+    def disc_new_global_choose_pct(c):
+        if not _is_admin_cb(c.from_user.id):
+            try:
+                return bot.answer_callback_query(c.id, "غير مصرح.")
+            except Exception:
+                return
+        try:
+            parts = c.data.split(":")
+            pct = int(parts[-1])
+        except Exception:
+            return bot.answer_callback_query(c.id, "❌ نسبة غير صالحة.")
+        kb = types.InlineKeyboardMarkup(row_width=3)
+        # مدد: دائم، يوم، يومان، أسبوع
+        kb.add(
+            types.InlineKeyboardButton("♾ دائم", callback_data=f"disc:new_global_dur:{pct}:0"),
+            types.InlineKeyboardButton("يوم",     callback_data=f"disc:new_global_dur:{pct}:1"),
+            types.InlineKeyboardButton("يومان",   callback_data=f"disc:new_global_dur:{pct}:2"),
+        )
+        kb.add(types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_global_dur:{pct}:7"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+        try:
+            bot.answer_callback_query(c.id, f"اختر مدة خصم {pct}٪")
+        except Exception:
+            pass
+        return bot.send_message(c.message.chat.id, f"اختر مدة خصم {pct}٪:", reply_markup=kb)
+
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_global_dur:"))
+    def disc_new_global_create(c):
+        if not _is_admin_cb(c.from_user.id):
+            try:
+                return bot.answer_callback_query(c.id, "غير مصرح.")
+            except Exception:
+                return
+        try:
+            _,_,_, pct_str, days_str = c.data.split(":")
+            pct = int(pct_str); days = int(days_str)
+        except Exception:
+            return bot.answer_callback_query(c.id, "❌ بيانات غير صالحة.")
+        try:
+            create_discount(scope="global", percent=pct, days=(days or None), active=True, source="admin")
+            bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم العام.")
+            _notify_admin_success(c.message.chat.id, f"✅ تم إنشاء خصم عام {pct}٪" + ("" if days == 0 else f" لمدة {days} يوم"))
+        except Exception as e:
+            bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
+    
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("➕ خصم عام 1٪", callback_data="disc:new:global:1"),
             types.InlineKeyboardButton("➕ خصم عام 2٪", callback_data="disc:new:global:2"),
         )
         kb.row(
-            types.InlineKeyboardButton("➕ خصم عام 3٪", callback_data="disc:new:global:3"),
+            types.InlineKeyboardButton("➕ خصم عام 3٪", callback_data="disc:new:global:2"),
             types.InlineKeyboardButton("➕ خصم لعميل",   callback_data="disc:new_user"),
         )
         try:
             rows = list_discounts(limit=25) or []
         except Exception:
             rows = []
+        # فلترة خصومات الأدمن فقط (استبعاد مصدر referral)
+        rows = [r for r in rows if (str(r.get('source') or 'admin').lower() != 'referral')]
         for r in rows:
             did    = str(r.get("id"))
             pct    = int(r.get("percent") or 0)
@@ -2668,7 +2716,7 @@ def _register_admin_roles(bot):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("يوم",    callback_data=f"disc:new_user_dur:{uid}:{pct}:1"),
-            types.InlineKeyboardButton("3 أيام", callback_data=f"disc:new_user_dur:{uid}:{pct}:3"),
+            types.InlineKeyboardButton("يومان", callback_data=f"disc:new_user_dur:{uid}:{pct}:2"),
         )
         kb.row(
             types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_user_dur:{uid}:{pct}:7"),
@@ -2730,7 +2778,17 @@ def _register_admin_roles(bot):
                 pass
         return changed
 
-    def _get_user_by_id(uid: int):
+    
+    def _is_admin_discount_id(discount_id: str) -> bool:
+        try:
+            rec = next((r for r in (list_discounts(limit=100) or []) if str(r.get("id")) == str(discount_id)), None)
+            if not rec:
+                return False
+            src = str(rec.get("source") or "admin").lower()
+            return src != "referral"
+        except Exception:
+            return False
+def _get_user_by_id(uid: int):
         try:
             r = (
                 get_table(USERS_TABLE)
@@ -2926,7 +2984,7 @@ def disc_new_user_choose_pct(c: types.CallbackQuery):
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
         types.InlineKeyboardButton("يوم",    callback_data=f"disc:new_user_dur:{uid}:{pct}:1"),
-        types.InlineKeyboardButton("3 أيام", callback_data=f"disc:new_user_dur:{uid}:{pct}:3"),
+        types.InlineKeyboardButton("يومان", callback_data=f"disc:new_user_dur:{uid}:{pct}:2"),
     )
     kb.row(
         types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_user_dur:{uid}:{pct}:7"),
