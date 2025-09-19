@@ -14,11 +14,8 @@ def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
 
     row1 = ["🛒 المنتجات"]
-    try:
-    except Exception:
-
     markup.row(*row1)
-
+    pass
     # باقي الصفوف كما كانت
     markup.row("💳 شحن محفظتي", "💰 محفظتي")
     markup.row("📢 إعلاناتك", "🌐 صفحتنا")
