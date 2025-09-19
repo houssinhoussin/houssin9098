@@ -313,7 +313,7 @@ def start_polling():
     while True:
         try:
             bot.infinity_polling(skip_pending=True,
-                long_polling_timeout=40,, timeout=20)
+               long_polling_timeout=40, timeout=20)
         except telebot.apihelper.ApiTelegramException as e:
             if getattr(e, "error_code", None) == 409:
                 logging.critical("❌ تم إيقاف هذه النسخة لأن نسخة أخرى من البوت متصلة بالفعل.")
