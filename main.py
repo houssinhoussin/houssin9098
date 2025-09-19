@@ -86,7 +86,8 @@ history: dict[int, list] = {}
 # ---------------------------------------------------------
 # استيراد جميع الهاندلرز بعد تهيئة البوت
 # ---------------------------------------------------------
-from handlers import (start,
+from handlers import (
+    start,
     wallet,
     support,
     admin,
@@ -100,7 +101,9 @@ from handlers import (start,
     university_fees,
     internet_providers,
     bill_and_units,
-    links as links_handler,
+    links as links_handler
+)
+from handlers.keyboards import (
     main_menu,
     products_menu,
     game_categories,
@@ -112,7 +115,7 @@ from handlers import (start,
     support_menu,
     links_menu,
     media_services_menu,
-    transfers_menu,
+    transfers_menu
 )
 # هاندلر الإلغاء المركزي
 from handlers import cancel as cancel_handler
