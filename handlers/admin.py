@@ -578,6 +578,7 @@ def _features_group_items_markup(group_name: str, page: int = 0, page_size: int 
 
     kb.add(types.InlineKeyboardButton("⬅️ رجوع للمجموعات", callback_data="adm_feat_home:groups"))
     return kb
+    
 # ⬇️ ضع الدوال هنا قبل register()
 
 def _prune_admin_msg_from_payload(request_id: int, payload: dict, admin_id: int, message_id: int):
@@ -603,6 +604,55 @@ def _maybe_delete_admin_message(call, request_id: int, payload: dict):
     except Exception:
         pass
     return _prune_admin_msg_from_payload(request_id, payload, call.message.chat.id, call.message.message_id)
+def _notify_and_close_expired_discounts():
+    """
+    يفحص الخصومات المنتهية تلقائيًا:
+    - يُنهي الخصم إن كان لا يزال مفعّلًا.
+    - يرسل رسالة للعميل تُبلغه بانتهاء الخصم.
+    """
+    try:
+        # احصل على قائمة كل الخصومات (يمكن لاحقًا تحسينها بفلترة على DB)
+        items = list_discounts() or []
+    except Exception:
+        items = []
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    ended = 0
+    for it in items:
+        try:
+            did     = str(it.get("id"))
+            active  = bool(it.get("active", False))
+            scope   = (it.get("scope") or "").lower()
+            uid     = it.get("user_id")
+            percent = int(it.get("percent", 0) or 0)
+
+            # نحتاج تاريخ الانتهاء. إن كانت الخدمة تُخزّن ended_at/valid_until بعمود،
+            # غيّر الاسم أدناه ليتطابق مع عمودك الحقيقي:
+            # أمثلة شائعة: "ends_at" أو "valid_until" أو "expires_at"
+            ends_at_raw = it.get("valid_until") or it.get("ends_at") or it.get("expires_at")
+            if not (active and ends_at_raw):
+                continue
+
+            # حوِّل ends_at_raw لـ datetime (ISO)
+            from dateutil import parser as dtparser
+            ends_at = dtparser.isoparse(ends_at_raw)
+
+            if ends_at <= now:
+                # أنهِ الخصم وبلّغ المستخدم إن كان الخصم على مستخدم معيّن
+                end_discount_now(did)
+                if scope == "user" and uid:
+                    try:
+                        msg = f"⌛ انتهت صلاحية خصمك {percent}% تلقائيًا."
+                        bot.send_message(int(uid), _append_bot_link_for_user(msg), parse_mode="HTML")
+                    except Exception:
+                        pass
+                ended += 1
+        except Exception:
+            pass
+
+    return ended
 
 # ⬆️ قبل register()
 
@@ -2622,6 +2672,13 @@ def _register_admin_roles(bot):
                 text = "لا تتوفر إحصاءات."
             bot.answer_callback_query(c.id)
             return bot.send_message(c.message.chat.id, text)
+        elif act == "check_expired":
+            try:
+                n = _notify_and_close_expired_discounts()
+                bot.answer_callback_query(c.id, f"تم إنهاء {n} خصم منتهي.")
+            except Exception:
+                bot.answer_callback_query(c.id, "تعذّر الفحص.")
+            return discount_menu(c.message)
 
     @bot.callback_query_handler(func=lambda c: c.data == "disc:cancel")
     def disc_cancel_cb(c):
