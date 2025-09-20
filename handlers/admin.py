@@ -2677,15 +2677,17 @@ def _register_admin_roles(bot):
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
             types.InlineKeyboardButton("يوم",    callback_data=f"disc:new_user_dur:{uid}:{pct}:1"),
-            types.InlineKeyboardButton("3 أيام", callback_data=f"disc:new_user_dur:{uid}:{pct}:3"),
+            types.InlineKeyboardButton("يومين",  callback_data=f"disc:new_user_dur:{uid}:{pct}:2"),
         )
         kb.row(
             types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_user_dur:{uid}:{pct}:7"),
-            types.InlineKeyboardButton("♾ يدوي", callback_data=f"disc:new_user_dur:{uid}:{pct}:0"),
+            types.InlineKeyboardButton("شهر",    callback_data=f"disc:new_user_dur:{uid}:{pct}:30"),
         )
+        kb.add(types.InlineKeyboardButton("♾ دائم", callback_data=f"disc:new_user_dur:{uid}:{pct}:0"))
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.answer_callback_query(c.id)
         return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
+
 
     # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
@@ -2707,6 +2709,10 @@ def _register_admin_roles(bot):
         except Exception:
             try:
                 uid_i, pct_i = int(uid), int(pct)
+        # السماح فقط بـ 1% أو 2% أو 3%
+        if pct not in (1, 2, 3):
+            return bot.answer_callback_query(c.id, "نسبة غير مسموحة.")
+
             except Exception:
                 return bot.answer_callback_query(c.id, "قيم غير صالحة.")
             days_i = 0
@@ -2720,7 +2726,9 @@ def _register_admin_roles(bot):
             return bot.answer_callback_query(c.id, "حدث خطأ أثناء إنشاء الخصم.")
 
         # تأكيد مرئي للأدمن
-        dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+        names = {0: "دائم", 1: "يوم واحد", 2: "يومين", 7: "أسبوع", 30: "شهر"}
+        dur_txt = names.get(days_i, f"لمدة {days_i} يوم")
+
         try:
             bot.send_message(
                 c.message.chat.id,
