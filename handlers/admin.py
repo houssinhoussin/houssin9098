@@ -2581,9 +2581,111 @@ def _register_admin_roles(bot):
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.send_message(m.chat.id, "لوحة الخصومات:", reply_markup=kb)
 
+     # --- Discounts: choose user percentage ---
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_pct:"))
+    def disc_new_user_choose_pct(c):
+        if not _is_admin(c.from_user.id):
+            return bot.answer_callback_query(c.id, "غير مصرح.")
 
-    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:"))
+        # payload: disc:new_user_pct:<uid>:<pct>
+        try:
+            _, _, uid, pct = c.data.split(":", 3)
+            uid_i = int(uid); pct_i = int(pct)
+        except Exception:
+            return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
+
+        if pct_i not in (1, 2, 3):
+            return bot.answer_callback_query(c.id, "نسبة غير مسموحة.")
+
+        _disc_new_user_state[c.from_user.id] = {"step": "ask_dur", "user_id": uid_i, "pct": pct_i}
+
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.row(
+            types.InlineKeyboardButton("يوم",    callback_data=f"disc:new_user_dur:{uid_i}:{pct_i}:1"),
+            types.InlineKeyboardButton("يومين",  callback_data=f"disc:new_user_dur:{uid_i}:{pct_i}:2"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("أسبوع",  callback_data=f"disc:new_user_dur:{uid_i}:{pct_i}:7"),
+            types.InlineKeyboardButton("شهر",    callback_data=f"disc:new_user_dur:{uid_i}:{pct_i}:30"),
+        )
+        kb.add(types.InlineKeyboardButton("♾ دائم", callback_data=f"disc:new_user_dur:{uid_i}:{pct_i}:0"))
+        kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
+
+        try: bot.answer_callback_query(c.id)
+        except Exception: pass
+        return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
+
+
+    # --- Discounts: choose user duration ---
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
+    def disc_new_user_choose_duration(c):
+        if not _is_admin(c.from_user.id):
+            return bot.answer_callback_query(c.id, "غير مصرح.")
+
+        # payload: disc:new_user_dur:<uid>:<pct>:<days>
+        try:
+            _, _, uid, pct, days = c.data.split(":", 4)
+            uid_i  = int(uid)
+            pct_i  = int(pct)
+            days_i = int(days)
+        except Exception:
+            return bot.answer_callback_query(c.id, "قيم غير صالحة.")
+
+        if pct_i not in (1, 2, 3):
+            return bot.answer_callback_query(c.id, "نسبة غير مسموحة.")
+        if days_i not in (1, 2, 7, 30, 0):
+            return bot.answer_callback_query(c.id, "مدة غير مسموحة.")
+
+        # إنشاء الخصم
+        try:
+            create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
+            _disc_new_user_state.pop(c.from_user.id, None)
+        except Exception as e:
+            logging.exception("create_discount failed: %s", e)
+            return bot.answer_callback_query(c.id, "حدث خطأ أثناء إنشاء الخصم.")
+
+        # تأكيد للأدمن
+        names = {0: "دائم", 1: "يوم واحد", 2: "يومين", 7: "أسبوع", 30: "شهر"}
+        dur_txt = names.get(days_i, f"لمدة {days_i} يوم")
+        try:
+            bot.send_message(
+                c.message.chat.id,
+                f"✅ تم تطبيق خصم {pct_i}% للمستخدم <code>{uid_i}</code> ({dur_txt}).",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+        # إغلاق أزرار الرسالة
+        try: bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception: pass
+
+        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+
+        # إشعار العميل
+        try:
+            msg = (
+                f"{BAND}\n"
+                f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
+                f"استمتع بالتوفير عند الشراء من البوت.\n"
+                f"{BAND}"
+            )
+            try:
+                notify_user(bot, uid_i, _append_bot_link_for_user(msg))
+            except Exception:
+                bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
+        except Exception:
+            pass
+
+        return discount_menu(c.message)
+
+    @bot.callback_query_handler(
+        func=lambda c: c.data
+        and c.data.startswith("disc:")
+        and not (c.data.startswith("disc:new_user_pct:") or c.data.startswith("disc:new_user_dur:"))
+    )
     def discounts_actions(c):
+
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         parts = (c.data or "").split(":")
