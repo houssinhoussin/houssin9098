@@ -2774,21 +2774,19 @@ def _register_admin_roles(bot):
         except ValueError:
             return bot.answer_callback_query(c.id, "صيغة الأمر غير صحيحة.")
 
-        # تحويل الأرقام مع احتياط
+        # تحويل الأرقام + تحقّق من القيم
         try:
             uid_i  = int(uid)
             pct_i  = int(pct)
             days_i = int(days)
         except Exception:
-            try:
-                uid_i, pct_i = int(uid), int(pct)
+            return bot.answer_callback_query(c.id, "قيم غير صالحة.")
+
         # السماح فقط بـ 1% أو 2% أو 3%
-        if pct not in (1, 2, 3):
+        if pct_i not in (1, 2, 3):
             return bot.answer_callback_query(c.id, "نسبة غير مسموحة.")
 
-            except Exception:
-                return bot.answer_callback_query(c.id, "قيم غير صالحة.")
-            days_i = 0
+        # المدد المسموحة: يوم/يومين/أسبوع/شهر/دائم
         if days_i not in (1, 2, 7, 30, 0):
             return bot.answer_callback_query(c.id, "مدة غير مسموحة.")
 
@@ -2800,10 +2798,11 @@ def _register_admin_roles(bot):
             logging.exception("create_discount failed: %s", e)
             return bot.answer_callback_query(c.id, "حدث خطأ أثناء إنشاء الخصم.")
 
-        # تأكيد مرئي للأدمن
-        names = {0: "دائم", 1: "يوم واحد", 2: "يومين", 7: "أسبوع", 30: "شهر"}
+        # نص المدة لرسائل التأكيد
+        names   = {0: "دائم", 1: "يوم واحد", 2: "يومين", 7: "أسبوع", 30: "شهر"}
         dur_txt = names.get(days_i, f"لمدة {days_i} يوم")
 
+        # تأكيد للأدمن
         try:
             bot.send_message(
                 c.message.chat.id,
@@ -2821,18 +2820,8 @@ def _register_admin_roles(bot):
 
         bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
-
-        # إغلاق أزرار الرسالة لمنع النقر المكرر
+        # ⬅️ إشعار العميل بالتفعيل
         try:
-            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
-        except Exception:
-            pass
-
-        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
-
-        # ⬅️ إشعار العميل
-        try:
-            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
             msg = (
                 f"{BAND}\n"
                 f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
@@ -2840,15 +2829,14 @@ def _register_admin_roles(bot):
                 f"{BAND}"
             )
             try:
-                # لو عندك notify_user مفعّلة
+                # لو عندك notify_user متوفرة
                 notify_user(bot, uid_i, _append_bot_link_for_user(msg))
             except Exception:
                 bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
         except Exception as e:
-            bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
+            logging.exception("user notify failed: %s", e)
 
         return discount_menu(c.message)
-
 
     def _disc_toggle_all(_to: bool) -> int:
         """تشغيل/إيقاف جميع أكواد الخصم دفعة واحدة."""
