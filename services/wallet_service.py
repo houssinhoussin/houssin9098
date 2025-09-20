@@ -1,10 +1,11 @@
 # services/wallet_service.py
-"""
-(نفس الهيدر التوضيحي السابق)
-"""
-# أعلى الملف
+
 import logging
 import uuid
+import time
+from httpx import ReadError
+from postgrest.exceptions import APIError
+
 from config import SUPABASE_TABLE_NAME
 from datetime import datetime, timedelta
 
@@ -41,6 +42,24 @@ def _is_uuid_like(x) -> bool:
         return False
 
 
+def _exec(q, tries: int = 3, base_delay: float = 0.4):
+    """
+    ينفّذ q.execute() مع إعادة محاولة تلقائية عند مشاكل الشبكة (HTTPX ReadError).
+    يحافظ على منطق الدوال كما هو بدون تغييره.
+    """
+    for i in range(tries):
+        try:
+            return q.execute()
+        except ReadError as e:
+            logging.warning("[NET] ReadError (try %d/%d): %s", i + 1, tries, e)
+            time.sleep(base_delay * (2 ** i))
+            continue
+        except APIError:
+            # أخطاء PostgREST المنطقية ليست شبكة — أعِد رفعها فورًا
+            raise
+    raise ReadError("Supabase execute() retry exhausted")
+
+
 # ================= عمليات المستخدم =================
 
 def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None:
@@ -56,13 +75,13 @@ def register_user_if_not_exist(user_id: int, name: str = "مستخدم") -> None
 
 def get_balance(user_id: int) -> int:
     # نُبقيها كما كانت: تُرجع الرصيد الكامل (بدون طرح المحجوز)
-    response = (
+    q = (
         get_table(USER_TABLE)
         .select("balance")
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
     )
+    response = _exec(q)  # ← إعادة محاولة عند ReadError
     return response.data[0]["balance"] if response.data else 0
 
 def get_available_balance(user_id: int) -> int:
@@ -252,7 +271,6 @@ def get_product_by_id(product_id: int):
 def _select_single(table_name, field, value):
     response = get_table(table_name).select(field).eq(field, value).limit(1).execute()
     return response.data[0][field] if response.data else None
-
 
 # ================= جداول مشتريات متخصصة (عرض/قراءة) =================
 # (بدون تغييرات)
