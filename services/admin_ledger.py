@@ -17,32 +17,45 @@ def _now_iso() -> str:
 # سجلات دائمة لإقرار الإداريين (إيداع/صرف)
 # ────────────────────────────────────────────────────────────
 def log_admin_deposit(admin_id: int, user_id: int, amount: int, note: str = "") -> None:
-    # يسجل إيداع وافق عليه الأدمن (مبلغ موجب)
-    get_table(LEDGER_TABLE).insert({
+    """يسجل إيداع أدمن (amount يجب أن يكون > 0)."""
+    if int(amount) <= 0:
+        raise ValueError("amount يجب أن يكون رقمًا موجبًا")
+
+    payload = {
         "admin_id": int(admin_id),
         "user_id": int(user_id),
         "action": "deposit",
         "amount": int(amount),
         "note": note,
         "created_at": _now_iso(),
-    }).execute()
+    }
+
+    try:
+        get_table(LEDGER_TABLE).insert(payload).execute()
+    except APIError as e:
+        logging.exception("[ADMIN_LEDGER] deposit insert failed: %s", e)
+        raise
+
 
 def log_admin_spend(admin_id: int, user_id: int, amount: int, note: str = "") -> None:
-    # يسجل صرف من المحفظة وافق عليه الأدمن (مبلغ موجب يمثل المبلغ المصروف)
-    get_table(LEDGER_TABLE).insert({
+    """يسجل صرف/خصم وافق عليه الأدمن (amount يجب أن يكون > 0 ويمثل قيمة المصروف)."""
+    if int(amount) <= 0:
+        raise ValueError("amount يجب أن يكون رقمًا موجبًا")
+
+    payload = {
         "admin_id": int(admin_id),
         "user_id": int(user_id),
         "action": "spend",
         "amount": int(amount),
         "note": note,
         "created_at": _now_iso(),
-    }).execute()
+    }
 
-def _fmt(amount: int) -> str:
     try:
-        return f"{int(amount):,} ل.س"
-    except Exception:
-        return f"{amount} ل.س"
+        get_table(LEDGER_TABLE).insert(payload).execute()
+    except APIError as e:
+        logging.exception("[ADMIN_LEDGER] spend insert failed: %s", e)
+        raise
 
 # ────────────────────────────────────────────────────────────
 # تقارير الإداريين
