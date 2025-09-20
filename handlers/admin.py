@@ -2590,6 +2590,14 @@ def _register_admin_roles(bot):
             did = parts[2]
             try:
                 end_discount_now(did)
+            try:
+                row = get_table("discounts").select("scope,user_id,percent").eq("id", did).limit(1).execute()
+                r = (row.data or [None])[0]
+                if r and (r.get("scope") or "").lower() == "user" and r.get("user_id"):
+                    bot.send_message(int(r["user_id"]), f"⌛ تم إنهاء خصمك {int(r['percent'])}% يدويًا.")
+            except Exception:
+                pass
+
                 bot.answer_callback_query(c.id, "⏳ تم إنهاء الخصم.")
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
@@ -2673,6 +2681,9 @@ def _register_admin_roles(bot):
             return bot.answer_callback_query(c.id, "غير مصرح.")
         _, _, uid, pct = c.data.split(":", 3)
         uid = int(uid); pct = int(pct)
+        if pct not in (1, 2, 3):
+            return bot.answer_callback_query(c.id, "نسبة غير مسموحة.")
+
         _disc_new_user_state[c.from_user.id] = {"step": "ask_dur", "user_id": uid, "pct": pct}
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.row(
@@ -2684,6 +2695,7 @@ def _register_admin_roles(bot):
             types.InlineKeyboardButton("شهر",    callback_data=f"disc:new_user_dur:{uid}:{pct}:30"),
         )
         kb.add(types.InlineKeyboardButton("♾ دائم", callback_data=f"disc:new_user_dur:{uid}:{pct}:0"))
+
         kb.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data="admin:home"))
         bot.answer_callback_query(c.id)
         return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
@@ -2716,6 +2728,8 @@ def _register_admin_roles(bot):
             except Exception:
                 return bot.answer_callback_query(c.id, "قيم غير صالحة.")
             days_i = 0
+        if days_i not in (1, 2, 7, 30, 0):
+            return bot.answer_callback_query(c.id, "مدة غير مسموحة.")
 
         # إنشاء الخصم وتصفير الحالة
         try:
