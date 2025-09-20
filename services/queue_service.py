@@ -10,6 +10,7 @@ import threading
 from database.db import get_table
 from config import ADMIN_MAIN_ID, ADMINS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from postgrest.exceptions import APIError  # ← لالتقاط 23505 وقت السباق
 
 QUEUE_TABLE = "pending_requests"
 
@@ -39,28 +40,75 @@ def _admin_targets():
 _MAX_CAPTION = 900
 
 def _add_pending_request_text(user_id: int, username: str, request_text: str, payload=None):
+    """
+    يعيد:
+      - {"status": "created", "request_id": int} عند إنشاء سجل جديد
+      - {"status": "duplicate", "request_id": int} إذا لدى المستخدم طلب قيد المعالجة
+      - {"status": "error"} عند فشل نهائي (شبكي)
+    """
+    # 1) فحص وجود سابق لنفس user_id
+    try:
+        exists = (
+            get_table(QUEUE_TABLE)
+            .select("id, created_at")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if exists.data:
+            # رفض طلب جديد — موجود سابقًا
+            return {"status": "duplicate", "request_id": exists.data[0]["id"]}
+    except Exception as e:
+        logging.warning("pre-check pending exists failed (will continue): %s", e)
+
+    # 2) محاولة الإدراج مع إعادة المحاولة للشبكة + التقاط 23505
+    data = {
+        "user_id": user_id,
+        "username": username,
+        "request_text": request_text,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    if payload is not None:
+        data["payload"] = payload
+
     for attempt in range(1, 4):
         try:
-            data = {
-                "user_id": user_id,
-                "username": username,
-                "request_text": request_text,
-                "created_at": datetime.utcnow().isoformat()
-            }
-            if payload is not None:
-                data["payload"] = payload
-            get_table(QUEUE_TABLE).insert(data).execute()
-            return
+            r = get_table(QUEUE_TABLE).insert(data).execute()
+            rid = (r.data or [{}])[0].get("id")
+            return {"status": "created", "request_id": rid}
+        except APIError as e:
+            # لو حدث سباق وأرجعت القاعدة 23505 نرجع duplicate بهدوء
+            code = getattr(e, "code", None)
+            if code == "23505":
+                try:
+                    ex = (
+                        get_table(QUEUE_TABLE)
+                        .select("id")
+                        .eq("user_id", user_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if ex.data:
+                        return {"status": "duplicate", "request_id": ex.data[0]["id"]}
+                except Exception:
+                    pass
+                return {"status": "duplicate", "request_id": None}
+            # غير ذلك: خطأ من PostgREST — لا نعيد رفعه حتى لا ينهار الworker
+            logging.exception("[QUEUE] APIError on insert: %s", e)
+            return {"status": "error"}
         except httpx.ReadError as e:
             logging.warning(f"Attempt {attempt}: ReadError in add_pending_request: {e}")
             time.sleep(0.5)
+
     logging.error(f"Failed to add pending request for user {user_id} after 3 attempts.")
+    return {"status": "error"}
 
 def add_pending_request(*args, **kwargs):
     """
     واجهة متوافقة ترسل طلبًا إلى طابور الإدمن.
     - النمط القديم: add_pending_request(user_id, username, request_text, payload=None)
     - النمط الجديد: add_pending_request(user_id=..., action="...", payload={...}, approve_channel="admin", meta={...})
+    تُعيد dict يوضح الحالة كما في _add_pending_request_text.
     """
     # النمط الجديد بكلمات مفتاحية
     if "action" in kwargs or ("user_id" in kwargs and "payload" in kwargs and "approve_channel" in kwargs):
