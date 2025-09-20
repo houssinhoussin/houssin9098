@@ -2699,27 +2699,24 @@ def _register_admin_roles(bot):
         bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
   
-            # ⬅️ إشعار العميل
+        # ⬅️ إشعار العميل
+        try:
+            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+            msg = (
+                f"{BAND}\n"
+                f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
+                f"استمتع بالتوفير عند الشراء من البوت.\n"
+                f"{BAND}"
+            )
             try:
-                dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
-                msg = (
-                    f"{BAND}\n"
-                    f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
-                    f"استمتع بالتوفير عند الشراء من البوت.\n"
-                    f"{BAND}"
-                )
-                try:
-                    # لو عندك notify_user مفعّلة
-                    notify_user(bot, uid_i, _append_bot_link_for_user(msg))
-                except Exception:
-                    bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
+                # لو عندك notify_user مفعّلة
+                notify_user(bot, uid_i, _append_bot_link_for_user(msg))
             except Exception:
-                pass
-
+                bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
         except Exception as e:
             bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
-        return discount_menu(c.message)
 
+        return discount_menu(c.message)
 
 
     def _disc_toggle_all(_to: bool) -> int:
@@ -2738,6 +2735,7 @@ def _register_admin_roles(bot):
                 pass
         return changed
 
+
     def _get_user_by_id(uid: int):
         """قراءة صف العميل من جدول houssin363 عبر user_id فقط."""
         try:
@@ -2753,8 +2751,6 @@ def _register_admin_roles(bot):
         except Exception as e:
             logging.exception("manage_user: DB error: %s", e)
             return None
-
- 
     # =========================
     # 👤 إدارة عميل — مبسّطة
     # =========================
