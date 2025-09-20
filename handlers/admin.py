@@ -4855,7 +4855,6 @@ def _register_admin_roles(bot):
         return bot.send_message(c.message.chat.id, "اختر مدة الخصم:", reply_markup=kb)
 
     # --- Discounts: choose user duration ---
-    # --- Discounts: choose user duration ---
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("disc:new_user_dur:"))
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
@@ -4907,27 +4906,32 @@ def _register_admin_roles(bot):
         bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
 
-            # ⬅️ إشعار العميل
-            try:
-                dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
-                msg = (
-                    f"{BAND}\n"
-                    f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
-                    f"استمتع بالتوفير عند الشراء من البوت.\n"
-                    f"{BAND}"
-                )
-                try:
-                    # لو عندك notify_user مفعّلة
-                    notify_user(bot, uid_i, _append_bot_link_for_user(msg))
-                except Exception:
-                    bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
-            except Exception:
-                pass
+        # إغلاق أزرار الرسالة لمنع النقر المكرر
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception:
+            pass
 
+        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+
+        # ⬅️ إشعار العميل
+        try:
+            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+            msg = (
+                f"{BAND}\n"
+                f"🎁 تم تفعيل خصم {pct_i}% على مشترياتك {dur_txt}.\n"
+                f"استمتع بالتوفير عند الشراء من البوت.\n"
+                f"{BAND}"
+            )
+            try:
+                # لو عندك notify_user مفعّلة
+                notify_user(bot, uid_i, _append_bot_link_for_user(msg))
+            except Exception:
+                bot.send_message(uid_i, _append_bot_link_for_user(msg), parse_mode="HTML")
         except Exception as e:
             bot.answer_callback_query(c.id, f"❌ فشل الإنشاء: {e}")
-        return discount_menu(c.message)
 
+        return discount_menu(c.message)
 
 
     def _disc_toggle_all(_to: bool) -> int:
@@ -4945,6 +4949,7 @@ def _register_admin_roles(bot):
             except Exception:
                 pass
         return changed
+
 
     def _get_user_by_id(uid: int):
         """قراءة صف العميل من جدول houssin363 عبر user_id فقط."""
