@@ -7,7 +7,13 @@ from zoneinfo import ZoneInfo
 import math
 
 CHANNEL_ADS_TABLE = "channel_ads"
-SYRIA_TZ = ZoneInfo("Asia/Damascus")
+try:
+    from zoneinfo import ZoneInfo
+    SYRIA_TZ = ZoneInfo("Asia/Damascus")
+except Exception:
+    from dateutil import tz
+    SYRIA_TZ = tz.gettz("Asia/Damascus")
+
 WINDOW_START = time(8, 0)   # 08:00
 WINDOW_END   = time(22, 0)  # 22:00
 WINDOW_SECONDS = (22 - 8) * 3600  # 14h = 50400s
