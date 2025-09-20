@@ -2664,6 +2664,20 @@ def _register_admin_roles(bot):
         try:
             create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
             _disc_new_user_state.pop(c.from_user.id, None)
+            # تأكيد مرئي للأدمن + إغلاق أزرار الرسالة لمنع النقر المكرر
+        try:
+            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+            bot.send_message(
+                c.message.chat.id,
+                f"✅ تم تطبيق خصم {pct_i}% للمستخدم <code>{uid_i}</code> ({dur_txt}).",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception:
+            pass
             bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
             # ⬅️ إشعار العميل
@@ -4842,6 +4856,20 @@ def _register_admin_roles(bot):
         try:
             create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
             _disc_new_user_state.pop(c.from_user.id, None)
+        # تأكيد مرئي للأدمن + إغلاق أزرار الرسالة لمنع النقر المكرر
+        try:
+            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
+            bot.send_message(
+                c.message.chat.id,
+                f"✅ تم تطبيق خصم {pct_i}% للمستخدم <code>{uid_i}</code> ({dur_txt}).",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        try:
+            bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
+        except Exception:
+            pass
             bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
             # ⬅️ إشعار العميل
