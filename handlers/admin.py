@@ -2678,7 +2678,7 @@ def _register_admin_roles(bot):
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception:
             pass
-            bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
             # ⬅️ إشعار العميل
             try:
@@ -4870,7 +4870,7 @@ def _register_admin_roles(bot):
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception:
             pass
-            bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
             # ⬅️ إشعار العميل
             try:
