@@ -2,6 +2,8 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
+import logging
+from postgrest.exceptions import APIError
 from database.db import get_table, DEFAULT_TABLE
 from config import ADMINS, ADMIN_MAIN_ID
 
