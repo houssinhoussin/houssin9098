@@ -2653,33 +2653,52 @@ def _register_admin_roles(bot):
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
-        _, _, uid, pct, days = c.data.split(":", 4)
+
+        # Parse payload safely
+        try:
+            _, _, uid, pct, days = c.data.split(":", 4)
+        except ValueError:
+            return bot.answer_callback_query(c.id, "صيغة الأمر غير صحيحة.")
+    
+        # Parse ints with fallback
         try:
             uid_i  = int(uid)
             pct_i  = int(pct)
             days_i = int(days)
         except Exception:
-            uid_i, pct_i, days_i = int(uid), int(pct), 0
+            try:
+                uid_i, pct_i = int(uid), int(pct)
+            except Exception:
+                return bot.answer_callback_query(c.id, "قيم غير صالحة.")
+            days_i = 0
 
+        # Create discount and clear state
         try:
             create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
             _disc_new_user_state.pop(c.from_user.id, None)
-            # تأكيد مرئي للأدمن + إغلاق أزرار الرسالة لمنع النقر المكرر
+        except Exception as e:
+            logging.exception("disc_new_user_choose_duration failed: %s", e)
+            return bot.answer_callback_query(c.id, "حدث خطأ أثناء إنشاء الخصم.")
+
+        # Visual confirmation to admin
+        dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
         try:
-            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
             bot.send_message(
                 c.message.chat.id,
                 f"✅ تم تطبيق خصم {pct_i}% للمستخدم <code>{uid_i}</code> ({dur_txt}).",
                 parse_mode="HTML"
             )
         except Exception:
-            pass
+        pass
+    
+        # Close inline keyboard to prevent duplicate taps
         try:
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception:
             pass
-        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
+        bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
+  
             # ⬅️ إشعار العميل
             try:
                 dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
@@ -4845,31 +4864,50 @@ def _register_admin_roles(bot):
     def disc_new_user_choose_duration(c):
         if not _is_admin(c.from_user.id):
             return bot.answer_callback_query(c.id, "غير مصرح.")
-        _, _, uid, pct, days = c.data.split(":", 4)
+
+        # Parse payload safely
+        try:
+            _, _, uid, pct, days = c.data.split(":", 4)
+        except ValueError:
+            return bot.answer_callback_query(c.id, "صيغة الأمر غير صحيحة.")
+    
+        # Parse ints with fallback
         try:
             uid_i  = int(uid)
             pct_i  = int(pct)
             days_i = int(days)
         except Exception:
-            uid_i, pct_i, days_i = int(uid), int(pct), 0
+            try:
+                uid_i, pct_i = int(uid), int(pct)
+            except Exception:
+                return bot.answer_callback_query(c.id, "قيم غير صالحة.")
+            days_i = 0
 
+        # Create discount and clear state
         try:
             create_discount(scope="user", user_id=uid_i, percent=pct_i, days=(days_i or None))
             _disc_new_user_state.pop(c.from_user.id, None)
-        # تأكيد مرئي للأدمن + إغلاق أزرار الرسالة لمنع النقر المكرر
+        except Exception as e:
+            logging.exception("disc_new_user_choose_duration failed: %s", e)
+            return bot.answer_callback_query(c.id, "حدث خطأ أثناء إنشاء الخصم.")
+
+        # Visual confirmation to admin
+        dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
         try:
-            dur_txt = f"لمدة {days_i} يوم" if days_i > 0 else "بدون مدة محددة"
             bot.send_message(
                 c.message.chat.id,
                 f"✅ تم تطبيق خصم {pct_i}% للمستخدم <code>{uid_i}</code> ({dur_txt}).",
                 parse_mode="HTML"
             )
         except Exception:
-            pass
+        pass
+    
+        # Close inline keyboard to prevent duplicate taps
         try:
             bot.edit_message_reply_markup(c.message.chat.id, c.message.message_id, reply_markup=None)
         except Exception:
             pass
+
         bot.answer_callback_query(c.id, "✅ تم إنشاء الخصم للمستخدم.")
 
             # ⬅️ إشعار العميل
