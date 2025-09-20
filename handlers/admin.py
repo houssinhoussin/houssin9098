@@ -2639,19 +2639,23 @@ def _register_admin_roles(bot):
                 return bot.answer_callback_query(c.id, "صيغة غير صحيحة.")
             did = parts[2]
             try:
+                # إنهاء الكود الآن
                 end_discount_now(did)
-            try:
-                row = get_table("discounts").select("scope,user_id,percent").eq("id", did).limit(1).execute()
-                r = (row.data or [None])[0]
-                if r and (r.get("scope") or "").lower() == "user" and r.get("user_id"):
-                    bot.send_message(int(r["user_id"]), f"⌛ تم إنهاء خصمك {int(r['percent'])}% يدويًا.")
-            except Exception:
-                pass
+
+                # (اختياري) إبلاغ العميل إن كان الخصم خاصًا بمستخدم
+                try:
+                    row = get_table("discounts").select("scope,user_id,percent").eq("id", did).limit(1).execute()
+                    r = (row.data or [None])[0] if hasattr(row, "data") else None
+                    if r and (r.get("scope") or "").lower() == "user" and r.get("user_id"):
+                        bot.send_message(int(r["user_id"]), f"⌛ تم إنهاء خصمك {int(r.get('percent') or 0)}% يدويًا.")
+                except Exception:
+                    pass
 
                 bot.answer_callback_query(c.id, "⏳ تم إنهاء الخصم.")
             except Exception:
                 bot.answer_callback_query(c.id, "تعذّر الإنهاء.")
             return discount_menu(c.message)
+
             
         elif act == "delete":
             if len(parts) < 3:
